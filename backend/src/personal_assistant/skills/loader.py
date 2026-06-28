@@ -7,6 +7,7 @@ from pathlib import Path
 from langchain_core.tools import BaseTool
 
 from personal_assistant.skills.base import Skill
+from personal_assistant.skills.script_tool import build_script_tool
 
 
 class SkillRegistry:
@@ -42,25 +43,35 @@ class SkillRegistry:
     # ── metadata scanning (phase 1 — lightweight) ───────────────
 
     def scan_metadata(self) -> list[Skill]:
-        """Scan skills_dir and create Skill objects with meta only (no tool import)."""
+        """Scan skills_dir and create Skill objects with meta only (no tool import).
+
+        Reads YAML frontmatter (name, description, triggers, scripts) if present,
+        otherwise falls back to the first Markdown heading. No ``skill.py`` is
+        imported and no script tools are built — that happens in :meth:`load_skill`.
+        """
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         loaded: dict[str, Skill] = {}
         for skill_dir in sorted(p for p in self.skills_dir.iterdir() if p.is_dir()):
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.exists():
                 continue
-            head = _read_first_line(skill_md)
-            description = _first_heading_or_line(head)
+            meta = _parse_frontmatter(skill_md)
+            name = meta.get("name", skill_dir.name)
+            description = meta.get("description") or _first_heading(skill_md)
+            triggers = [str(t) for t in meta.get("triggers", []) if t]
+            script_decls = [s for s in meta.get("scripts", []) if isinstance(s, dict) and s.get("name")]
             # Preserve already-loaded skills if they still exist on disk
             existing = self._skills.get(skill_dir.name)
             if existing and existing.loaded:
                 loaded[skill_dir.name] = existing
             else:
                 loaded[skill_dir.name] = Skill(
-                    name=skill_dir.name,
+                    name=name,
                     description=description,
                     path=skill_dir,
                     instructions_path=skill_md,
+                    triggers=triggers,
+                    script_decls=script_decls,
                 )
         self._skills = loaded
         return list(loaded.values())
@@ -68,14 +79,21 @@ class SkillRegistry:
     # ── full loading (phase 2 — on demand) ──────────────────────
 
     def load_skill(self, name: str) -> None:
-        """Load full content (instructions + tools) for a specific skill."""
+        """Load full content (instructions + tools) for a specific skill.
+
+        Builds script tools from the frontmatter ``scripts`` declarations and
+        imports ``skill.py`` TOOLS if present. Both are cheap to build — the
+        expensive part (subprocess execution) only happens when the agent calls
+        the tool.
+        """
         skill = self._skills.get(name)
         if skill is None:
             raise KeyError(f"Unknown skill: {name}")
         if skill.loaded:
             return
         skill.instructions = skill.instructions_path.read_text(encoding="utf-8")
-        skill.tools = _load_tools(skill.path)
+        script_tools = [build_script_tool(decl, skill.path) for decl in skill.script_decls]
+        skill.tools = script_tools + _load_tools(skill.path)
 
     # ── bulk reload (backward compat) ───────────────────────────
 
@@ -83,9 +101,7 @@ class SkillRegistry:
         """Rescan and fully load all skills."""
         self.scan_metadata()
         for name in self._skills:
-            skill = self._skills[name]
-            skill.instructions = skill.instructions_path.read_text(encoding="utf-8")
-            skill.tools = _load_tools(skill.path)
+            self.load_skill(name)
         return list(self._skills.values())
 
     # ── tool helpers ────────────────────────────────────────────
@@ -136,19 +152,68 @@ class SkillRegistry:
 # ── module-private helpers ──────────────────────────────────────
 
 
-def _read_first_line(path: Path) -> str:
-    """Read only the first non-empty line of a file."""
-    with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            stripped = line.strip()
-            if stripped:
-                return stripped
-    return ""
+def _parse_frontmatter(path: Path) -> dict:
+    """Parse YAML frontmatter from a Markdown file.
+
+    Reads the block between the opening and closing ``---`` delimiters and parses
+    it with ``yaml.safe_load`` so nested structures (``triggers`` list,
+    ``scripts`` list of dicts) are preserved. Returns an empty dict if no valid
+    frontmatter is found. Falls back to a minimal key:value parser if PyYAML is
+    unavailable.
+    """
+    try:
+        with path.open(encoding="utf-8") as fh:
+            first = fh.readline().strip()
+            if first != "---":
+                return {}
+            lines: list[str] = []
+            for line in fh:
+                if line.strip() == "---":
+                    break
+                lines.append(line)
+    except (OSError, UnicodeDecodeError):
+        return {}
+
+    block = "".join(lines)
+    try:
+        import yaml
+
+        data = yaml.safe_load(block)
+    except ImportError:
+        return _parse_flat_frontmatter(block)
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
-def _first_heading_or_line(text: str) -> str:
-    cleaned = text.strip().lstrip("#").strip()
-    return cleaned if cleaned else "No description"
+def _parse_flat_frontmatter(block: str) -> dict[str, str]:
+    """Minimal fallback parser: flat ``key: value`` lines only (no nesting)."""
+    meta: dict[str, str] = {}
+    for line in block.splitlines():
+        stripped = line.strip()
+        if ":" in stripped:
+            key, _, value = stripped.partition(":")
+            meta[key.strip()] = value.strip()
+    return meta
+
+
+def _first_heading(path: Path) -> str:
+    """Extract the first Markdown heading (after frontmatter) as description."""
+    try:
+        with path.open(encoding="utf-8") as fh:
+            in_frontmatter = False
+            for line in fh:
+                stripped = line.strip()
+                if stripped == "---":
+                    in_frontmatter = not in_frontmatter
+                    continue
+                if in_frontmatter:
+                    continue
+                if stripped.startswith("#"):
+                    return stripped.lstrip("#").strip()
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "No description"
 
 
 def _load_tools(skill_dir: Path) -> list[BaseTool]:

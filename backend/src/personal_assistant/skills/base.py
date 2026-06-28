@@ -12,6 +12,9 @@ class Skill:
     instructions_path: Path
     instructions: str | None = None
     tools: list[BaseTool] = field(default_factory=list)
+    # Lightweight metadata parsed from frontmatter at scan time (phase 1).
+    triggers: list[str] = field(default_factory=list)
+    script_decls: list[dict] = field(default_factory=list)
 
     @property
     def loaded(self) -> bool:
