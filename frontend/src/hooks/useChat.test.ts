@@ -26,7 +26,7 @@ describe('useChat', () => {
   })
 
   it('starts with empty messages and no approvals', () => {
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
     expect(result.current.messages).toEqual([])
     expect(result.current.pendingApprovals).toEqual([])
     expect(result.current.loading).toBe(false)
@@ -42,7 +42,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('Hi')
@@ -77,7 +77,7 @@ describe('useChat', () => {
 
     mockApi.chatStream.mockReturnValue(slowStream())
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     let sendDone = false
     act(() => {
@@ -117,7 +117,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('What time is it?')
@@ -148,7 +148,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('What time?')
@@ -184,7 +184,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('What time?')
@@ -214,7 +214,7 @@ describe('useChat', () => {
 
     mockApi.chatStream.mockReturnValue(slowStream())
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     let sendDone = false
     act(() => {
@@ -240,13 +240,30 @@ describe('useChat', () => {
       throw new Error('Network error')
     })
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('Hi')
     })
 
     expect(result.current.error).toBe('Network error')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('sets error when the stream yields an error event', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'error', message: 'LLM connection failed' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('Hi')
+    })
+
+    expect(result.current.error).toBe('LLM connection failed')
     expect(result.current.loading).toBe(false)
   })
 
@@ -264,7 +281,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('What time?')
@@ -297,7 +314,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('Time and weather?')
@@ -323,7 +340,7 @@ describe('useChat', () => {
       throw new Error('Network error')
     })
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('Hi')
@@ -347,7 +364,7 @@ describe('useChat', () => {
       ]),
     )
 
-    const { result } = renderHook(() => useChat('thread-1'))
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
 
     await act(async () => {
       await result.current.send('What time?')

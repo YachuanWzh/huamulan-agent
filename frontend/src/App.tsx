@@ -3,26 +3,45 @@ import { ChatPanel } from './components/ChatPanel'
 import { Sidebar } from './components/Sidebar'
 import './App.css'
 
+function createThreadId() {
+  const id = crypto.randomUUID()
+  localStorage.setItem('threadId', id)
+  return id
+}
+
 function App() {
-  const [threadId] = useState(() => {
+  const [threadId, setThreadId] = useState<string | null>(() => {
     const stored = localStorage.getItem('threadId')
     if (stored) return stored
-    const id = crypto.randomUUID()
-    localStorage.setItem('threadId', id)
-    return id
+    return null
   })
+
+  const handleThreadCreated = () => {
+    const id = createThreadId()
+    setThreadId(id)
+    return id
+  }
+
+  const handleThreadCleared = () => {
+    handleThreadCreated()
+  }
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🤖 LangGraph Assistant</h1>
-        <div className="thread-info" title={threadId}>
-          Thread: {threadId.slice(0, 8)}…
+        <h1>LangGraph Assistant</h1>
+        <div className="thread-info" title={threadId ?? ''}>
+          Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
         </div>
       </header>
       <main className="app-body">
-        <ChatPanel threadId={threadId} />
-        <Sidebar threadId={threadId} />
+        <ChatPanel
+          key={threadId ?? 'empty-thread'}
+          threadId={threadId}
+          onThreadCreated={handleThreadCreated}
+          onNewConversation={handleThreadCreated}
+        />
+        <Sidebar threadId={threadId} onThreadCleared={handleThreadCleared} />
       </main>
     </div>
   )

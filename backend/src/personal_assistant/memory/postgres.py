@@ -33,6 +33,11 @@ class PostgresMemory:
             states.append(_serialize_checkpoint(checkpoint))
         return states
 
+    async def delete_thread(self, thread_id: str) -> None:
+        if self.checkpointer is None:
+            raise RuntimeError("Postgres memory is not started")
+        await self.checkpointer.adelete_thread(thread_id)
+
 
 def _serialize_checkpoint(checkpoint: Any) -> dict[str, Any]:
     payload = checkpoint.model_dump(mode="json") if hasattr(checkpoint, "model_dump") else checkpoint

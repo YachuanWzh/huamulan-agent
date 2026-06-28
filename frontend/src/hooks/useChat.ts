@@ -10,7 +10,7 @@ export interface Message {
   streaming?: boolean
 }
 
-export function useChat(threadId: string) {
+export function useChat(threadId: string | null, ensureThreadId: () => string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<ToolCallApproval[]>([])
   const [loading, setLoading] = useState(false)
@@ -25,26 +25,6 @@ export function useChat(threadId: string) {
     setLoading(false)
   }, [])
 
-  const send = useCallback(
-    async (text: string) => {
-      setError(null)
-      setLoading(true)
-      const userId = nextId()
-      setMessages((prev) => [...prev, { id: userId, role: 'user', content: text }])
-
-      try {
-        const stream = api.chatStream({ thread_id: threadId, message: text })
-        await processStream(stream)
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return
-        setError(e instanceof Error ? e.message : 'Unknown error')
-      } finally {
-        setLoading(false)
-      }
-    },
-    [threadId],
-  )
-
   const processStream = useCallback(
     async (stream: AsyncGenerator<StreamEvent>) => {
       let assistantId = ''
@@ -55,14 +35,17 @@ export function useChat(threadId: string) {
           case 'token': {
             buffer += event.content
             if (!assistantId) {
-              // Create the assistant message placeholder synchronously
               assistantId = nextId()
               setMessages((prev) => [
                 ...prev,
-                { id: assistantId, role: 'assistant' as const, content: event.content, streaming: true },
+                {
+                  id: assistantId,
+                  role: 'assistant' as const,
+                  content: event.content,
+                  streaming: true,
+                },
               ])
             } else {
-              // Append to existing streaming message
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
@@ -74,7 +57,6 @@ export function useChat(threadId: string) {
             break
           }
           case 'requires_approval': {
-            // Finalize assistant message if any
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
@@ -92,13 +74,11 @@ export function useChat(threadId: string) {
             return
           }
           case 'done': {
-            // Finalize the assistant message
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
               )
             } else if (!assistantId && event.message) {
-              // No tokens streamed but we have a message (e.g., after tool call)
               setMessages((prev) => [
                 ...prev,
                 { id: nextId(), role: 'assistant' as const, content: event.message },
@@ -107,10 +87,34 @@ export function useChat(threadId: string) {
             setPendingApprovals([])
             return
           }
+          case 'error': {
+            throw new Error(event.message)
+          }
         }
       }
     },
     [],
+  )
+
+  const send = useCallback(
+    async (text: string) => {
+      setError(null)
+      setLoading(true)
+      const userId = nextId()
+      setMessages((prev) => [...prev, { id: userId, role: 'user', content: text }])
+
+      try {
+        const activeThreadId = threadId ?? ensureThreadId()
+        const stream = api.chatStream({ thread_id: activeThreadId, message: text })
+        await processStream(stream)
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
+        setError(e instanceof Error ? e.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [threadId, ensureThreadId, processStream],
   )
 
   const approve = useCallback(
@@ -126,8 +130,9 @@ export function useChat(threadId: string) {
         ),
       )
       try {
+        const activeThreadId = threadId ?? ensureThreadId()
         const stream = api.approveStream({
-          thread_id: threadId,
+          thread_id: activeThreadId,
           approval_id: approvalId,
           approved: true,
         })
@@ -139,7 +144,7 @@ export function useChat(threadId: string) {
         setLoading(false)
       }
     },
-    [threadId, processStream],
+    [threadId, ensureThreadId, processStream],
   )
 
   const deny = useCallback(
@@ -155,8 +160,9 @@ export function useChat(threadId: string) {
         ),
       )
       try {
+        const activeThreadId = threadId ?? ensureThreadId()
         const stream = api.approveStream({
-          thread_id: threadId,
+          thread_id: activeThreadId,
           approval_id: approvalId,
           approved: false,
         })
@@ -168,7 +174,7 @@ export function useChat(threadId: string) {
         setLoading(false)
       }
     },
-    [threadId, processStream],
+    [threadId, ensureThreadId, processStream],
   )
 
   const dismissApproval = useCallback((approvalId: string) => {

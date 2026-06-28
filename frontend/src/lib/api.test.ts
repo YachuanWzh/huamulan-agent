@@ -179,6 +179,20 @@ describe('api', () => {
     })
   })
 
+  describe('deleteThread', () => {
+    it('deletes a thread', async () => {
+      server.use(
+        http.delete(`${BASE}/api/threads/t1`, () =>
+          HttpResponse.json({ thread_id: 't1', deleted: true }),
+        ),
+      )
+
+      const result = await api.deleteThread('t1')
+
+      expect(result).toEqual({ thread_id: 't1', deleted: true })
+    })
+  })
+
   describe('listSkills', () => {
     it('returns skills array', async () => {
       server.use(

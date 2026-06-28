@@ -9,6 +9,7 @@ vi.mock('../lib/api', () => ({
     listSkills: vi.fn(),
     reloadSkills: vi.fn(),
     replay: vi.fn(),
+    deleteThread: vi.fn(),
   },
 }))
 
@@ -82,6 +83,44 @@ describe('Sidebar', () => {
 
     await waitFor(() => {
       expect(mockApi.replay).toHaveBeenCalledWith('t1')
+    })
+  })
+
+  it('deletes thread history from the history tab', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.replay.mockResolvedValue({
+      thread_id: 't1',
+      states: [{ messages: [{ type: 'human', content: 'Hi' }] }],
+    })
+    mockApi.deleteThread.mockResolvedValue({ thread_id: 't1', deleted: true })
+
+    const user = userEvent.setup()
+    render(<Sidebar threadId="t1" />)
+
+    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(await screen.findByRole('button', { name: /delete history/i }))
+
+    await waitFor(() => {
+      expect(mockApi.deleteThread).toHaveBeenCalledWith('t1')
+      expect(screen.getByText(/no history for this thread/i)).toBeInTheDocument()
+    })
+  })
+
+  it('clears history and starts a new thread', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.replay.mockResolvedValue({ thread_id: 't1', states: [] })
+    mockApi.deleteThread.mockResolvedValue({ thread_id: 't1', deleted: true })
+    const onThreadCleared = vi.fn()
+
+    const user = userEvent.setup()
+    render(<Sidebar threadId="t1" onThreadCleared={onThreadCleared} />)
+
+    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(await screen.findByRole('button', { name: /clear and new thread/i }))
+
+    await waitFor(() => {
+      expect(mockApi.deleteThread).toHaveBeenCalledWith('t1')
+      expect(onThreadCleared).toHaveBeenCalledOnce()
     })
   })
 })

@@ -2,10 +2,11 @@ import { useState, type KeyboardEvent } from 'react'
 
 interface Props {
   onSend: (message: string) => void
+  onNewConversation?: () => void
   disabled?: boolean
 }
 
-export function MessageInput({ onSend, disabled }: Props) {
+export function MessageInput({ onSend, onNewConversation, disabled }: Props) {
   const [text, setText] = useState('')
 
   const handleSend = () => {
@@ -24,6 +25,14 @@ export function MessageInput({ onSend, disabled }: Props) {
 
   return (
     <div className="message-input">
+      <button
+        className="new-conversation-button"
+        onClick={onNewConversation}
+        disabled={disabled}
+        type="button"
+      >
+        New Conversation
+      </button>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -32,7 +41,7 @@ export function MessageInput({ onSend, disabled }: Props) {
         disabled={disabled}
         rows={1}
       />
-      <button onClick={handleSend} disabled={disabled || !text.trim()}>
+      <button onClick={handleSend} disabled={disabled || !text.trim()} type="button">
         Send
       </button>
     </div>

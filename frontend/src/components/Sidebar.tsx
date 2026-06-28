@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react'
 import { api, type SkillInfo, type ReplayResponse } from '../lib/api'
 
 interface Props {
-  threadId: string
+  threadId: string | null
+  onThreadCleared?: () => void
 }
 
 type Tab = 'skills' | 'history'
 
-export function Sidebar({ threadId }: Props) {
+export function Sidebar({ threadId, onThreadCleared }: Props) {
   const [tab, setTab] = useState<Tab>('skills')
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillsLoading, setSkillsLoading] = useState(true)
   const [replay, setReplay] = useState<ReplayResponse | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
+  const [historyDeleting, setHistoryDeleting] = useState(false)
 
   useEffect(() => {
     loadSkills()
@@ -22,7 +24,7 @@ export function Sidebar({ threadId }: Props) {
     if (tab === 'history') {
       loadReplay()
     }
-  }, [tab])
+  }, [tab, threadId])
 
   const loadSkills = async () => {
     setSkillsLoading(true)
@@ -45,6 +47,10 @@ export function Sidebar({ threadId }: Props) {
   }
 
   const loadReplay = async () => {
+    if (!threadId) {
+      setReplay(null)
+      return
+    }
     setReplayLoading(true)
     try {
       setReplay(await api.replay(threadId))
@@ -52,6 +58,32 @@ export function Sidebar({ threadId }: Props) {
       // silently handle
     }
     setReplayLoading(false)
+  }
+
+  const deleteCurrentHistory = async () => {
+    if (!threadId) return
+    setHistoryDeleting(true)
+    try {
+      await api.deleteThread(threadId)
+      setReplay({ thread_id: threadId, states: [] })
+    } catch {
+      // silently handle
+    }
+    setHistoryDeleting(false)
+  }
+
+  const clearAndStartNewThread = async () => {
+    setHistoryDeleting(true)
+    try {
+      if (threadId) {
+        await api.deleteThread(threadId)
+        setReplay({ thread_id: threadId, states: [] })
+      }
+      onThreadCleared?.()
+    } catch {
+      // silently handle
+    }
+    setHistoryDeleting(false)
   }
 
   return (
@@ -81,10 +113,10 @@ export function Sidebar({ threadId }: Props) {
             <div className="skills-header">
               <h3>Skills</h3>
               <button onClick={handleReload} disabled={skillsLoading}>
-                ↻ Reload
+                Reload
               </button>
             </div>
-            {skillsLoading && <div className="loading">Loading…</div>}
+            {skillsLoading && <div className="loading">Loading...</div>}
             {!skillsLoading && skills.length === 0 && (
               <div className="empty-state">No skills loaded.</div>
             )}
@@ -104,12 +136,22 @@ export function Sidebar({ threadId }: Props) {
 
         {tab === 'history' && (
           <div className="replay-panel">
-            <h3>Thread Replay</h3>
-            {replayLoading && <div className="loading">Loading…</div>}
-            {!replayLoading && !replay && (
+            <div className="replay-header">
+              <h3>Thread Replay</h3>
+              <div className="replay-actions">
+                <button onClick={deleteCurrentHistory} disabled={historyDeleting}>
+                  Delete History
+                </button>
+                <button onClick={clearAndStartNewThread} disabled={historyDeleting}>
+                  Clear and New Thread
+                </button>
+              </div>
+            </div>
+            {replayLoading && <div className="loading">Loading...</div>}
+            {!replayLoading && (!replay || replay.states.length === 0) && (
               <div className="empty-state">No history for this thread.</div>
             )}
-            {replay && (
+            {replay && replay.states.length > 0 && (
               <div className="replay-states">
                 {replay.states.map((state, i) => (
                   <details key={i} className="replay-state">

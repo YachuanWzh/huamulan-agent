@@ -45,6 +45,11 @@ export interface ReplayResponse {
   states: Record<string, unknown>[]
 }
 
+export interface DeleteThreadResponse {
+  thread_id: string
+  deleted: boolean
+}
+
 // --- SSE Streaming types ---
 
 export interface StreamToken {
@@ -63,7 +68,12 @@ export interface StreamDone {
   message: string
 }
 
-export type StreamEvent = StreamToken | StreamRequiresApproval | StreamDone
+export interface StreamError {
+  type: 'error'
+  message: string
+}
+
+export type StreamEvent = StreamToken | StreamRequiresApproval | StreamDone | StreamError
 
 // --- API client ---
 
@@ -171,6 +181,9 @@ export const api = {
 
   replay: (threadId: string) =>
     request<ReplayResponse>(`/api/threads/${threadId}/replay`),
+
+  deleteThread: (threadId: string) =>
+    request<DeleteThreadResponse>(`/api/threads/${threadId}`, { method: 'DELETE' }),
 
   listSkills: () => request<SkillInfo[]>('/api/skills'),
 

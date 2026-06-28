@@ -20,6 +20,15 @@ class ApprovalGate:
         if not isinstance(last, AIMessage) or not tool_calls:
             return {"pending_approvals": []}
 
+        # Track existing ToolMessage responses to avoid duplicates across
+        # resume cycles — a denied call already has a ToolMessage from a
+        # prior inspection pass and should not get a second one.
+        answered_ids: set[str] = {
+            m.tool_call_id
+            for m in messages
+            if isinstance(m, ToolMessage)
+        }
+
         pending: list[dict[str, Any]] = []
         denial_messages: list[ToolMessage] = []
         for call in tool_calls:
@@ -33,7 +42,10 @@ class ApprovalGate:
                         "args": call.get("args", {}),
                     }
                 )
-            elif self.decisions[approval_id] is False:
+            elif (
+                self.decisions[approval_id] is False
+                and call["id"] not in answered_ids
+            ):
                 denial_messages.append(
                     ToolMessage(
                         tool_call_id=call["id"],
@@ -41,11 +53,14 @@ class ApprovalGate:
                     )
                 )
 
-        if pending:
-            return {"pending_approvals": pending}
+        result: dict[str, Any] = {"pending_approvals": pending}
         if denial_messages:
-            return {"messages": denial_messages, "pending_approvals": []}
-        return {"pending_approvals": []}
+            # Return denial ToolMessages even when other calls are still
+            # pending — the state's add_messages reducer appends them, and
+            # _entry_route / _approval_route use answered_ids to skip
+            # already-answered tool calls in subsequent passes.
+            result["messages"] = denial_messages
+        return result
 
 
 def _approval_id(call: dict[str, Any]) -> str:

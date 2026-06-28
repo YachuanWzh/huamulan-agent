@@ -7,7 +7,18 @@ describe('MessageInput', () => {
   it('renders textarea and send button', () => {
     render(<MessageInput onSend={vi.fn()} />)
     expect(screen.getByPlaceholderText(/type your message/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /new conversation/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument()
+  })
+
+  it('calls onNewConversation when new conversation is clicked', async () => {
+    const onNewConversation = vi.fn()
+    const user = userEvent.setup()
+    render(<MessageInput onSend={vi.fn()} onNewConversation={onNewConversation} />)
+
+    await user.click(screen.getByRole('button', { name: /new conversation/i }))
+
+    expect(onNewConversation).toHaveBeenCalledOnce()
   })
 
   it('calls onSend with text and clears input', async () => {

@@ -9,6 +9,7 @@ from personal_assistant.api.schemas import (
     ApprovalDecision,
     ChatRequest,
     ChatResponse,
+    DeleteThreadResponse,
     ReplayResponse,
     SkillInfo,
 )
@@ -88,6 +89,12 @@ async def approve_stream(request: ApprovalDecision) -> StreamingResponse:
 @app.get("/api/threads/{thread_id}/replay", response_model=ReplayResponse)
 async def replay(thread_id: str) -> ReplayResponse:
     return ReplayResponse(thread_id=thread_id, states=await harness.replay(thread_id))
+
+
+@app.delete("/api/threads/{thread_id}", response_model=DeleteThreadResponse)
+async def delete_thread(thread_id: str) -> DeleteThreadResponse:
+    await harness.delete_thread(thread_id)
+    return DeleteThreadResponse(thread_id=thread_id)
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

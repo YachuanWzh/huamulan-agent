@@ -47,3 +47,8 @@ class SkillInfo(BaseModel):
 class ReplayResponse(BaseModel):
     thread_id: str
     states: list[dict[str, Any]]
+
+
+class DeleteThreadResponse(BaseModel):
+    thread_id: str
+    deleted: bool = True

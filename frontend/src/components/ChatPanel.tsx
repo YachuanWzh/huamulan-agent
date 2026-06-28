@@ -4,10 +4,12 @@ import { MessageInput } from './MessageInput'
 import { ToolApprovalCard } from './ToolApprovalCard'
 
 interface Props {
-  threadId: string
+  threadId: string | null
+  onThreadCreated: () => string
+  onNewConversation: () => void
 }
 
-export function ChatPanel({ threadId }: Props) {
+export function ChatPanel({ threadId, onThreadCreated, onNewConversation }: Props) {
   const {
     messages,
     pendingApprovals,
@@ -17,7 +19,7 @@ export function ChatPanel({ threadId }: Props) {
     approve,
     deny,
     clearError,
-  } = useChat(threadId)
+  } = useChat(threadId, onThreadCreated)
 
   return (
     <div className="chat-panel">
@@ -36,7 +38,11 @@ export function ChatPanel({ threadId }: Props) {
           onDeny={deny}
         />
       ))}
-      <MessageInput onSend={send} disabled={loading} />
+      <MessageInput
+        onSend={send}
+        onNewConversation={onNewConversation}
+        disabled={loading}
+      />
     </div>
   )
 }
