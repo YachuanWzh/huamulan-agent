@@ -3,15 +3,23 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChatPanel } from './ChatPanel'
 import * as apiModule from '../lib/api'
+import type { StreamEvent } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   api: {
     chat: vi.fn(),
+    chatStream: vi.fn(),
     approve: vi.fn(),
+    approveStream: vi.fn(),
   },
 }))
 
 const mockApi = vi.mocked(apiModule.api)
+
+/** Helper: create an async generator from an array of StreamEvent */
+async function* makeStream(events: StreamEvent[]): AsyncGenerator<StreamEvent> {
+  for (const e of events) yield e
+}
 
 describe('ChatPanel', () => {
   beforeEach(() => {
@@ -25,12 +33,13 @@ describe('ChatPanel', () => {
   })
 
   it('sends message and displays assistant response', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 't1',
-      status: 'completed',
-      message: 'Hello! How can I help?',
-      approvals: [],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'token', content: 'Hello!' },
+        { type: 'token', content: ' How can I help?' },
+        { type: 'done', status: 'completed', message: 'Hello! How can I help?' },
+      ]),
+    )
 
     const user = userEvent.setup()
     render(<ChatPanel threadId="t1" />)
@@ -46,18 +55,18 @@ describe('ChatPanel', () => {
   })
 
   it('shows approval cards when status is requires_approval', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 't1',
-      status: 'requires_approval',
-      approvals: [
-        {
-          approval_id: 'a1',
-          tool_call_id: 'tc1',
-          name: 'resolve_current_time',
-          args: {},
-        },
-      ],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          {
+            approval_id: 'a1',
+            tool_call_id: 'tc1',
+            name: 'resolve_current_time',
+            args: {},
+          },
+        ]},
+      ]),
+    )
 
     const user = userEvent.setup()
     render(<ChatPanel threadId="t1" />)
@@ -73,7 +82,9 @@ describe('ChatPanel', () => {
   })
 
   it('shows error message on API failure', async () => {
-    mockApi.chat.mockRejectedValue(new Error('Server error'))
+    mockApi.chatStream.mockImplementation(() => {
+      throw new Error('Server error')
+    })
 
     const user = userEvent.setup()
     render(<ChatPanel threadId="t1" />)

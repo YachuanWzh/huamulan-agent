@@ -1,7 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_SKILLS_DIR = str(Path(__file__).resolve().parent / "skills")
 
 
 class Settings(BaseSettings):
@@ -13,7 +17,7 @@ class Settings(BaseSettings):
     llm_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
-    skills_dir: str = Field(default="backend/src/personal_assistant/skills", alias="SKILLS_DIR")
+    skills_dir: str = Field(default=DEFAULT_SKILLS_DIR, alias="SKILLS_DIR")
     cors_origins: list[str] = Field(default=["http://localhost:5173"])
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)

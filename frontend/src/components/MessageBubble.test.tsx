@@ -40,4 +40,20 @@ describe('MessageBubble', () => {
     render(<MessageBubble role="assistant" content="test" />)
     expect(screen.getByText('Assistant')).toBeInTheDocument()
   })
+
+  it('shows typewriter cursor when streaming', () => {
+    render(<MessageBubble role="assistant" content="typing..." streaming={true} />)
+    expect(screen.getByTestId('typewriter-cursor')).toBeInTheDocument()
+    expect(screen.getByText('typing…')).toBeInTheDocument()
+  })
+
+  it('does not show typewriter cursor when not streaming', () => {
+    render(<MessageBubble role="assistant" content="done" />)
+    expect(screen.queryByTestId('typewriter-cursor')).not.toBeInTheDocument()
+  })
+
+  it('does not show typewriter cursor when streaming is false', () => {
+    render(<MessageBubble role="assistant" content="done" streaming={false} />)
+    expect(screen.queryByTestId('typewriter-cursor')).not.toBeInTheDocument()
+  })
 })

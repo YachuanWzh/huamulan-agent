@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { api, type ChatResponse, type ToolCallApproval } from '../lib/api'
+import { api, type StreamEvent, type ToolCallApproval } from '../lib/api'
 
 export interface Message {
   id: string
@@ -7,6 +7,7 @@ export interface Message {
   content: string
   approvalId?: string
   approvalStatus?: 'pending' | 'approved' | 'denied'
+  streaming?: boolean
 }
 
 export function useChat(threadId: string) {
@@ -15,44 +16,101 @@ export function useChat(threadId: string) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const idRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const nextId = () => String(++idRef.current)
 
-  const handleResponse = useCallback((response: ChatResponse) => {
-    if (response.status === 'completed') {
-      setMessages((prev) => [
-        ...prev,
-        { id: String(Date.now()), role: 'assistant' as const, content: response.message ?? '' },
-      ])
-      setPendingApprovals([])
-    } else {
-      setPendingApprovals(response.approvals)
-      const toolMessages: Message[] = response.approvals.map((approval) => ({
-        id: String(Date.now() + Math.random()),
-        role: 'tool_call' as const,
-        content: approval.name,
-        approvalId: approval.approval_id,
-        approvalStatus: 'pending' as const,
-      }))
-      setMessages((prev) => [...prev, ...toolMessages])
-    }
+  const cancel = useCallback(() => {
+    abortRef.current?.abort()
+    setLoading(false)
   }, [])
 
   const send = useCallback(
     async (text: string) => {
       setError(null)
       setLoading(true)
-      setMessages((prev) => [...prev, { id: nextId(), role: 'user', content: text }])
+      const userId = nextId()
+      setMessages((prev) => [...prev, { id: userId, role: 'user', content: text }])
+
       try {
-        const response = await api.chat({ thread_id: threadId, message: text })
-        handleResponse(response)
+        const stream = api.chatStream({ thread_id: threadId, message: text })
+        await processStream(stream)
       } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         setError(e instanceof Error ? e.message : 'Unknown error')
       } finally {
         setLoading(false)
       }
     },
-    [threadId, handleResponse],
+    [threadId],
+  )
+
+  const processStream = useCallback(
+    async (stream: AsyncGenerator<StreamEvent>) => {
+      let assistantId = ''
+      let buffer = ''
+
+      for await (const event of stream) {
+        switch (event.type) {
+          case 'token': {
+            buffer += event.content
+            if (!assistantId) {
+              // Create the assistant message placeholder synchronously
+              assistantId = nextId()
+              setMessages((prev) => [
+                ...prev,
+                { id: assistantId, role: 'assistant' as const, content: event.content, streaming: true },
+              ])
+            } else {
+              // Append to existing streaming message
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: m.content + event.content }
+                    : m,
+                ),
+              )
+            }
+            break
+          }
+          case 'requires_approval': {
+            // Finalize assistant message if any
+            if (assistantId && buffer) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+              )
+            }
+            setPendingApprovals(event.approvals)
+            const toolMessages: Message[] = event.approvals.map((a) => ({
+              id: nextId(),
+              role: 'tool_call' as const,
+              content: a.name,
+              approvalId: a.approval_id,
+              approvalStatus: 'pending' as const,
+            }))
+            setMessages((prev) => [...prev, ...toolMessages])
+            return
+          }
+          case 'done': {
+            // Finalize the assistant message
+            if (assistantId && buffer) {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+              )
+            } else if (!assistantId && event.message) {
+              // No tokens streamed but we have a message (e.g., after tool call)
+              setMessages((prev) => [
+                ...prev,
+                { id: nextId(), role: 'assistant' as const, content: event.message },
+              ])
+            }
+            setPendingApprovals([])
+            return
+          }
+        }
+      }
+    },
+    [],
   )
 
   const approve = useCallback(
@@ -68,19 +126,20 @@ export function useChat(threadId: string) {
         ),
       )
       try {
-        const response = await api.approve({
+        const stream = api.approveStream({
           thread_id: threadId,
           approval_id: approvalId,
           approved: true,
         })
-        handleResponse(response)
+        await processStream(stream)
       } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         setError(e instanceof Error ? e.message : 'Unknown error')
       } finally {
         setLoading(false)
       }
     },
-    [threadId, handleResponse],
+    [threadId, processStream],
   )
 
   const deny = useCallback(
@@ -96,19 +155,20 @@ export function useChat(threadId: string) {
         ),
       )
       try {
-        const response = await api.approve({
+        const stream = api.approveStream({
           thread_id: threadId,
           approval_id: approvalId,
           approved: false,
         })
-        handleResponse(response)
+        await processStream(stream)
       } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
         setError(e instanceof Error ? e.message : 'Unknown error')
       } finally {
         setLoading(false)
       }
     },
-    [threadId, handleResponse],
+    [threadId, processStream],
   )
 
   const dismissApproval = useCallback((approvalId: string) => {
@@ -129,5 +189,6 @@ export function useChat(threadId: string) {
     deny,
     dismissApproval,
     clearError,
+    cancel,
   }
 }

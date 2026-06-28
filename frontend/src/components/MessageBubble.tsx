@@ -4,6 +4,7 @@ interface Props {
   role: Message['role']
   content: string
   approvalStatus?: Message['approvalStatus']
+  streaming?: boolean
 }
 
 const roleLabels: Record<string, string> = {
@@ -12,7 +13,7 @@ const roleLabels: Record<string, string> = {
   tool_call: 'Tool Call',
 }
 
-export function MessageBubble({ role, content, approvalStatus }: Props) {
+export function MessageBubble({ role, content, approvalStatus, streaming }: Props) {
   return (
     <div className={`message-bubble ${role}`} data-testid="message-bubble">
       <div className="message-header">
@@ -24,8 +25,14 @@ export function MessageBubble({ role, content, approvalStatus }: Props) {
             {approvalStatus === 'denied' && 'Denied'}
           </span>
         )}
+        {streaming && (
+          <span className="streaming-badge">typing…</span>
+        )}
       </div>
-      <div className="message-content">{content}</div>
+      <div className="message-content">
+        {content}
+        {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
+      </div>
     </div>
   )
 }

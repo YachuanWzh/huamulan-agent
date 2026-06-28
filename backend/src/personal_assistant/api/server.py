@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.api.schemas import (
@@ -53,12 +54,34 @@ async def chat(request: ChatRequest) -> ChatResponse:
     return await harness.run_user_turn(request.thread_id, request.message, request.llm)
 
 
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    return StreamingResponse(
+        harness.run_user_turn_stream(request.thread_id, request.message, request.llm),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 @app.post("/api/approve", response_model=ChatResponse)
 async def approve(request: ApprovalDecision) -> ChatResponse:
     return await harness.resume_after_approval(
         request.thread_id,
         request.approval_id,
         request.approved,
+    )
+
+
+@app.post("/api/approve/stream")
+async def approve_stream(request: ApprovalDecision) -> StreamingResponse:
+    return StreamingResponse(
+        harness.resume_after_approval_stream(
+            request.thread_id,
+            request.approval_id,
+            request.approved,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
 

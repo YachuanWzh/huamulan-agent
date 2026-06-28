@@ -2,16 +2,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useChat } from './useChat'
 import * as apiModule from '../lib/api'
-import type { ChatResponse } from '../lib/api'
+import type { StreamEvent } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   api: {
     chat: vi.fn(),
+    chatStream: vi.fn(),
     approve: vi.fn(),
+    approveStream: vi.fn(),
   },
 }))
 
 const mockApi = vi.mocked(apiModule.api)
+
+/** Helper: create an async generator from an array of StreamEvent */
+async function* makeStream(events: StreamEvent[]): AsyncGenerator<StreamEvent> {
+  for (const e of events) yield e
+}
 
 describe('useChat', () => {
   beforeEach(() => {
@@ -26,13 +33,14 @@ describe('useChat', () => {
     expect(result.current.error).toBeNull()
   })
 
-  it('adds user message and assistant response on completed', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'completed',
-      message: 'Hello there!',
-      approvals: [],
-    })
+  it('adds user message and assistant response via streaming', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'token', content: 'Hello' },
+        { type: 'token', content: ' there!' },
+        { type: 'done', status: 'completed', message: 'Hello there!' },
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -49,19 +57,65 @@ describe('useChat', () => {
     expect(result.current.messages[1]!).toMatchObject({
       role: 'assistant',
       content: 'Hello there!',
+      streaming: false,
     })
     expect(result.current.pendingApprovals).toEqual([])
+  })
+
+  it('sets streaming true during token streaming', async () => {
+    let resolveStream!: () => void
+    const streamPromise = new Promise<void>((resolve) => {
+      resolveStream = resolve
+    })
+
+    // Create a stream that doesn't complete until we say so
+    async function* slowStream(): AsyncGenerator<StreamEvent> {
+      yield { type: 'token', content: 'Hello' }
+      await streamPromise
+      yield { type: 'done', status: 'completed', message: 'Hello' }
+    }
+
+    mockApi.chatStream.mockReturnValue(slowStream())
+
+    const { result } = renderHook(() => useChat('thread-1'))
+
+    let sendDone = false
+    act(() => {
+      result.current.send('Hi').then(() => {
+        sendDone = true
+      })
+    })
+
+    // After the first token, we should have an assistant message with streaming: true
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    const assistantMsg = result.current.messages.find((m) => m.role === 'assistant')
+    expect(assistantMsg?.streaming).toBe(true)
+    expect(assistantMsg?.content).toBe('Hello')
+
+    // Resolve the stream
+    resolveStream!()
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    expect(sendDone).toBe(true)
+    const finalMsg = result.current.messages.find((m) => m.role === 'assistant')
+    expect(finalMsg?.streaming).toBe(false)
   })
 
   it('sets pending approvals on requires_approval', async () => {
     const approvals = [
       { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
     ]
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals,
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals },
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -79,20 +133,20 @@ describe('useChat', () => {
     })
   })
 
-  it('approve continues the conversation', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
-      ],
-    })
-    mockApi.approve.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'completed',
-      message: 'It is 3pm.',
-      approvals: [],
-    })
+  it('approve continues the conversation via streaming', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        ]},
+      ]),
+    )
+    mockApi.approveStream.mockReturnValue(
+      makeStream([
+        { type: 'token', content: 'It is 3pm.' },
+        { type: 'done', status: 'completed', message: 'It is 3pm.' },
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -107,7 +161,7 @@ describe('useChat', () => {
     })
 
     expect(result.current.pendingApprovals).toEqual([])
-    expect(mockApi.approve).toHaveBeenCalledWith({
+    expect(mockApi.approveStream).toHaveBeenCalledWith({
       thread_id: 'thread-1',
       approval_id: 'a1',
       approved: true,
@@ -117,19 +171,18 @@ describe('useChat', () => {
   })
 
   it('deny rejects the tool call', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
-      ],
-    })
-    mockApi.approve.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'completed',
-      message: 'I cannot check the time without permission.',
-      approvals: [],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        ]},
+      ]),
+    )
+    mockApi.approveStream.mockReturnValue(
+      makeStream([
+        { type: 'done', status: 'completed', message: 'I cannot check the time without permission.' },
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -141,7 +194,7 @@ describe('useChat', () => {
       await result.current.deny('a1')
     })
 
-    expect(mockApi.approve).toHaveBeenCalledWith({
+    expect(mockApi.approveStream).toHaveBeenCalledWith({
       thread_id: 'thread-1',
       approval_id: 'a1',
       approved: false,
@@ -149,13 +202,17 @@ describe('useChat', () => {
   })
 
   it('sets loading during send', async () => {
-    let resolvePromise!: (v: ChatResponse) => void
-    mockApi.chat.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolvePromise = resolve
-        }),
-    )
+    let resolveStream!: () => void
+    const streamPromise = new Promise<void>((resolve) => {
+      resolveStream = resolve
+    })
+
+    async function* slowStream(): AsyncGenerator<StreamEvent> {
+      await streamPromise
+      yield { type: 'done', status: 'completed', message: 'ok' }
+    }
+
+    mockApi.chatStream.mockReturnValue(slowStream())
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -168,15 +225,10 @@ describe('useChat', () => {
 
     expect(result.current.loading).toBe(true)
 
+    resolveStream!()
+
     await act(async () => {
-      resolvePromise!({
-        thread_id: 'thread-1',
-        status: 'completed',
-        message: 'ok',
-        approvals: [],
-      })
-      // Wait for the send promise to resolve
-      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 10))
     })
 
     expect(sendDone).toBe(true)
@@ -184,7 +236,9 @@ describe('useChat', () => {
   })
 
   it('sets error on API failure', async () => {
-    mockApi.chat.mockRejectedValue(new Error('Network error'))
+    mockApi.chatStream.mockImplementation(() => {
+      throw new Error('Network error')
+    })
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -197,19 +251,18 @@ describe('useChat', () => {
   })
 
   it('approve updates the specific tool_call message to approved', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
-      ],
-    })
-    mockApi.approve.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'completed',
-      message: 'Done.',
-      approvals: [],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        ]},
+      ]),
+    )
+    mockApi.approveStream.mockReturnValue(
+      makeStream([
+        { type: 'done', status: 'completed', message: 'Done.' },
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -228,21 +281,21 @@ describe('useChat', () => {
   })
 
   it('deny only marks the targeted tool_call as denied, not all', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
-        { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
-      ],
-    })
-    mockApi.approve.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
-      ],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+          { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+        ]},
+      ]),
+    )
+    mockApi.approveStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+        ]},
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -266,7 +319,9 @@ describe('useChat', () => {
   })
 
   it('clearError resets error state', async () => {
-    mockApi.chat.mockRejectedValue(new Error('Network error'))
+    mockApi.chatStream.mockImplementation(() => {
+      throw new Error('Network error')
+    })
 
     const { result } = renderHook(() => useChat('thread-1'))
 
@@ -284,13 +339,13 @@ describe('useChat', () => {
   })
 
   it('dismissApproval removes the approval', async () => {
-    mockApi.chat.mockResolvedValue({
-      thread_id: 'thread-1',
-      status: 'requires_approval',
-      approvals: [
-        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
-      ],
-    })
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        ]},
+      ]),
+    )
 
     const { result } = renderHook(() => useChat('thread-1'))
 

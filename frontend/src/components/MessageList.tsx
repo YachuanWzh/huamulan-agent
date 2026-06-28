@@ -25,6 +25,7 @@ export function MessageList({ messages, loading }: Props) {
           role={msg.role}
           content={msg.content}
           approvalStatus={msg.approvalStatus}
+          streaming={msg.streaming}
         />
       ))}
       {loading && (

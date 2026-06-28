@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+import json
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -52,6 +53,87 @@ class AgentHarness:
 
     async def replay(self, thread_id: str) -> list[dict[str, Any]]:
         return await self.memory.replay(thread_id)
+
+    async def run_user_turn_stream(
+        self,
+        thread_id: str,
+        message: str,
+        llm_config: LLMConfig | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream the agent response as SSE events."""
+        app = self._compile(llm_config)
+        config = {"configurable": {"thread_id": thread_id}}
+
+        async for event in app.astream_events(
+            {"messages": [HumanMessage(content=message)]},
+            config=config,
+            version="v2",
+        ):
+            kind = event["event"]
+            if kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                if chunk.content:
+                    yield _sse_event("token", {"content": chunk.content})
+
+        # After streaming, inspect final state
+        state = await app.aget_state(config)
+        values = state.values if state.values else {}
+        pending = values.get("pending_approvals") or []
+
+        if pending:
+            yield _sse_event("requires_approval", {
+                "approvals": [
+                    {"approval_id": a["approval_id"], "tool_call_id": a["tool_call_id"],
+                     "name": a["name"], "args": a["args"]}
+                    for a in pending
+                ]
+            })
+        else:
+            msg = _extract_last_ai_message(values.get("messages", []))
+            yield _sse_event("done", {"status": "completed", "message": msg})
+
+        yield "data: [DONE]\n\n"
+
+    async def resume_after_approval_stream(
+        self,
+        thread_id: str,
+        approval_id: str,
+        approved: bool,
+        llm_config: LLMConfig | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Resume after approval with streaming SSE events."""
+        self.decisions[approval_id] = approved
+        app = self._compile(llm_config)
+        config = {"configurable": {"thread_id": thread_id}}
+
+        async for event in app.astream_events(
+            {},
+            config=config,
+            version="v2",
+        ):
+            kind = event["event"]
+            if kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                if chunk.content:
+                    yield _sse_event("token", {"content": chunk.content})
+
+        state = await app.aget_state(config)
+        values = state.values if state.values else {}
+        pending = values.get("pending_approvals") or []
+
+        if pending:
+            yield _sse_event("requires_approval", {
+                "approvals": [
+                    {"approval_id": a["approval_id"], "tool_call_id": a["tool_call_id"],
+                     "name": a["name"], "args": a["args"]}
+                    for a in pending
+                ]
+            })
+        else:
+            msg = _extract_last_ai_message(values.get("messages", []))
+            yield _sse_event("done", {"status": "completed", "message": msg})
+
+        yield "data: [DONE]\n\n"
 
     def _compile(self, llm_config: LLMConfig | None):
         llm = build_llm(self.settings, llm_config)
@@ -132,3 +214,14 @@ def _to_response(thread_id: str, state: AgentState) -> ChatResponse:
         if getattr(message, "type", "") == "ai" and getattr(message, "content", None):
             return ChatResponse(thread_id=thread_id, status="completed", message=message.content)
     return ChatResponse(thread_id=thread_id, status="completed", message="")
+
+
+def _extract_last_ai_message(messages: list[Any]) -> str:
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "ai" and getattr(msg, "content", None):
+            return msg.content
+    return ""
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"

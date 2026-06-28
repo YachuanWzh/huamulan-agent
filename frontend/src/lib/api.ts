@@ -45,6 +45,26 @@ export interface ReplayResponse {
   states: Record<string, unknown>[]
 }
 
+// --- SSE Streaming types ---
+
+export interface StreamToken {
+  type: 'token'
+  content: string
+}
+
+export interface StreamRequiresApproval {
+  type: 'requires_approval'
+  approvals: ToolCallApproval[]
+}
+
+export interface StreamDone {
+  type: 'done'
+  status: 'completed'
+  message: string
+}
+
+export type StreamEvent = StreamToken | StreamRequiresApproval | StreamDone
+
 // --- API client ---
 
 let _baseUrl = ''
@@ -64,6 +84,70 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+/**
+ * Read an SSE stream from the given endpoint, yielding parsed StreamEvent objects.
+ *
+ * Parses standard SSE format:
+ *   event: <type>
+ *   data: <json-payload>
+ *   <blank line>
+ *
+ * Merges the event type into the data payload so consumers see { type, ...data }.
+ */
+async function* streamRequest(
+  url: string,
+  body: unknown,
+): AsyncGenerator<StreamEvent> {
+  const res = await fetch(`${_baseUrl}${url}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`API error ${res.status}: ${text}`)
+  }
+  if (!res.body) {
+    throw new Error('No response body for streaming')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let eventType = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim()
+        } else if (line.startsWith('data: ')) {
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') return
+          try {
+            const payload = JSON.parse(raw) as Record<string, unknown>
+            yield { type: eventType, ...payload } as StreamEvent
+          } catch {
+            // Skip malformed JSON lines
+          }
+        }
+        // blank line resets event type (SSE end-of-event marker)
+        if (line === '') {
+          eventType = ''
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
 
@@ -73,11 +157,17 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  chatStream: (body: ChatRequest) =>
+    streamRequest('/api/chat/stream', body),
+
   approve: (body: ApprovalDecision) =>
     request<ChatResponse>('/api/approve', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  approveStream: (body: ApprovalDecision) =>
+    streamRequest('/api/approve/stream', body),
 
   replay: (threadId: string) =>
     request<ReplayResponse>(`/api/threads/${threadId}/replay`),
