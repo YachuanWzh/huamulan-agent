@@ -1,6 +1,5 @@
 """Tests for build_script_tool — wraps a scripts/ entry as a LangChain tool."""
 
-import sys
 from pathlib import Path
 from textwrap import dedent
 
@@ -113,7 +112,7 @@ class TestBuildScriptToolExecution:
         assert '"count": 9' in result
 
     def test_python_token_replaced_with_sys_executable(self, tmp_path: Path):
-        script = _write_echo_script(tmp_path)
+        _write_echo_script(tmp_path)
         decl = {
             "name": "echo_tool",
             "description": "Echoes args.",
