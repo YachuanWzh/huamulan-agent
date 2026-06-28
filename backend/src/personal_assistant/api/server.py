@@ -25,9 +25,11 @@ harness = AgentHarness(settings, registry, memory)
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await memory.start()
+    registry.start_watching()
     try:
         yield
     finally:
+        registry.stop_watching()
         await memory.stop()
 
 
@@ -81,4 +83,5 @@ def _skill_info(skill) -> SkillInfo:
         description=skill.description,
         tool_names=skill.tool_names,
         path=str(skill.path),
+        loaded=skill.loaded,
     )

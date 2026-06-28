@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 from langchain_core.tools import BaseTool
@@ -12,36 +13,82 @@ class SkillRegistry:
     def __init__(self, skills_dir: str | Path):
         self.skills_dir = Path(skills_dir).resolve()
         self._skills: dict[str, Skill] = {}
-        self.reload()
+        self._watcher_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self.scan_metadata()
+
+    # ── properties ──────────────────────────────────────────────
 
     @property
     def skills(self) -> dict[str, Skill]:
         return self._skills
 
     @property
+    def skill_names(self) -> list[str]:
+        return list(self._skills.keys())
+
+    @property
     def all_tools(self) -> list[BaseTool]:
         tools: list[BaseTool] = []
         for skill in self._skills.values():
-            tools.extend(skill.tools)
+            if skill.loaded:
+                tools.extend(skill.tools)
         return tools
 
-    def reload(self) -> list[Skill]:
+    @property
+    def is_watching(self) -> bool:
+        return self._watcher_thread is not None and self._watcher_thread.is_alive()
+
+    # ── metadata scanning (phase 1 — lightweight) ───────────────
+
+    def scan_metadata(self) -> list[Skill]:
+        """Scan skills_dir and create Skill objects with meta only (no tool import)."""
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         loaded: dict[str, Skill] = {}
         for skill_dir in sorted(p for p in self.skills_dir.iterdir() if p.is_dir()):
             skill_md = skill_dir / "SKILL.md"
             if not skill_md.exists():
                 continue
-            instructions = skill_md.read_text(encoding="utf-8")
-            loaded[skill_dir.name] = Skill(
-                name=skill_dir.name,
-                description=_first_heading_or_line(instructions),
-                instructions=instructions,
-                path=skill_dir,
-                tools=_load_tools(skill_dir),
-            )
+            head = _read_first_line(skill_md)
+            description = _first_heading_or_line(head)
+            # Preserve already-loaded skills if they still exist on disk
+            existing = self._skills.get(skill_dir.name)
+            if existing and existing.loaded:
+                loaded[skill_dir.name] = existing
+            else:
+                loaded[skill_dir.name] = Skill(
+                    name=skill_dir.name,
+                    description=description,
+                    path=skill_dir,
+                    instructions_path=skill_md,
+                )
         self._skills = loaded
         return list(loaded.values())
+
+    # ── full loading (phase 2 — on demand) ──────────────────────
+
+    def load_skill(self, name: str) -> None:
+        """Load full content (instructions + tools) for a specific skill."""
+        skill = self._skills.get(name)
+        if skill is None:
+            raise KeyError(f"Unknown skill: {name}")
+        if skill.loaded:
+            return
+        skill.instructions = skill.instructions_path.read_text(encoding="utf-8")
+        skill.tools = _load_tools(skill.path)
+
+    # ── bulk reload (backward compat) ───────────────────────────
+
+    def reload(self) -> list[Skill]:
+        """Rescan and fully load all skills."""
+        self.scan_metadata()
+        for name in self._skills:
+            skill = self._skills[name]
+            skill.instructions = skill.instructions_path.read_text(encoding="utf-8")
+            skill.tools = _load_tools(skill.path)
+        return list(self._skills.values())
+
+    # ── tool helpers ────────────────────────────────────────────
 
     def tool_map_for_skills(self, skill_names: list[str]) -> dict[str, BaseTool]:
         selected = set(skill_names)
@@ -53,13 +100,55 @@ class SkillRegistry:
                 tools[tool.name] = tool
         return tools
 
+    # ── file watching (hot-plug) ────────────────────────────────
 
-def _first_heading_or_line(markdown: str) -> str:
-    for line in markdown.splitlines():
-        text = line.strip().lstrip("#").strip()
-        if text:
-            return text
-    return "No description"
+    def start_watching(self) -> None:
+        """Start a background thread that watches skills_dir for changes."""
+        if self.is_watching:
+            return
+        self._stop_event.clear()
+        self._watcher_thread = threading.Thread(
+            target=self._watch_loop, daemon=True, name="skill-watcher"
+        )
+        self._watcher_thread.start()
+
+    def stop_watching(self) -> None:
+        """Stop the file-watching background thread."""
+        self._stop_event.set()
+        if self._watcher_thread is not None:
+            self._watcher_thread.join(timeout=5)
+            self._watcher_thread = None
+
+    def _watch_loop(self) -> None:
+        try:
+            from watchfiles import watch
+        except ImportError:
+            return
+
+        for _changes in watch(
+            self.skills_dir,
+            stop_event=self._stop_event,
+            watch_filter=lambda change, path: Path(path).name == "SKILL.md",
+        ):
+            self.scan_metadata()
+
+
+# ── module-private helpers ──────────────────────────────────────
+
+
+def _read_first_line(path: Path) -> str:
+    """Read only the first non-empty line of a file."""
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if stripped:
+                return stripped
+    return ""
+
+
+def _first_heading_or_line(text: str) -> str:
+    cleaned = text.strip().lstrip("#").strip()
+    return cleaned if cleaned else "No description"
 
 
 def _load_tools(skill_dir: Path) -> list[BaseTool]:

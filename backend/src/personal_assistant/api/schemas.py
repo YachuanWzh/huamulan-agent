@@ -41,6 +41,7 @@ class SkillInfo(BaseModel):
     description: str
     tool_names: list[str]
     path: str
+    loaded: bool = False
 
 
 class ReplayResponse(BaseModel):

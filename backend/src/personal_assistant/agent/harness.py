@@ -54,15 +54,27 @@ class AgentHarness:
         return await self.memory.replay(thread_id)
 
     def _compile(self, llm_config: LLMConfig | None):
-        tools = self.registry.all_tools
-        llm = build_llm(self.settings, llm_config).bind_tools(tools)
+        llm = build_llm(self.settings, llm_config)
         approval_gate = ApprovalGate(self.decisions)
 
         async def call_agent(state: AgentState) -> AgentState:
-            allowed = set(state.get("allowed_tools") or [])
-            active_tools = [tool for tool in tools if tool.name in allowed]
+            # Dynamically resolve tools from loaded skills (progressive loading)
+            active_tools = list(
+                self.registry.tool_map_for_skills(
+                    state.get("selected_skills", [])
+                ).values()
+            )
             response = await llm.bind_tools(active_tools).ainvoke(state["messages"])
             return {"messages": [response]}
+
+        async def execute_tools(state: AgentState) -> AgentState:
+            # Dynamically create ToolNode with currently loaded tools
+            active_tools = list(
+                self.registry.tool_map_for_skills(
+                    state.get("selected_skills", [])
+                ).values()
+            )
+            return await ToolNode(active_tools).ainvoke(state)
 
         async def inspect_approval(state: AgentState) -> AgentState:
             return approval_gate.inspect(state)
@@ -71,7 +83,7 @@ class AgentHarness:
         graph.add_node("route_skills", build_skill_router(self.registry))
         graph.add_node("agent", call_agent)
         graph.add_node("approval", inspect_approval)
-        graph.add_node("tools", ToolNode(tools))
+        graph.add_node("tools", execute_tools)
 
         graph.set_entry_point("route_skills")
         graph.add_edge("route_skills", "agent")
