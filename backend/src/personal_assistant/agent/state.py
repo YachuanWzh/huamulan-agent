@@ -1,0 +1,11 @@
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
+
+
+class AgentState(TypedDict, total=False):
+    messages: Annotated[list[AnyMessage], add_messages]
+    selected_skills: list[str]
+    allowed_tools: list[str]
+    pending_approvals: list[dict[str, Any]]
