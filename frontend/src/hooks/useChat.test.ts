@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useChat } from './useChat'
 import * as apiModule from '../lib/api'
+import type { ChatResponse } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   api: {
@@ -148,7 +149,7 @@ describe('useChat', () => {
   })
 
   it('sets loading during send', async () => {
-    let resolvePromise: (v: unknown) => void
+    let resolvePromise!: (v: ChatResponse) => void
     mockApi.chat.mockImplementation(
       () =>
         new Promise((resolve) => {
