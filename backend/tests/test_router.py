@@ -1,7 +1,35 @@
 from pathlib import Path
+from textwrap import dedent
+
+import pytest
 
 from personal_assistant.skills.loader import SkillRegistry
-from personal_assistant.agent.router import build_system_prompt, _keyword_route
+from personal_assistant.agent.router import build_skill_router, build_system_prompt, _keyword_route
+
+
+def _make_triggered_skill(tmp_path: Path) -> Path:
+    """A skill whose trigger words do NOT appear in its name or description."""
+    d = tmp_path / "cal"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        dedent(
+            """
+            ---
+            name: cal
+            description: Performs calendar arithmetic.
+            triggers:
+              - 今天
+              - tomorrow
+              - 星期几
+            ---
+
+            # Cal
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    return tmp_path
 
 
 class TestKeywordRoute:
@@ -28,6 +56,77 @@ class TestKeywordRoute:
         # "handles" appears in full SKILL.md ("Handles alpha tasks") but not in meta
         result = _keyword_route(registry, "please handle this request")
         assert result == []
+
+
+class TestTriggerRouting:
+    def test_matches_via_triggers_when_present(self, tmp_path: Path):
+        """A trigger word not in name/description still routes the skill."""
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        # "今天" is a trigger but does not appear in name "cal" or description
+        assert _keyword_route(registry, "今天是几号") == ["cal"]
+
+    def test_matches_english_trigger(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        assert _keyword_route(registry, "what about tomorrow") == ["cal"]
+
+    def test_no_trigger_match_returns_empty(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        assert _keyword_route(registry, "completely unrelated xyz") == []
+
+    def test_skills_without_triggers_fall_back_to_token_match(self, multi_skill_dir: Path):
+        """Skills without a triggers list still match on name/description tokens."""
+        registry = SkillRegistry(multi_skill_dir)
+        result = _keyword_route(registry, "I need help with alpha tasks")
+        assert "skill-a" in result
+
+
+class TestRouteSkillsNoFallback:
+    """route_skills must not force-load all skills when nothing matches."""
+
+    @pytest.mark.asyncio
+    async def test_no_match_loads_no_skills(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        router = build_skill_router(registry)
+
+        state = await router({"messages": [], "selected_skills": []})
+        # Nothing matched "random unrelated text"
+        assert state["selected_skills"] == []
+        # Skill stays unloaded — only meta overview is in the system prompt
+        assert not registry.skills["cal"].loaded
+
+    @pytest.mark.asyncio
+    async def test_match_loads_only_matched_skill(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        # add a second skill that won't match
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "SKILL.md").write_text(
+            "---\nname: other\ndescription: Other stuff.\n---\n# Other\n", encoding="utf-8"
+        )
+        registry = SkillRegistry(tmp_path)
+        router = build_skill_router(registry)
+
+        from langchain_core.messages import HumanMessage
+
+        state = await router({"messages": [HumanMessage(content="今天怎么样")]})
+        assert state["selected_skills"] == ["cal"]
+        assert registry.skills["cal"].loaded
+        assert not registry.skills["other"].loaded
+
+    @pytest.mark.asyncio
+    async def test_system_prompt_has_meta_overview_even_when_unmatched(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        router = build_skill_router(registry)
+
+        state = await router({"messages": [], "selected_skills": []})
+        system = state["messages"][0]
+        # Meta overview lists the skill even though it wasn't loaded
+        assert "cal" in system.content
 
 
 class TestBuildSystemPrompt:

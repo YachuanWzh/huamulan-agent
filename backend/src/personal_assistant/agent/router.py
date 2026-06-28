@@ -19,11 +19,13 @@ def build_skill_router(registry: SkillRegistry):
             if getattr(message, "type", "") == "human"
         )[-4000:]
 
+        # Progressive loading: match skills using lightweight meta only
+        # (name + description + triggers). Skills that don't match are NOT
+        # force-loaded — the agent still sees their meta overview below and
+        # can ask a clarifying question.
         selected = _keyword_route(registry, user_text)
-        if not selected and registry.skills:
-            selected = list(registry.skills)
 
-        # Progressive loading: load full content only for selected skills
+        # Load full content (instructions + tools) only for matched skills
         for name in selected:
             registry.load_skill(name)
 
@@ -62,10 +64,20 @@ def build_system_prompt(registry: SkillRegistry, selected: list[str]) -> SystemM
 
 
 def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
-    """Match skills using only meta (name + description), not full instructions."""
+    """Match skills using lightweight meta only — not full instructions.
+
+    A skill matches if any of its explicit ``triggers`` appears in the user text
+    (substring match, case-insensitive for ASCII), or — for skills without
+    triggers — if a name/description token appears in the text.
+    """
     normalized = user_text.lower()
     selected: list[str] = []
     for skill in registry.skills.values():
+        if skill.triggers:
+            if any(_trigger_match(t, normalized) for t in skill.triggers):
+                selected.append(skill.name)
+            continue
+        # No explicit triggers: fall back to name + description tokens
         haystack = f"{skill.name}\n{skill.description}".lower()
         tokens = {
             token.strip(".,:;()[]{}#`*_-/")
@@ -75,3 +87,8 @@ def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
         if any(token in normalized for token in tokens):
             selected.append(skill.name)
     return selected
+
+
+def _trigger_match(trigger: str, normalized_text: str) -> bool:
+    """A trigger matches if it appears as a substring (ASCII case-insensitive)."""
+    return trigger.lower() in normalized_text

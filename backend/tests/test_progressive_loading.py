@@ -50,25 +50,25 @@ class TestProgressiveLoadingE2E:
         assert "alpha_tool" in tool_map
         assert len(tool_map) == 1
 
-    def test_fallback_loads_all_when_no_match(self, multi_skill_dir: Path):
-        """When no skills match, all skills are selected (fallback)."""
+    def test_no_match_loads_nothing(self, multi_skill_dir: Path):
+        """Progressive loading: when no skills match, NONE are fully loaded.
+
+        The agent still sees the lightweight meta overview (so it can ask a
+        clarifying question), but full instructions/tools stay unloaded.
+        """
         registry = SkillRegistry(multi_skill_dir)
 
         matched = _keyword_route(registry, "zzzzz completely unrelated")
         assert matched == []
 
-        # Fallback: select all
-        if not matched and registry.skills:
-            matched = list(registry.skills)
-
-        assert len(matched) == 3
-
+        # No fallback — load only matched (none)
         for name in matched:
             registry.load_skill(name)
 
-        # All skills loaded
+        # No skills loaded
         for skill in registry.skills.values():
-            assert skill.loaded
+            assert not skill.loaded
+
 
     def test_hot_plug_add_and_remove(self, multi_skill_dir: Path):
         """Skills can be added and removed at runtime."""
