@@ -10,6 +10,10 @@ dist/
 # Virtual environment
 .venv/
 
+# Node
+node_modules/
+frontend/dist/
+
 # IDE
 .idea/
 .vscode/
