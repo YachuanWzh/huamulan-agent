@@ -16,12 +16,18 @@ export function ChatPanel({ threadId }: Props) {
     send,
     approve,
     deny,
+    clearError,
   } = useChat(threadId)
 
   return (
     <div className="chat-panel">
       <MessageList messages={messages} loading={loading} />
-      {error && <div className="error-banner">{error}</div>}
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button className="error-dismiss" onClick={clearError}>✕</button>
+        </div>
+      )}
       {pendingApprovals.map((approval) => (
         <ToolApprovalCard
           key={approval.approval_id}

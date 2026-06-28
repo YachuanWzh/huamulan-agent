@@ -4,7 +4,13 @@ import { Sidebar } from './components/Sidebar'
 import './App.css'
 
 function App() {
-  const [threadId] = useState(() => crypto.randomUUID())
+  const [threadId] = useState(() => {
+    const stored = localStorage.getItem('threadId')
+    if (stored) return stored
+    const id = crypto.randomUUID()
+    localStorage.setItem('threadId', id)
+    return id
+  })
 
   return (
     <div className="app">

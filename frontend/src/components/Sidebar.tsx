@@ -59,6 +59,7 @@ export function Sidebar({ threadId }: Props) {
       <div className="sidebar-tabs">
         <button
           role="tab"
+          aria-selected={tab === 'skills'}
           className={`tab ${tab === 'skills' ? 'active' : ''}`}
           onClick={() => setTab('skills')}
         >
@@ -66,6 +67,7 @@ export function Sidebar({ threadId }: Props) {
         </button>
         <button
           role="tab"
+          aria-selected={tab === 'history'}
           className={`tab ${tab === 'history' ? 'active' : ''}`}
           onClick={() => setTab('history')}
         >

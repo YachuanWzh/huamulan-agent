@@ -196,6 +196,93 @@ describe('useChat', () => {
     expect(result.current.loading).toBe(false)
   })
 
+  it('approve updates the specific tool_call message to approved', async () => {
+    mockApi.chat.mockResolvedValue({
+      thread_id: 'thread-1',
+      status: 'requires_approval',
+      approvals: [
+        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+      ],
+    })
+    mockApi.approve.mockResolvedValue({
+      thread_id: 'thread-1',
+      status: 'completed',
+      message: 'Done.',
+      approvals: [],
+    })
+
+    const { result } = renderHook(() => useChat('thread-1'))
+
+    await act(async () => {
+      await result.current.send('What time?')
+    })
+
+    await act(async () => {
+      await result.current.approve('a1')
+    })
+
+    const toolCallMsg = result.current.messages.find(
+      (m) => m.role === 'tool_call',
+    )
+    expect(toolCallMsg?.approvalStatus).toBe('approved')
+  })
+
+  it('deny only marks the targeted tool_call as denied, not all', async () => {
+    mockApi.chat.mockResolvedValue({
+      thread_id: 'thread-1',
+      status: 'requires_approval',
+      approvals: [
+        { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+      ],
+    })
+    mockApi.approve.mockResolvedValue({
+      thread_id: 'thread-1',
+      status: 'requires_approval',
+      approvals: [
+        { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+      ],
+    })
+
+    const { result } = renderHook(() => useChat('thread-1'))
+
+    await act(async () => {
+      await result.current.send('Time and weather?')
+    })
+
+    // Two tool_call messages should exist
+    const toolCalls = result.current.messages.filter((m) => m.role === 'tool_call')
+    expect(toolCalls).toHaveLength(2)
+
+    await act(async () => {
+      await result.current.deny('a1')
+    })
+
+    const updatedToolCalls = result.current.messages.filter((m) => m.role === 'tool_call')
+    const denied = updatedToolCalls.find((m) => m.approvalId === 'a1')
+    const stillPending = updatedToolCalls.find((m) => m.approvalId === 'a2')
+    expect(denied?.approvalStatus).toBe('denied')
+    expect(stillPending?.approvalStatus).toBe('pending')
+  })
+
+  it('clearError resets error state', async () => {
+    mockApi.chat.mockRejectedValue(new Error('Network error'))
+
+    const { result } = renderHook(() => useChat('thread-1'))
+
+    await act(async () => {
+      await result.current.send('Hi')
+    })
+
+    expect(result.current.error).toBe('Network error')
+
+    act(() => {
+      result.current.clearError()
+    })
+
+    expect(result.current.error).toBeNull()
+  })
+
   it('dismissApproval removes the approval', async () => {
     mockApi.chat.mockResolvedValue({
       thread_id: 'thread-1',

@@ -5,6 +5,7 @@ export interface Message {
   id: string
   role: 'user' | 'assistant' | 'tool_call'
   content: string
+  approvalId?: string
   approvalStatus?: 'pending' | 'approved' | 'denied'
 }
 
@@ -30,6 +31,7 @@ export function useChat(threadId: string) {
         id: String(Date.now() + Math.random()),
         role: 'tool_call' as const,
         content: approval.name,
+        approvalId: approval.approval_id,
         approvalStatus: 'pending' as const,
       }))
       setMessages((prev) => [...prev, ...toolMessages])
@@ -58,6 +60,13 @@ export function useChat(threadId: string) {
       setError(null)
       setLoading(true)
       setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.approvalId === approvalId
+            ? { ...m, approvalStatus: 'approved' as const }
+            : m,
+        ),
+      )
       try {
         const response = await api.approve({
           thread_id: threadId,
@@ -81,7 +90,7 @@ export function useChat(threadId: string) {
       setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
       setMessages((prev) =>
         prev.map((m) =>
-          m.role === 'tool_call' && m.approvalStatus === 'pending'
+          m.approvalId === approvalId
             ? { ...m, approvalStatus: 'denied' as const }
             : m,
         ),
@@ -106,6 +115,10 @@ export function useChat(threadId: string) {
     setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
   }, [])
 
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
+
   return {
     messages,
     pendingApprovals,
@@ -115,5 +128,6 @@ export function useChat(threadId: string) {
     approve,
     deny,
     dismissApproval,
+    clearError,
   }
 }
