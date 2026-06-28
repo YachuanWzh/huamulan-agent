@@ -4,6 +4,7 @@ import sys
 import threading
 from pathlib import Path
 
+import yaml
 from langchain_core.tools import BaseTool
 
 from personal_assistant.skills.base import Skill
@@ -59,10 +60,13 @@ class SkillRegistry:
             name = meta.get("name", skill_dir.name)
             description = meta.get("description") or _first_heading(skill_md)
             triggers = [str(t) for t in meta.get("triggers", []) if t]
-            script_decls = [s for s in meta.get("scripts", []) if isinstance(s, dict) and s.get("name")]
-            # Preserve already-loaded skills if they still exist on disk
+            script_decls = _valid_script_decls(meta.get("scripts", []))
+            mtime_ns = skill_md.stat().st_mtime_ns
+            # Preserve an already-loaded skill only if its SKILL.md is unchanged
+            # since the last scan (same mtime). An edit resets it to unloaded so
+            # the next route_skills picks up new triggers/scripts/instructions.
             existing = self._skills.get(skill_dir.name)
-            if existing and existing.loaded:
+            if existing and existing.loaded and existing.source_mtime_ns == mtime_ns:
                 loaded[skill_dir.name] = existing
             else:
                 loaded[skill_dir.name] = Skill(
@@ -72,6 +76,7 @@ class SkillRegistry:
                     instructions_path=skill_md,
                     triggers=triggers,
                     script_decls=script_decls,
+                    source_mtime_ns=mtime_ns,
                 )
         self._skills = loaded
         return list(loaded.values())
@@ -158,8 +163,7 @@ def _parse_frontmatter(path: Path) -> dict:
     Reads the block between the opening and closing ``---`` delimiters and parses
     it with ``yaml.safe_load`` so nested structures (``triggers`` list,
     ``scripts`` list of dicts) are preserved. Returns an empty dict if no valid
-    frontmatter is found. Falls back to a minimal key:value parser if PyYAML is
-    unavailable.
+    frontmatter is found. PyYAML is a declared dependency.
     """
     try:
         with path.open(encoding="utf-8") as fh:
@@ -174,27 +178,30 @@ def _parse_frontmatter(path: Path) -> dict:
     except (OSError, UnicodeDecodeError):
         return {}
 
-    block = "".join(lines)
-    try:
-        import yaml
-
-        data = yaml.safe_load(block)
-    except ImportError:
-        return _parse_flat_frontmatter(block)
+    data = yaml.safe_load("".join(lines))
     if not isinstance(data, dict):
         return {}
     return data
 
 
-def _parse_flat_frontmatter(block: str) -> dict[str, str]:
-    """Minimal fallback parser: flat ``key: value`` lines only (no nesting)."""
-    meta: dict[str, str] = {}
-    for line in block.splitlines():
-        stripped = line.strip()
-        if ":" in stripped:
-            key, _, value = stripped.partition(":")
-            meta[key.strip()] = value.strip()
-    return meta
+def _valid_script_decls(raw: list) -> list[dict]:
+    """Keep only script declarations with a name and a non-empty list ``command``.
+
+    A common mistake is writing ``command: python scripts/x.py`` (a string).
+    Without validation, ``list(str)`` would silently turn it into a per-character
+    argv and fail cryptically at invoke time. Drop malformed decls instead.
+    """
+    decls: list[dict] = []
+    for entry in raw or []:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("name"):
+            continue
+        command = entry.get("command")
+        if not isinstance(command, list) or not command:
+            continue
+        decls.append(entry)
+    return decls
 
 
 def _first_heading(path: Path) -> str:

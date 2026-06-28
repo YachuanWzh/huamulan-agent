@@ -23,6 +23,7 @@ subprocess contract (argv in, stdout out) matters.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,8 @@ def build_script_tool(decl: dict[str, Any], skill_path: Path) -> StructuredTool:
     command = list(decl.get("command", []))
     params = decl.get("params") or {}
 
+    _validate_placeholders(command)
+
     args_schema = _build_args_schema(name, params)
 
     def _render(argv_args: dict[str, Any]) -> list[str]:
@@ -83,7 +86,9 @@ def build_script_tool(decl: dict[str, Any], skill_path: Path) -> StructuredTool:
         return _execute(_render(argv_args), skill_path)
 
     async def _arun(**argv_args: Any) -> str:
-        return _execute(_render(argv_args), skill_path)
+        # Run the blocking subprocess off the event loop so concurrent agent
+        # work isn't serialized for up to the 30s timeout per script call.
+        return await asyncio.to_thread(_execute, _render(argv_args), skill_path)
 
     return StructuredTool.from_function(
         func=_run,
@@ -118,6 +123,13 @@ def _build_args_schema(tool_name: str, params: dict[str, Any]) -> type:
 
 def _is_placeholder(token: str) -> bool:
     return token.startswith("{") and token.endswith("}") and "{" not in token[1:-1]
+
+
+def _validate_placeholders(command: list[str]) -> None:
+    """Reject empty ``{}`` placeholders at build time (trusted-author typo)."""
+    for token in command:
+        if token == "{}":
+            raise ValueError(f"Empty placeholder in command: {command!r}")
 
 
 def _resolve_interpreter(command: list[str]) -> list[str]:

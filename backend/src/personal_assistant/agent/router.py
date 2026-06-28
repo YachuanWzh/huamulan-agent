@@ -1,3 +1,5 @@
+import re
+
 from langchain_core.messages import SystemMessage
 
 from personal_assistant.agent.state import AgentState
@@ -77,14 +79,16 @@ def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
             if any(_trigger_match(t, normalized) for t in skill.triggers):
                 selected.append(skill.name)
             continue
-        # No explicit triggers: fall back to name + description tokens
+        # No explicit triggers: fall back to name + description tokens.
+        # Match on word boundaries so a token like "for" doesn't fire on
+        # "information" (substring false positive).
         haystack = f"{skill.name}\n{skill.description}".lower()
         tokens = {
             token.strip(".,:;()[]{}#`*_-/")
             for token in haystack.split()
             if len(token.strip(".,:;()[]{}#`*_-/")) >= 3
         }
-        if any(token in normalized for token in tokens):
+        if any(re.search(rf"\b{re.escape(token)}\b", normalized) for token in tokens):
             selected.append(skill.name)
     return selected
 

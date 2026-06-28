@@ -15,6 +15,8 @@ class Skill:
     # Lightweight metadata parsed from frontmatter at scan time (phase 1).
     triggers: list[str] = field(default_factory=list)
     script_decls: list[dict] = field(default_factory=list)
+    # mtime of SKILL.md at scan time — used to detect edits for hot-plug reload.
+    source_mtime_ns: int | None = None
 
     @property
     def loaded(self) -> bool:
