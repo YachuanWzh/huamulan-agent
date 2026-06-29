@@ -107,6 +107,53 @@ describe('useChat', () => {
     expect(finalMsg?.streaming).toBe(false)
   })
 
+  it('streams reasoning into the assistant message and collapses it when answer starts', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'reasoning', content: 'first ' },
+        { type: 'reasoning', content: 'second' },
+        { type: 'token', content: 'Answer' },
+        { type: 'done', status: 'completed', message: 'Answer' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('Hi')
+    })
+
+    const assistant = result.current.messages.find((m) => m.role === 'assistant')!
+    expect(assistant.reasoning).toBe('first second')
+    expect(assistant.reasoningStreaming).toBe(false)
+    expect(assistant.reasoningCollapsed).toBe(true)
+    expect(assistant.content).toBe('Answer')
+  })
+
+  it('toggles a completed reasoning card', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'reasoning', content: 'thinking' },
+        { type: 'done', status: 'completed', message: 'Answer' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('Hi')
+    })
+
+    const assistant = result.current.messages.find((m) => m.role === 'assistant')!
+    expect(assistant.reasoningCollapsed).toBe(true)
+
+    act(() => {
+      result.current.toggleReasoning(assistant.id)
+    })
+
+    expect(result.current.messages.find((m) => m.id === assistant.id)?.reasoningCollapsed).toBe(false)
+  })
+
   it('sets pending approvals on requires_approval', async () => {
     const approvals = [
       { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },

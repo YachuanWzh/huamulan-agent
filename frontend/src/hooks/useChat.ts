@@ -8,6 +8,9 @@ export interface Message {
   approvalId?: string
   approvalStatus?: 'pending' | 'approved' | 'denied'
   streaming?: boolean
+  reasoning?: string
+  reasoningStreaming?: boolean
+  reasoningCollapsed?: boolean
 }
 
 export function useChat(
@@ -47,10 +50,54 @@ export function useChat(
     async (stream: AsyncGenerator<StreamEvent>) => {
       let assistantId = ''
       let buffer = ''
+      let reasoningBuffer = ''
+
+      const ensureAssistantMessage = () => {
+        if (assistantId) return assistantId
+        assistantId = nextId()
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantId,
+            role: 'assistant' as const,
+            content: '',
+          },
+        ])
+        return assistantId
+      }
+
+      const finishReasoning = () => {
+        if (!assistantId || !reasoningBuffer) return
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, reasoningStreaming: false, reasoningCollapsed: true }
+              : m,
+          ),
+        )
+      }
 
       for await (const event of stream) {
         switch (event.type) {
+          case 'reasoning': {
+            const id = ensureAssistantMessage()
+            reasoningBuffer += event.content
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      reasoning: (m.reasoning ?? '') + event.content,
+                      reasoningStreaming: true,
+                      reasoningCollapsed: false,
+                    }
+                  : m,
+              ),
+            )
+            break
+          }
           case 'token': {
+            finishReasoning()
             buffer += event.content
             if (!assistantId) {
               assistantId = nextId()
@@ -75,6 +122,7 @@ export function useChat(
             break
           }
           case 'requires_approval': {
+            finishReasoning()
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
@@ -92,9 +140,18 @@ export function useChat(
             return
           }
           case 'done': {
+            finishReasoning()
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+              )
+            } else if (assistantId && event.message) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? { ...m, content: event.message, streaming: false }
+                    : m,
+                ),
               )
             } else if (!assistantId && event.message) {
               setMessages((prev) => [
@@ -113,6 +170,16 @@ export function useChat(
     },
     [],
   )
+
+  const toggleReasoning = useCallback((messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.reasoning
+          ? { ...m, reasoningCollapsed: !m.reasoningCollapsed }
+          : m,
+      ),
+    )
+  }, [])
 
   const send = useCallback(
     async (text: string) => {
@@ -214,5 +281,6 @@ export function useChat(
     dismissApproval,
     clearError,
     cancel,
+    toggleReasoning,
   }
 }

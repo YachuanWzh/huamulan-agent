@@ -26,11 +26,16 @@ export function ChatPanel({
     approve,
     deny,
     clearError,
+    toggleReasoning,
   } = useChat(threadId, onThreadCreated, replayState)
 
   return (
     <div className="chat-panel">
-      <MessageList messages={messages} loading={loading} />
+      <MessageList
+        messages={messages}
+        loading={loading}
+        onToggleReasoning={toggleReasoning}
+      />
       {error && (
         <div className="error-banner">
           <span>{error}</span>

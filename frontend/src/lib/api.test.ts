@@ -101,6 +101,26 @@ describe('api', () => {
       expect(results[2]).toEqual({ type: 'done', status: 'completed', message: 'Hello world' })
     })
 
+    it('yields reasoning events from SSE stream', async () => {
+      const events: StreamEvent[] = [
+        { type: 'reasoning', content: 'thinking' },
+        { type: 'token', content: 'answer' },
+        { type: 'done', status: 'completed', message: 'answer' },
+      ]
+      server.use(
+        http.post(`${BASE}/api/chat/stream`, () =>
+          new HttpResponse(sseBody(events), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+        ),
+      )
+      const results: StreamEvent[] = []
+      for await (const e of api.chatStream({ thread_id: 't1', message: 'Hi' })) {
+        results.push(e)
+      }
+      expect(results[0]).toEqual({ type: 'reasoning', content: 'thinking' })
+    })
+
     it('yields requires_approval event', async () => {
       const events: StreamEvent[] = [
         { type: 'requires_approval', approvals: [

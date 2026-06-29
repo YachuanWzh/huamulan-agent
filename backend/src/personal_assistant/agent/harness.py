@@ -69,6 +69,8 @@ _TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
     ("ssh_key_modification", "HIGH", "Tool command may modify SSH keys.", r"(?is)(?:\.ssh[/\\]|authorized_keys|id_rsa|id_ed25519)"),
 )
 
+_REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
+
 
 class AgentHarness:
     def __init__(self, settings: Settings, registry: SkillRegistry, memory: PostgresMemory):
@@ -168,6 +170,9 @@ class AgentHarness:
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
+                    reasoning = _extract_reasoning_content(chunk)
+                    if reasoning:
+                        yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
 
@@ -213,6 +218,9 @@ class AgentHarness:
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
+                    reasoning = _extract_reasoning_content(chunk)
+                    if reasoning:
+                        yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
 
@@ -267,6 +275,18 @@ def guard_tool_call(tool_name: str, args: Any) -> None:
     match = scan_tool_guard(tool_name, args)
     if match:
         raise SecurityError(f"{match.category}: {match.reason}")
+
+
+def _extract_reasoning_content(chunk: Any) -> str:
+    for source_name in ("additional_kwargs", "response_metadata"):
+        source = getattr(chunk, source_name, None)
+        if not isinstance(source, dict):
+            continue
+        for key in _REASONING_KEYS:
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return ""
 
 
 async def _record_audit(memory: Any, event: AuditEventCreate) -> None:

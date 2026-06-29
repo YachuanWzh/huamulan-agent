@@ -87,6 +87,11 @@ export interface StreamToken {
   content: string
 }
 
+export interface StreamReasoning {
+  type: 'reasoning'
+  content: string
+}
+
 export interface StreamRequiresApproval {
   type: 'requires_approval'
   approvals: ToolCallApproval[]
@@ -103,7 +108,12 @@ export interface StreamError {
   message: string
 }
 
-export type StreamEvent = StreamToken | StreamRequiresApproval | StreamDone | StreamError
+export type StreamEvent =
+  | StreamToken
+  | StreamReasoning
+  | StreamRequiresApproval
+  | StreamDone
+  | StreamError
 
 // --- API client ---
 

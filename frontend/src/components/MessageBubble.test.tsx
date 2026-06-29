@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MessageBubble } from './MessageBubble'
 
 describe('MessageBubble', () => {
@@ -44,7 +45,7 @@ describe('MessageBubble', () => {
   it('shows typewriter cursor when streaming', () => {
     render(<MessageBubble role="assistant" content="typing..." streaming={true} />)
     expect(screen.getByTestId('typewriter-cursor')).toBeInTheDocument()
-    expect(screen.getByText('typing…')).toBeInTheDocument()
+    expect(screen.getAllByText('typing...').length).toBeGreaterThan(0)
   })
 
   it('does not show typewriter cursor when not streaming', () => {
@@ -55,5 +56,46 @@ describe('MessageBubble', () => {
   it('does not show typewriter cursor when streaming is false', () => {
     render(<MessageBubble role="assistant" content="done" streaming={false} />)
     expect(screen.queryByTestId('typewriter-cursor')).not.toBeInTheDocument()
+  })
+
+  it('renders completed reasoning collapsed by default and expands on click', async () => {
+    const user = userEvent.setup()
+    let toggled = false
+    render(
+      <MessageBubble
+        id="m1"
+        role="assistant"
+        content="Answer"
+        reasoning="Hidden thought"
+        reasoningCollapsed={true}
+        onToggleReasoning={() => {
+          toggled = true
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: /thinking complete/i })).toBeInTheDocument()
+    expect(screen.queryByText('Hidden thought')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /thinking complete/i }))
+
+    expect(toggled).toBe(true)
+  })
+
+  it('renders streaming reasoning expanded', () => {
+    render(
+      <MessageBubble
+        id="m1"
+        role="assistant"
+        content=""
+        reasoning="Working it out"
+        reasoningStreaming={true}
+        reasoningCollapsed={false}
+        onToggleReasoning={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Working it out')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument()
   })
 })

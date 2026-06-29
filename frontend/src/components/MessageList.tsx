@@ -5,9 +5,10 @@ import type { Message } from '../hooks/useChat'
 interface Props {
   messages: Message[]
   loading?: boolean
+  onToggleReasoning?: (messageId: string) => void
 }
 
-export function MessageList({ messages, loading }: Props) {
+export function MessageList({ messages, loading, onToggleReasoning }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -22,10 +23,15 @@ export function MessageList({ messages, loading }: Props) {
       {messages.map((msg) => (
         <MessageBubble
           key={msg.id}
+          id={msg.id}
           role={msg.role}
           content={msg.content}
           approvalStatus={msg.approvalStatus}
           streaming={msg.streaming}
+          reasoning={msg.reasoning}
+          reasoningStreaming={msg.reasoningStreaming}
+          reasoningCollapsed={msg.reasoningCollapsed}
+          onToggleReasoning={onToggleReasoning}
         />
       ))}
       {loading && (
