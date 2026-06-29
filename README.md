@@ -85,10 +85,10 @@ flowchart LR
 
 ```powershell
 cd backend
+cp .env.example .env                # 复制并编辑 .env，填入实际配置
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
-$env:OPENAI_API_KEY="sk-..."        # DeepSeek 或 OpenAI API Key
 uvicorn personal_assistant.api.server:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -109,15 +109,27 @@ postgresql://user:password@host:5432/dbname?sslmode=disable
 
 ## 环境变量
 
+项目根目录下有 `.env.example` 文件（[backend](backend/.env.example) / [frontend](frontend/.env.example)），
+复制为 `.env` 后按需修改即可使用。
+
+### 后端
+
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `DATABASE_URL` | 必填，无默认值 | PostgreSQL 连接串 |
-| `OPENAI_API_KEY` | - | API 密钥（兼容 OpenAI/DeepSeek） |
-| `LLM_BASE_URL` | DeepSeek 默认 | LLM API 地址 |
-| `LLM_MODEL` | `gpt-4.1-mini` | 模型名称 |
-| `LLM_TEMPERATURE` | `0.2` | 生成温度 |
-| `SKILLS_DIR` | `skills/` | Skill 目录 |
-| `ASSISTANT_WORKSPACE_DIR` | 当前目录 | 工具沙箱根目录 |
+| `DATABASE_URL` | 必填，无默认值 | PostgreSQL 连接串（checkpoint + 审计日志） |
+| `OPENAI_API_KEY` | 必填，无默认值 | API 密钥（兼容 OpenAI/DeepSeek） |
+| `LLM_BASE_URL` | 必填，无默认值 | LLM API 地址（如 `https://api.deepseek.com`） |
+| `LLM_MODEL` | 必填，无默认值 | 模型名称（如 `deepseek-v4-pro`） |
+| `LLM_TEMPERATURE` | `0.2` | 生成温度（0.0–2.0） |
+| `SKILLS_DIR` | `<backend>/skills/` | Skill 定义目录 |
+| `ASSISTANT_WORKSPACE_DIR` | 当前工作目录 | 工具沙箱根目录 |
+| `CORS_ORIGINS` | `["http://localhost:5173"]` | 允许跨域的浏览器来源（JSON 数组） |
+
+### 前端（Vite）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VITE_API_TARGET` | `http://localhost:8000` | 开发服务器 API 代理目标 |
 
 ## Skill 开发
 
