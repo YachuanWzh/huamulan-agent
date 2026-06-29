@@ -143,6 +143,28 @@ _TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
 _REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
 
 
+def _merge_callbacks(
+    config: dict[str, Any],
+    harness_callbacks: list[Any],
+    thread_id: str,
+    request_callbacks: list[Any] | None = None,
+) -> None:
+    """Merge harness-level and per-request callbacks into the LangChain config.
+
+    Only adds the ``callbacks`` key and ``langfuse_session_id`` metadata
+    when at least one callback is present — keeping the config clean when
+    observability is not configured.
+    """
+    combined = list(harness_callbacks)
+    if request_callbacks:
+        combined.extend(request_callbacks)
+    if not combined:
+        return
+    config["callbacks"] = combined
+    config.setdefault("metadata", {})
+    config["metadata"]["langfuse_session_id"] = thread_id
+
+
 class AgentHarness:
     def __init__(
         self,
@@ -150,11 +172,13 @@ class AgentHarness:
         registry: SkillRegistry,
         memory: PostgresMemory,
         hook_manager: AgentHookManager | None = None,
+        callbacks: list[Any] | None = None,
     ):
         self.settings = settings
         self.registry = registry
         self.memory = memory
         self.hook_manager = hook_manager
+        self.callbacks = list(callbacks or [])
         self.decisions: dict[str, bool] = {}
 
     async def run_user_turn(
@@ -162,6 +186,7 @@ class AgentHarness:
         thread_id: str,
         message: str,
         llm_config: LLMConfig | None = None,
+        callbacks: list[Any] | None = None,
     ) -> ChatResponse:
         match = scan_prompt_guard(message)
         if match:
@@ -183,9 +208,11 @@ class AgentHarness:
                 message=_PROMPT_GUARD_MESSAGE,
             )
         app = self._compile(llm_config)
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         result = await app.ainvoke(
             {"messages": [HumanMessage(content=message)]},
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
         )
         return _to_response(thread_id, result)
 
@@ -195,6 +222,7 @@ class AgentHarness:
         approval_id: str,
         approved: bool,
         llm_config: LLMConfig | None = None,
+        callbacks: list[Any] | None = None,
     ) -> ChatResponse:
         self.decisions[approval_id] = approved
         await _record_tool_approval_decision(
@@ -204,9 +232,11 @@ class AgentHarness:
             approved,
         )
         app = self._compile(llm_config)
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         result = await app.ainvoke(
             {},
-            config={"configurable": {"thread_id": thread_id}},
+            config=config,
         )
         return _to_response(thread_id, result)
 
