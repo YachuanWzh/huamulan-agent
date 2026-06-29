@@ -11,7 +11,7 @@ class FailingStreamApp:
 
 class FailingHarness(AgentHarness):
     def __init__(self) -> None:
-        pass
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         return FailingStreamApp()
@@ -20,6 +20,7 @@ class FailingHarness(AgentHarness):
 class FailingCompileHarness(AgentHarness):
     def __init__(self) -> None:
         self.decisions = {}
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         raise RuntimeError("Missing credentials")
@@ -56,6 +57,7 @@ class ReasoningStreamApp:
 class ReasoningHarness(AgentHarness):
     def __init__(self, chunks: list[FakeChunk]) -> None:
         self.chunks = chunks
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         return ReasoningStreamApp(self.chunks)
@@ -80,6 +82,7 @@ class ToolResultStreamApp:
 class ToolResultHarness(AgentHarness):
     def __init__(self) -> None:
         self.decisions = {}
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         return ToolResultStreamApp()
@@ -118,6 +121,7 @@ class AuditMemory:
 class PendingApprovalHarness(AgentHarness):
     def __init__(self) -> None:
         self.memory = AuditMemory()
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         return PendingApprovalStreamApp()

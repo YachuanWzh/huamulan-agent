@@ -235,3 +235,114 @@ async def test_resume_after_approval_injects_callbacks() -> None:
     call_config = mock_app.ainvoke.call_args.kwargs.get("config", {})
     assert "callbacks" in call_config
     assert mock_callback in call_config["callbacks"]
+
+
+# ── Streaming callback injection tests ────────────────────────────────────────
+
+
+async def _consume_stream(stream):
+    """Helper: fully consume an async generator."""
+    async for _ in stream:
+        pass
+
+
+async def test_run_user_turn_stream_injects_callbacks() -> None:
+    """Streaming calls pass callbacks to astream_events config."""
+    mock_callback = MagicMock()
+    mock_state = MagicMock()
+    mock_state.values = {}
+
+    configs_seen = []
+
+    async def spy_astream(*args, **kwargs):
+        configs_seen.append(kwargs.get("config", {}))
+        yield {"event": "on_chain_end", "data": {}}
+
+    mock_app = MagicMock()
+    mock_app.astream_events = spy_astream
+    mock_app.aget_state = AsyncMock(return_value=mock_state)
+
+    harness = AgentHarness(
+        settings=_make_harness_settings(),
+        registry=MagicMock(),
+        memory=MagicMock(),
+        callbacks=[mock_callback],
+    )
+
+    with patch.object(harness, "_compile", return_value=mock_app):
+        await _consume_stream(
+            harness.run_user_turn_stream("thread-abc", "hello")
+        )
+
+    assert len(configs_seen) == 1
+    call_config = configs_seen[0]
+    assert "callbacks" in call_config
+    assert mock_callback in call_config["callbacks"]
+    assert "metadata" in call_config
+    assert call_config["metadata"]["langfuse_session_id"] == "thread-abc"
+
+
+async def test_resume_after_approval_stream_injects_callbacks() -> None:
+    """Streaming approval resume passes callbacks to astream_events."""
+    mock_callback = MagicMock()
+    mock_state = MagicMock()
+    mock_state.values = {}
+
+    configs_seen = []
+
+    async def spy_astream(*args, **kwargs):
+        configs_seen.append(kwargs.get("config", {}))
+        yield {"event": "on_chain_end", "data": {}}
+
+    mock_app = MagicMock()
+    mock_app.astream_events = spy_astream
+    mock_app.aget_state = AsyncMock(return_value=mock_state)
+
+    harness = AgentHarness(
+        settings=_make_harness_settings(),
+        registry=MagicMock(),
+        memory=MagicMock(),
+        callbacks=[mock_callback],
+    )
+    harness.memory = MagicMock()
+
+    with patch.object(harness, "_compile", return_value=mock_app):
+        await _consume_stream(
+            harness.resume_after_approval_stream("thread-xyz", "approval-1", True)
+        )
+
+    assert len(configs_seen) == 1
+    call_config = configs_seen[0]
+    assert "callbacks" in call_config
+    assert mock_callback in call_config["callbacks"]
+    assert call_config["metadata"]["langfuse_session_id"] == "thread-xyz"
+
+
+async def test_stream_no_callbacks_leaves_config_clean() -> None:
+    """Without callbacks, streaming config has no callbacks key."""
+    mock_state = MagicMock()
+    mock_state.values = {}
+
+    configs_seen = []
+
+    async def spy_astream(*args, **kwargs):
+        configs_seen.append(kwargs.get("config", {}))
+        yield {"event": "on_chain_end", "data": {}}
+
+    mock_app = MagicMock()
+    mock_app.astream_events = spy_astream
+    mock_app.aget_state = AsyncMock(return_value=mock_state)
+
+    harness = AgentHarness(
+        settings=_make_harness_settings(),
+        registry=MagicMock(),
+        memory=MagicMock(),
+    )
+
+    with patch.object(harness, "_compile", return_value=mock_app):
+        await _consume_stream(
+            harness.run_user_turn_stream("thread-1", "hello")
+        )
+
+    call_config = configs_seen[0]
+    assert "callbacks" not in call_config

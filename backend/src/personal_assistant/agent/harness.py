@@ -260,6 +260,7 @@ class AgentHarness:
         thread_id: str,
         message: str,
         llm_config: LLMConfig | None = None,
+        callbacks: list[Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
         try:
@@ -281,7 +282,8 @@ class AgentHarness:
                 yield "data: [DONE]\n\n"
                 return
             app = self._compile(llm_config)
-            config = {"configurable": {"thread_id": thread_id}}
+            config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+            _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
@@ -328,6 +330,7 @@ class AgentHarness:
         approval_id: str,
         approved: bool,
         llm_config: LLMConfig | None = None,
+        callbacks: list[Any] | None = None,
     ) -> AsyncGenerator[str, None]:
         """Resume after approval with streaming SSE events."""
         self.decisions[approval_id] = approved
@@ -340,7 +343,8 @@ class AgentHarness:
 
         try:
             app = self._compile(llm_config)
-            config = {"configurable": {"thread_id": thread_id}}
+            config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+            _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
                 {},
                 config=config,
