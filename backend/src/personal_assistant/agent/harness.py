@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from personal_assistant.agent.hook import AgentHookManager
 from personal_assistant.agent.state import AgentState
 from personal_assistant.api.schemas import AuditEventCreate, ChatResponse, LLMConfig, ToolCallApproval
 from personal_assistant.config import Settings
@@ -73,10 +74,17 @@ _REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
 
 
 class AgentHarness:
-    def __init__(self, settings: Settings, registry: SkillRegistry, memory: PostgresMemory):
+    def __init__(
+        self,
+        settings: Settings,
+        registry: SkillRegistry,
+        memory: PostgresMemory,
+        hook_manager: AgentHookManager | None = None,
+    ):
         self.settings = settings
         self.registry = registry
         self.memory = memory
+        self.hook_manager = hook_manager
         self.decisions: dict[str, bool] = {}
 
     async def run_user_turn(
@@ -247,12 +255,21 @@ class AgentHarness:
     def _compile(self, llm_config: LLMConfig | None):
         from personal_assistant.agent import agent as agent_module
 
+        if self.hook_manager is None:
+            return agent_module.compile_agent(
+                self.settings,
+                self.registry,
+                self.memory,
+                self.decisions,
+                llm_config,
+            )
         return agent_module.compile_agent(
             self.settings,
             self.registry,
             self.memory,
             self.decisions,
             llm_config,
+            hook_manager=self.hook_manager,
         )
 
 

@@ -10,6 +10,7 @@ from personal_assistant.agent.harness import (
     _sanitize_messages_for_api,
     scan_tool_guard,
 )
+from personal_assistant.agent.hook import AgentHookManager, HookStage, with_hooks
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import build_skill_router
 from personal_assistant.agent.state import AgentState
@@ -25,9 +26,11 @@ def compile_agent(
     memory: PostgresMemory,
     decisions: dict[str, bool],
     llm_config: LLMConfig | None = None,
+    hook_manager: AgentHookManager | None = None,
 ):
     llm = build_llm(settings, llm_config)
     approval_gate = ApprovalGate(decisions)
+    hooks = hook_manager or AgentHookManager()
 
     async def call_agent(state: AgentState) -> AgentState:
         active_tools = list(
@@ -104,10 +107,13 @@ def compile_agent(
         return approval_gate.inspect(state)
 
     graph = StateGraph(AgentState)
-    graph.add_node("route_skills", build_skill_router(registry))
-    graph.add_node("agent", call_agent)
-    graph.add_node("approval", inspect_approval)
-    graph.add_node("tools", execute_tools)
+    graph.add_node(
+        "route_skills",
+        with_hooks(hooks, HookStage.ROUTE_SKILLS, build_skill_router(registry)),
+    )
+    graph.add_node("agent", with_hooks(hooks, HookStage.AGENT, call_agent))
+    graph.add_node("approval", with_hooks(hooks, HookStage.APPROVAL, inspect_approval))
+    graph.add_node("tools", with_hooks(hooks, HookStage.TOOLS, execute_tools))
 
     graph.set_conditional_entry_point(
         _entry_route,
