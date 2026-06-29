@@ -1,5 +1,7 @@
 # LangGraph Personal Assistant
 
+> **Secure LangGraph agent with ReAct loop, human-in-the-loop tool approval, auditable execution, and a hot-pluggable skill system.**
+
 基于 **LangGraph** 的个人助理 Agent 原型系统：React 19 前端 + FastAPI/LangGraph 后端，
 单 ReAct Agent + 工具调用审批 + 渐进式 Skill 系统。
 
