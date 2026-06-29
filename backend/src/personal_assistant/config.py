@@ -17,14 +17,16 @@ class Settings(BaseSettings):
     )
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
     llm_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
-    llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
+    llm_model: str = Field(default=..., alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
     skills_dir: str = Field(default=DEFAULT_SKILLS_DIR, alias="SKILLS_DIR")
     assistant_workspace_dir: str = Field(
         default_factory=lambda: str(Path.cwd()),
         alias="ASSISTANT_WORKSPACE_DIR",
     )
-    cors_origins: list[str] = Field(default=["http://localhost:5173"])
+    cors_origins: list[str] = Field(
+        default=["http://localhost:5173"], alias="CORS_ORIGINS"
+    )
 
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILE,
