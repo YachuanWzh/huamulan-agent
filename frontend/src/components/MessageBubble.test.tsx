@@ -74,10 +74,10 @@ describe('MessageBubble', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /thinking complete/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /completed/i })).toBeInTheDocument()
     expect(screen.queryByText('Hidden thought')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /thinking complete/i }))
+    await user.click(screen.getByRole('button', { name: /completed/i }))
 
     expect(toggled).toBe(true)
   })

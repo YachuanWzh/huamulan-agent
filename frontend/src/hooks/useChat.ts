@@ -132,14 +132,6 @@ export function useChat(
               )
             }
             setPendingApprovals(event.approvals)
-            const toolMessages: Message[] = event.approvals.map((a) => ({
-              id: nextId(),
-              role: 'tool_call' as const,
-              content: a.name,
-              approvalId: a.approval_id,
-              approvalStatus: 'pending' as const,
-            }))
-            setMessages((prev) => [...prev, ...toolMessages])
             return
           }
           case 'tool_result': {

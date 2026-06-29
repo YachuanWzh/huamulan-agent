@@ -50,7 +50,7 @@ export function MessageBubble({
             onClick={() => onToggleReasoning?.(id)}
             aria-expanded={!reasoningCollapsed}
           >
-            <span>{reasoningStreaming ? 'Thinking' : 'Thinking complete'}</span>
+            <span>{reasoningStreaming ? 'Thinking' : 'Completed'}</span>
             <span className="reasoning-toggle">
               {reasoningCollapsed ? 'Show' : 'Hide'}
             </span>

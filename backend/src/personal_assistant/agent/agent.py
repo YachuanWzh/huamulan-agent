@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, ToolMessage
+from pathlib import Path
 
 from personal_assistant.agent.approval import ApprovalGate
 from personal_assistant.agent.harness import (
@@ -18,6 +19,7 @@ from personal_assistant.api.schemas import AuditEventCreate, LLMConfig
 from personal_assistant.config import Settings
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
+from personal_assistant.tools import build_basic_tools
 
 
 def compile_agent(
@@ -31,22 +33,23 @@ def compile_agent(
     llm = build_llm(settings, llm_config)
     approval_gate = ApprovalGate(decisions)
     hooks = hook_manager or AgentHookManager()
+    basic_tools = build_basic_tools(getattr(settings, "assistant_workspace_dir", Path.cwd()))
 
     async def call_agent(state: AgentState) -> AgentState:
-        active_tools = list(
-            registry.tool_map_for_skills(
-                state.get("selected_skills", [])
-            ).values()
+        active_tools = _active_tools_for_state(
+            registry,
+            state.get("selected_skills", []),
+            basic_tools,
         )
         messages = _sanitize_messages_for_api(state["messages"])
         response = await llm.bind_tools(active_tools).ainvoke(messages)
         return {"messages": [response]}
 
     async def execute_tools(state: AgentState, config=None) -> AgentState:
-        active_tools = list(
-            registry.tool_map_for_skills(
-                state.get("selected_skills", [])
-            ).values()
+        active_tools = _active_tools_for_state(
+            registry,
+            state.get("selected_skills", []),
+            basic_tools,
         )
         messages = state.get("messages", [])
         ai_message = _latest_ai_with_tool_calls(messages)
@@ -143,6 +146,12 @@ def _latest_ai_with_tool_calls(messages):
         if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
             return message
     return None
+
+
+def _active_tools_for_state(registry: SkillRegistry, selected_skills: list[str], basic_tools):
+    tool_map = {tool.name: tool for tool in basic_tools}
+    tool_map.update(registry.tool_map_for_skills(selected_skills))
+    return list(tool_map.values())
 
 
 def _replace_ai_tool_calls(message: AIMessage, tool_calls: list[dict]) -> AIMessage:

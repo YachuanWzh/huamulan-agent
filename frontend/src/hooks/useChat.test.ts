@@ -171,12 +171,10 @@ describe('useChat', () => {
     })
 
     expect(result.current.pendingApprovals).toEqual(approvals)
-    // User message + tool call message
-    expect(result.current.messages).toHaveLength(2)
-    expect(result.current.messages[1]!).toMatchObject({
-      role: 'tool_call',
-      content: 'get_time',
-      approvalStatus: 'pending',
+    expect(result.current.messages).toHaveLength(1)
+    expect(result.current.messages[0]!).toMatchObject({
+      role: 'user',
+      content: 'What time is it?',
     })
   })
 
@@ -420,7 +418,7 @@ describe('useChat', () => {
     expect(result.current.loading).toBe(false)
   })
 
-  it('approve updates the specific tool_call message to approved', async () => {
+  it('approve does not create a duplicate pending tool_call message', async () => {
     mockApi.chatStream.mockReturnValue(
       makeStream([
         { type: 'requires_approval', approvals: [
@@ -444,13 +442,10 @@ describe('useChat', () => {
       await result.current.approve('a1')
     })
 
-    const toolCallMsg = result.current.messages.find(
-      (m) => m.role === 'tool_call',
-    )
-    expect(toolCallMsg?.approvalStatus).toBe('approved')
+    expect(result.current.messages.filter((m) => m.role === 'tool_call')).toEqual([])
   })
 
-  it('deny only marks the targeted tool_call as denied, not all', async () => {
+  it('does not append duplicate pending tool_call messages when approvals refresh', async () => {
     mockApi.chatStream.mockReturnValue(
       makeStream([
         { type: 'requires_approval', approvals: [
@@ -473,19 +468,14 @@ describe('useChat', () => {
       await result.current.send('Time and weather?')
     })
 
-    // Two tool_call messages should exist
-    const toolCalls = result.current.messages.filter((m) => m.role === 'tool_call')
-    expect(toolCalls).toHaveLength(2)
-
     await act(async () => {
       await result.current.deny('a1')
     })
 
-    const updatedToolCalls = result.current.messages.filter((m) => m.role === 'tool_call')
-    const denied = updatedToolCalls.find((m) => m.approvalId === 'a1')
-    const stillPending = updatedToolCalls.find((m) => m.approvalId === 'a2')
-    expect(denied?.approvalStatus).toBe('denied')
-    expect(stillPending?.approvalStatus).toBe('pending')
+    expect(result.current.pendingApprovals).toEqual([
+      { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+    ])
+    expect(result.current.messages.filter((m) => m.role === 'tool_call')).toEqual([])
   })
 
   it('clearError resets error state', async () => {
