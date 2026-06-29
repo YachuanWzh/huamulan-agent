@@ -12,7 +12,7 @@ DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
 
 class Settings(BaseSettings):
     database_url: str = Field(
-        default="postgresql://langchain_user:Deartyl0115@192.168.5.7:5432/langchain_db?sslmode=disable",
+        default=...,
         alias="DATABASE_URL",
     )
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
