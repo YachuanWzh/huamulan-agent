@@ -1,8 +1,9 @@
 import json
 import logging
 import re
+from collections import deque
 from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -26,6 +27,75 @@ class GuardMatch:
 
 class SecurityError(RuntimeError):
     pass
+
+
+class ToolCallMiddleware:
+    def pre_tool(self, call: dict[str, Any]) -> ToolMessage | None:
+        return None
+
+
+@dataclass
+class RateLimitMiddleware(ToolCallMiddleware):
+    max_calls_per_tool: int = 50
+    _counts: dict[str, int] = field(default_factory=dict)
+
+    def pre_tool(self, call: dict[str, Any]) -> ToolMessage | None:
+        tool_name = _tool_call_name(call)
+        self._counts[tool_name] = self._counts.get(tool_name, 0) + 1
+        if self._counts[tool_name] <= self.max_calls_per_tool:
+            return None
+        return _blocked_tool_message(
+            call,
+            (
+                f"RateLimitMiddleware blocked tool '{tool_name}': per-request "
+                f"limit is {self.max_calls_per_tool} calls."
+            ),
+        )
+
+
+@dataclass
+class CallLimitMiddleware(ToolCallMiddleware):
+    max_total_calls: int = 20
+    block: bool = True
+    _count: int = 0
+
+    def pre_tool(self, call: dict[str, Any]) -> ToolMessage | None:
+        self._count += 1
+        if not self.block or self._count <= self.max_total_calls:
+            return None
+        return _blocked_tool_message(
+            call,
+            (
+                "CallLimitMiddleware blocked tool call: total tool call limit "
+                f"is {self.max_total_calls}."
+            ),
+        )
+
+
+@dataclass
+class LoopDetectionMiddleware(ToolCallMiddleware):
+    window_size: int = 20
+    max_repeats: int = 15
+    _window: deque[str] = field(default_factory=deque)
+
+    def pre_tool(self, call: dict[str, Any]) -> ToolMessage | None:
+        signature = _tool_call_signature(call)
+        self._window.append(signature)
+        while len(self._window) > self.window_size:
+            self._window.popleft()
+        if sum(1 for item in self._window if item == signature) < self.max_repeats:
+            return None
+        return _blocked_tool_message(
+            call,
+            (
+                "LoopDetectionMiddleware blocked repeated tool call: "
+                f"'{_tool_call_name(call)}' used the same arguments "
+                f"{self.max_repeats} times within the last {self.window_size} tool calls."
+            ),
+        )
+
+
+ToolMiddleware = ToolCallMiddleware | RateLimitMiddleware | CallLimitMiddleware | LoopDetectionMiddleware
 
 
 _PROMPT_GUARD_MESSAGE = "我不能执行这类会绕过系统安全规则的请求。你可以换一种正常业务问题继续。"
@@ -324,6 +394,40 @@ def guard_tool_call(tool_name: str, args: Any) -> None:
         raise SecurityError(f"{match.category}: {match.reason}")
 
 
+def build_default_tool_middlewares() -> list[ToolMiddleware]:
+    return [
+        RateLimitMiddleware(),
+        CallLimitMiddleware(),
+        LoopDetectionMiddleware(),
+    ]
+
+
+async def apply_pre_tool_guards(
+    calls: Sequence[dict[str, Any]],
+    *,
+    memory: Any,
+    thread_id: str | None,
+    middlewares: Sequence[ToolMiddleware],
+) -> tuple[list[dict[str, Any]], list[ToolMessage]]:
+    allowed_calls: list[dict[str, Any]] = []
+    blocked_messages: list[ToolMessage] = []
+
+    for call in calls:
+        security_response = await _pre_tool_security_guard(call, memory, thread_id)
+        if security_response is not None:
+            blocked_messages.append(security_response)
+            continue
+
+        middleware_response = _run_pre_tool_middlewares(call, middlewares)
+        if middleware_response is not None:
+            blocked_messages.append(middleware_response)
+            continue
+
+        allowed_calls.append(call)
+
+    return allowed_calls, blocked_messages
+
+
 def _extract_reasoning_content(chunk: Any) -> str:
     for source_name in ("additional_kwargs", "response_metadata"):
         source = getattr(chunk, source_name, None)
@@ -421,6 +525,71 @@ def _flatten_tool_args(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return " ".join(_flatten_tool_args(item) for item in value)
     return str(value)
+
+
+async def _pre_tool_security_guard(
+    call: dict[str, Any],
+    memory: Any,
+    thread_id: str | None,
+) -> ToolMessage | None:
+    match = scan_tool_guard(_tool_call_name(call), call.get("args", {}))
+    if match is None:
+        return None
+    await _record_audit(
+        memory,
+        AuditEventCreate(
+            thread_id=thread_id,
+            source="tool",
+            category=match.category,
+            severity=match.severity,
+            reason=match.reason,
+            subject=_tool_call_name(call),
+            metadata={
+                "tool_call_id": _tool_call_id(call),
+                "tool_name": _tool_call_name(call),
+                "tool_args": call.get("args", {}),
+                "tool_guard_blocked": True,
+            },
+        ),
+    )
+    return _blocked_tool_message(
+        call,
+        f"SecurityError: {match.category}: {match.reason}",
+    )
+
+
+def _run_pre_tool_middlewares(
+    call: dict[str, Any],
+    middlewares: Sequence[ToolMiddleware],
+) -> ToolMessage | None:
+    for middleware in middlewares:
+        response = middleware.pre_tool(call)
+        if response is not None:
+            return response
+    return None
+
+
+def _blocked_tool_message(call: dict[str, Any], content: str) -> ToolMessage:
+    return ToolMessage(tool_call_id=_tool_call_id(call), content=content)
+
+
+def _tool_call_id(call: dict[str, Any]) -> str:
+    return str(call.get("id") or "")
+
+
+def _tool_call_name(call: dict[str, Any]) -> str:
+    return str(call.get("name") or "tool")
+
+
+def _tool_call_signature(call: dict[str, Any]) -> str:
+    return f"{_tool_call_name(call)}:{_stable_json(call.get('args', {}))}"
+
+
+def _stable_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except TypeError:
+        return str(value)
 
 
 def _sanitize_messages_for_api(

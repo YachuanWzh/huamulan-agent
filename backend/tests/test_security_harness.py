@@ -3,7 +3,10 @@ from fastapi.testclient import TestClient
 
 from personal_assistant.agent.harness import (
     AgentHarness,
+    CallLimitMiddleware,
     GuardMatch,
+    LoopDetectionMiddleware,
+    RateLimitMiddleware,
     SecurityError,
     guard_tool_call,
     scan_prompt_guard,
@@ -108,6 +111,49 @@ def test_guard_tool_call_raises_security_error_with_reason() -> None:
         guard_tool_call("shell", {"command": "dd if=/dev/zero of=/dev/sda"})
 
     assert "disk_format" in str(exc_info.value)
+
+
+def test_rate_limit_middleware_blocks_single_tool_after_configured_request_limit() -> None:
+    middleware = RateLimitMiddleware(max_calls_per_tool=2)
+    call = {"id": "call-1", "name": "search", "args": {"query": "docs"}}
+
+    assert middleware.pre_tool(call) is None
+    assert middleware.pre_tool(call) is None
+    response = middleware.pre_tool(call)
+
+    assert response is not None
+    assert response.tool_call_id == "call-1"
+    assert "RateLimitMiddleware" in response.content
+    assert "search" in response.content
+
+
+def test_call_limit_middleware_blocks_total_tool_calls_after_configured_limit() -> None:
+    middleware = CallLimitMiddleware(max_total_calls=3)
+
+    assert middleware.pre_tool({"id": "call-1", "name": "search", "args": {}}) is None
+    assert middleware.pre_tool({"id": "call-2", "name": "read_file", "args": {}}) is None
+    assert middleware.pre_tool({"id": "call-3", "name": "write_file", "args": {}}) is None
+    response = middleware.pre_tool({"id": "call-4", "name": "shell_command", "args": {}})
+
+    assert response is not None
+    assert response.tool_call_id == "call-4"
+    assert "CallLimitMiddleware" in response.content
+    assert "total tool call limit" in response.content
+
+
+def test_loop_detection_middleware_blocks_repeated_tool_and_args_in_sliding_window() -> None:
+    middleware = LoopDetectionMiddleware(window_size=4, max_repeats=3)
+    repeated = {"name": "search", "args": {"query": "same", "limit": 5}}
+
+    assert middleware.pre_tool({"id": "call-1", **repeated}) is None
+    assert middleware.pre_tool({"id": "call-2", "name": "search", "args": {"query": "other"}}) is None
+    assert middleware.pre_tool({"id": "call-3", **repeated}) is None
+    response = middleware.pre_tool({"id": "call-4", **repeated})
+
+    assert response is not None
+    assert response.tool_call_id == "call-4"
+    assert "LoopDetectionMiddleware" in response.content
+    assert "repeated tool call" in response.content
 
 
 @pytest.mark.asyncio

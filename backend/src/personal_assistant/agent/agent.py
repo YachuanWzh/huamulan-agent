@@ -1,21 +1,21 @@
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from pathlib import Path
 
 from personal_assistant.agent.approval import ApprovalGate
 from personal_assistant.agent.harness import (
-    _record_audit,
     _approval_route,
     _entry_route,
     _sanitize_messages_for_api,
-    scan_tool_guard,
+    apply_pre_tool_guards,
+    build_default_tool_middlewares,
 )
 from personal_assistant.agent.hook import AgentHookManager, HookStage, with_hooks
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import build_skill_router
 from personal_assistant.agent.state import AgentState
-from personal_assistant.api.schemas import AuditEventCreate, LLMConfig
+from personal_assistant.api.schemas import LLMConfig
 from personal_assistant.config import Settings
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
@@ -34,6 +34,7 @@ def compile_agent(
     approval_gate = ApprovalGate(decisions)
     hooks = hook_manager or AgentHookManager()
     basic_tools = build_basic_tools(getattr(settings, "assistant_workspace_dir", Path.cwd()))
+    tool_middlewares = build_default_tool_middlewares()
 
     async def call_agent(state: AgentState) -> AgentState:
         active_tools = _active_tools_for_state(
@@ -62,36 +63,12 @@ def compile_agent(
             if isinstance(configurable, dict):
                 thread_id = configurable.get("thread_id")
 
-        allowed_calls = []
-        blocked_messages = []
-        for call in ai_message.tool_calls:
-            match = scan_tool_guard(call["name"], call.get("args", {}))
-            if match is None:
-                allowed_calls.append(call)
-                continue
-            await _record_audit(
-                memory,
-                AuditEventCreate(
-                    thread_id=thread_id,
-                    source="tool",
-                    category=match.category,
-                    severity=match.severity,
-                    reason=match.reason,
-                    subject=call["name"],
-                    metadata={
-                        "tool_call_id": call["id"],
-                        "tool_name": call["name"],
-                        "tool_args": call.get("args", {}),
-                        "tool_guard_blocked": True,
-                    },
-                ),
-            )
-            blocked_messages.append(
-                ToolMessage(
-                    tool_call_id=call["id"],
-                    content=f"SecurityError: {match.category}: {match.reason}",
-                )
-            )
+        allowed_calls, blocked_messages = await apply_pre_tool_guards(
+            ai_message.tool_calls,
+            memory=memory,
+            thread_id=thread_id,
+            middlewares=tool_middlewares,
+        )
 
         if not blocked_messages:
             return await ToolNode(active_tools).ainvoke(state)
