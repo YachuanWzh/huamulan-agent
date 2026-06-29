@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default=["http://localhost:5173"], alias="CORS_ORIGINS"
     )
+    langfuse_public_key: str | None = Field(
+        default=None, alias="LANGFUSE_PUBLIC_KEY"
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None, alias="LANGFUSE_SECRET_KEY"
+    )
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com", alias="LANGFUSE_HOST"
+    )
+
+    @computed_field
+    @property
+    def langfuse_enabled(self) -> bool:
+        return bool(self.langfuse_public_key and self.langfuse_secret_key)
 
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILE,
