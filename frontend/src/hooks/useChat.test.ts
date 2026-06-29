@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useChat } from './useChat'
 import * as apiModule from '../lib/api'
-import type { StreamEvent } from '../lib/api'
+import type { ReplayState, StreamEvent } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   api: {
@@ -248,6 +248,42 @@ describe('useChat', () => {
 
     expect(result.current.error).toBe('Network error')
     expect(result.current.loading).toBe(false)
+  })
+
+  it('replaces conversation with replayed checkpoint messages', () => {
+    const { result, rerender } = renderHook(
+      ({ replayState }: { replayState: ReplayState | null }) =>
+        useChat('thread-1', () => 'thread-1', replayState),
+      { initialProps: { replayState: null as ReplayState | null } },
+    )
+
+    rerender({
+      replayState: {
+        checkpoint_id: 'checkpoint-1',
+        parent_checkpoint_id: null,
+        created_at: '2026-06-29T04:00:00+00:00',
+        node: 'agent',
+        values: {
+          selected_skills: ['resolve-time'],
+          pending_approvals: [],
+        },
+        messages: [
+          { role: 'user', content: 'Hi' },
+          { role: 'assistant', content: 'Hello from history' },
+        ],
+        checkpoint: {},
+      },
+    })
+
+    expect(result.current.messages).toMatchObject([
+      { id: 'replay-checkpoint-1-0', role: 'user', content: 'Hi' },
+      {
+        id: 'replay-checkpoint-1-1',
+        role: 'assistant',
+        content: 'Hello from history',
+      },
+    ])
+    expect(result.current.pendingApprovals).toEqual([])
   })
 
   it('sets error when the stream yields an error event', async () => {

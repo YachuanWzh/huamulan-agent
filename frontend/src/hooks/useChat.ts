@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from 'react'
-import { api, type StreamEvent, type ToolCallApproval } from '../lib/api'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { api, type ReplayState, type StreamEvent, type ToolCallApproval } from '../lib/api'
 
 export interface Message {
   id: string
@@ -10,7 +10,11 @@ export interface Message {
   streaming?: boolean
 }
 
-export function useChat(threadId: string | null, ensureThreadId: () => string) {
+export function useChat(
+  threadId: string | null,
+  ensureThreadId: () => string,
+  replayState?: ReplayState | null,
+) {
   const [messages, setMessages] = useState<Message[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<ToolCallApproval[]>([])
   const [loading, setLoading] = useState(false)
@@ -19,6 +23,20 @@ export function useChat(threadId: string | null, ensureThreadId: () => string) {
   const abortRef = useRef<AbortController | null>(null)
 
   const nextId = () => String(++idRef.current)
+
+  useEffect(() => {
+    if (!replayState) return
+    const replayMessages: Message[] = replayState.messages.map((message, index) => ({
+      id: `replay-${replayState.checkpoint_id}-${index}`,
+      role: message.role,
+      content: message.content,
+    }))
+    setMessages(replayMessages)
+    setPendingApprovals(replayState.values.pending_approvals ?? [])
+    setError(null)
+    setLoading(false)
+    idRef.current = replayMessages.length
+  }, [replayState?.checkpoint_id])
 
   const cancel = useCallback(() => {
     abortRef.current?.abort()

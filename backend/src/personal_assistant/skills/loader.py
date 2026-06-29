@@ -62,11 +62,17 @@ class SkillRegistry:
             triggers = [str(t) for t in meta.get("triggers", []) if t]
             script_decls = _valid_script_decls(meta.get("scripts", []))
             mtime_ns = skill_md.stat().st_mtime_ns
+            source_hash = _file_hash(skill_md)
             # Preserve an already-loaded skill only if its SKILL.md is unchanged
-            # since the last scan (same mtime). An edit resets it to unloaded so
-            # the next route_skills picks up new triggers/scripts/instructions.
+            # since the last scan. An edit resets it to unloaded so the next
+            # route_skills picks up new triggers/scripts/instructions.
             existing = self._skills.get(skill_dir.name)
-            if existing and existing.loaded and existing.source_mtime_ns == mtime_ns:
+            if (
+                existing
+                and existing.loaded
+                and existing.source_mtime_ns == mtime_ns
+                and existing.source_hash == source_hash
+            ):
                 loaded[skill_dir.name] = existing
             else:
                 loaded[skill_dir.name] = Skill(
@@ -77,6 +83,7 @@ class SkillRegistry:
                     triggers=triggers,
                     script_decls=script_decls,
                     source_mtime_ns=mtime_ns,
+                    source_hash=source_hash,
                 )
         self._skills = loaded
         return list(loaded.values())
@@ -182,6 +189,10 @@ def _parse_frontmatter(path: Path) -> dict:
     if not isinstance(data, dict):
         return {}
     return data
+
+
+def _file_hash(path: Path) -> str:
+    return hashlib.sha1(path.read_bytes()).hexdigest()
 
 
 def _valid_script_decls(raw: list) -> list[dict]:

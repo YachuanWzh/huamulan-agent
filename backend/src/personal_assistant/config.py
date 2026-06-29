@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 DEFAULT_SKILLS_DIR = str(Path(__file__).resolve().parent / "skills")
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
@@ -20,7 +22,11 @@ class Settings(BaseSettings):
     skills_dir: str = Field(default=DEFAULT_SKILLS_DIR, alias="SKILLS_DIR")
     cors_origins: list[str] = Field(default=["http://localhost:5173"])
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+    model_config = SettingsConfigDict(
+        env_file=DEFAULT_ENV_FILE,
+        extra="ignore",
+        populate_by_name=True,
+    )
 
 
 @lru_cache(maxsize=1)

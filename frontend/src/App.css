@@ -486,10 +486,37 @@ body {
 }
 
 .replay-state summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
   font-size: 0.9rem;
   font-weight: 500;
+}
+
+.replay-state summary button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: white;
+  cursor: pointer;
+}
+
+.replay-state summary button:hover {
+  background: var(--color-bg);
+}
+
+.replay-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 12px 8px;
+  font-size: 0.75rem;
+  color: var(--color-muted);
 }
 
 .replay-state pre {

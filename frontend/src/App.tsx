@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { Sidebar } from './components/Sidebar'
+import type { ReplayState } from './lib/api'
 import './App.css'
 
 function createThreadId() {
@@ -15,10 +16,12 @@ function App() {
     if (stored) return stored
     return null
   })
+  const [replayState, setReplayState] = useState<ReplayState | null>(null)
 
   const handleThreadCreated = () => {
     const id = createThreadId()
     setThreadId(id)
+    setReplayState(null)
     return id
   }
 
@@ -40,8 +43,13 @@ function App() {
           threadId={threadId}
           onThreadCreated={handleThreadCreated}
           onNewConversation={handleThreadCreated}
+          replayState={replayState}
         />
-        <Sidebar threadId={threadId} onThreadCleared={handleThreadCleared} />
+        <Sidebar
+          threadId={threadId}
+          onThreadCleared={handleThreadCleared}
+          onReplayState={setReplayState}
+        />
       </main>
     </div>
   )

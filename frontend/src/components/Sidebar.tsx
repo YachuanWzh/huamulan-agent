@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { api, type SkillInfo, type ReplayResponse } from '../lib/api'
+import { api, type ReplayState, type SkillInfo, type ReplayResponse } from '../lib/api'
 
 interface Props {
   threadId: string | null
   onThreadCleared?: () => void
+  onReplayState?: (state: ReplayState) => void
 }
 
 type Tab = 'skills' | 'history'
 
-export function Sidebar({ threadId, onThreadCleared }: Props) {
+export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
   const [tab, setTab] = useState<Tab>('skills')
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillsLoading, setSkillsLoading] = useState(true)
@@ -155,7 +156,27 @@ export function Sidebar({ threadId, onThreadCleared }: Props) {
               <div className="replay-states">
                 {replay.states.map((state, i) => (
                   <details key={i} className="replay-state">
-                    <summary>State {i + 1}</summary>
+                    <summary>
+                      <span>
+                        Checkpoint {i + 1}
+                        {state.node ? ` · ${state.node}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          onReplayState?.(state)
+                        }}
+                      >
+                        Replay checkpoint {i + 1}
+                      </button>
+                    </summary>
+                    <div className="replay-meta">
+                      {state.created_at && <span>{state.created_at}</span>}
+                      {state.values.selected_skills?.length ? (
+                        <span>Skills: {state.values.selected_skills.join(', ')}</span>
+                      ) : null}
+                    </div>
                     <pre>{JSON.stringify(state, null, 2)}</pre>
                   </details>
                 ))}

@@ -20,6 +20,16 @@ describe('Sidebar', () => {
     vi.clearAllMocks()
   })
 
+  const replayState = {
+    checkpoint_id: 'checkpoint-1',
+    parent_checkpoint_id: null,
+    created_at: '2026-06-29T04:00:00+00:00',
+    node: 'agent',
+    values: {},
+    messages: [{ role: 'user' as const, content: 'Hi' }],
+    checkpoint: {},
+  }
+
   it('renders skills tab by default', () => {
     mockApi.listSkills.mockResolvedValue([])
     render(<Sidebar threadId="t1" />)
@@ -73,7 +83,7 @@ describe('Sidebar', () => {
     mockApi.listSkills.mockResolvedValue([])
     mockApi.replay.mockResolvedValue({
       thread_id: 't1',
-      states: [{ messages: [{ type: 'human', content: 'Hi' }] }],
+      states: [replayState],
     })
 
     const user = userEvent.setup()
@@ -86,11 +96,28 @@ describe('Sidebar', () => {
     })
   })
 
+  it('replays a checkpoint from history', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.replay.mockResolvedValue({
+      thread_id: 't1',
+      states: [replayState],
+    })
+    const onReplayState = vi.fn()
+
+    const user = userEvent.setup()
+    render(<Sidebar threadId="t1" onReplayState={onReplayState} />)
+
+    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(await screen.findByRole('button', { name: /replay checkpoint 1/i }))
+
+    expect(onReplayState).toHaveBeenCalledWith(replayState)
+  })
+
   it('deletes thread history from the history tab', async () => {
     mockApi.listSkills.mockResolvedValue([])
     mockApi.replay.mockResolvedValue({
       thread_id: 't1',
-      states: [{ messages: [{ type: 'human', content: 'Hi' }] }],
+      states: [replayState],
     })
     mockApi.deleteThread.mockResolvedValue({ thread_id: 't1', deleted: true })
 
@@ -124,3 +151,4 @@ describe('Sidebar', () => {
     })
   })
 })
+

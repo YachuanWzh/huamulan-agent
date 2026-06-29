@@ -40,9 +40,27 @@ export interface SkillInfo {
   path: string
 }
 
+export interface ReplayMessage {
+  role: 'user' | 'assistant' | 'tool_call'
+  content: string
+}
+
+export interface ReplayState {
+  checkpoint_id: string
+  parent_checkpoint_id: string | null
+  created_at: string | null
+  node: string | null
+  values: {
+    selected_skills?: string[]
+    pending_approvals?: ToolCallApproval[]
+  }
+  messages: ReplayMessage[]
+  checkpoint: Record<string, unknown>
+}
+
 export interface ReplayResponse {
   thread_id: string
-  states: Record<string, unknown>[]
+  states: ReplayState[]
 }
 
 export interface DeleteThreadResponse {

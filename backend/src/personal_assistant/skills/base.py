@@ -17,6 +17,7 @@ class Skill:
     script_decls: list[dict] = field(default_factory=list)
     # mtime of SKILL.md at scan time — used to detect edits for hot-plug reload.
     source_mtime_ns: int | None = None
+    source_hash: str | None = None
 
     @property
     def loaded(self) -> bool:

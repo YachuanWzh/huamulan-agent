@@ -3,12 +3,7 @@ from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode
 
-from personal_assistant.agent.approval import ApprovalGate
-from personal_assistant.agent.llm import build_llm
-from personal_assistant.agent.router import build_skill_router
 from personal_assistant.agent.state import AgentState
 from personal_assistant.api.schemas import ChatResponse, LLMConfig, ToolCallApproval
 from personal_assistant.config import Settings
@@ -64,10 +59,9 @@ class AgentHarness:
         llm_config: LLMConfig | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
-        app = self._compile(llm_config)
-        config = {"configurable": {"thread_id": thread_id}}
-
         try:
+            app = self._compile(llm_config)
+            config = {"configurable": {"thread_id": thread_id}}
             async for event in app.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
@@ -109,10 +103,10 @@ class AgentHarness:
     ) -> AsyncGenerator[str, None]:
         """Resume after approval with streaming SSE events."""
         self.decisions[approval_id] = approved
-        app = self._compile(llm_config)
-        config = {"configurable": {"thread_id": thread_id}}
 
         try:
+            app = self._compile(llm_config)
+            config = {"configurable": {"thread_id": thread_id}}
             async for event in app.astream_events(
                 {},
                 config=config,
@@ -145,65 +139,15 @@ class AgentHarness:
         yield "data: [DONE]\n\n"
 
     def _compile(self, llm_config: LLMConfig | None):
-        llm = build_llm(self.settings, llm_config)
-        approval_gate = ApprovalGate(self.decisions)
+        from personal_assistant.agent import agent as agent_module
 
-        async def call_agent(state: AgentState) -> AgentState:
-            # Dynamically resolve tools from loaded skills (progressive loading)
-            active_tools = list(
-                self.registry.tool_map_for_skills(
-                    state.get("selected_skills", [])
-                ).values()
-            )
-            # Sanitize message history for the API: OpenAI/DeepSeek require
-            # every AIMessage with tool_calls to be followed by corresponding
-            # ToolMessages.  If the graph routing has a bug and routes to
-            # agent before tools execute (e.g. on resume after approval wait),
-            # strip unanswered tool_calls so the API call succeeds instead of
-            # crashing with a cryptic BadRequestError.
-            messages = _sanitize_messages_for_api(state["messages"])
-            response = await llm.bind_tools(active_tools).ainvoke(messages)
-            return {"messages": [response]}
-
-        async def execute_tools(state: AgentState) -> AgentState:
-            # Dynamically create ToolNode with currently loaded tools
-            active_tools = list(
-                self.registry.tool_map_for_skills(
-                    state.get("selected_skills", [])
-                ).values()
-            )
-            return await ToolNode(active_tools).ainvoke(state)
-
-        async def inspect_approval(state: AgentState) -> AgentState:
-            return approval_gate.inspect(state)
-
-        graph = StateGraph(AgentState)
-        graph.add_node("route_skills", build_skill_router(self.registry))
-        graph.add_node("agent", call_agent)
-        graph.add_node("approval", inspect_approval)
-        graph.add_node("tools", execute_tools)
-
-        graph.set_conditional_entry_point(
-            _entry_route,
-            {
-                "route_skills": "route_skills",
-                "approval": "approval",
-            },
+        return agent_module.compile_agent(
+            self.settings,
+            self.registry,
+            self.memory,
+            self.decisions,
+            llm_config,
         )
-        graph.add_edge("route_skills", "agent")
-        graph.add_edge("agent", "approval")
-        graph.add_conditional_edges(
-            "approval",
-            _approval_route,
-            {
-                "wait": END,
-                "tools": "tools",
-                "agent": "agent",
-                "end": END,
-            },
-        )
-        graph.add_edge("tools", "agent")
-        return graph.compile(checkpointer=self.memory.checkpointer)
 
 
 def _sanitize_messages_for_api(

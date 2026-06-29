@@ -2,14 +2,21 @@ import { useChat } from '../hooks/useChat'
 import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { ToolApprovalCard } from './ToolApprovalCard'
+import type { ReplayState } from '../lib/api'
 
 interface Props {
   threadId: string | null
   onThreadCreated: () => string
   onNewConversation: () => void
+  replayState?: ReplayState | null
 }
 
-export function ChatPanel({ threadId, onThreadCreated, onNewConversation }: Props) {
+export function ChatPanel({
+  threadId,
+  onThreadCreated,
+  onNewConversation,
+  replayState,
+}: Props) {
   const {
     messages,
     pendingApprovals,
@@ -19,7 +26,7 @@ export function ChatPanel({ threadId, onThreadCreated, onNewConversation }: Prop
     approve,
     deny,
     clearError,
-  } = useChat(threadId, onThreadCreated)
+  } = useChat(threadId, onThreadCreated, replayState)
 
   return (
     <div className="chat-panel">
