@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.api.schemas import (
     ApprovalDecision,
+    AuditEvent,
     ChatRequest,
     ChatResponse,
     DeleteThreadResponse,
@@ -95,6 +96,11 @@ async def replay(thread_id: str) -> ReplayResponse:
 async def delete_thread(thread_id: str) -> DeleteThreadResponse:
     await harness.delete_thread(thread_id)
     return DeleteThreadResponse(thread_id=thread_id)
+
+
+@app.get("/api/audit-events", response_model=list[AuditEvent])
+async def list_audit_events(thread_id: str | None = None, limit: int = 100) -> list[AuditEvent]:
+    return await harness.list_audit_events(thread_id=thread_id, limit=limit)
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

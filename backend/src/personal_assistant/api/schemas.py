@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -34,6 +35,21 @@ class ChatResponse(BaseModel):
     status: Literal["completed", "requires_approval"]
     message: str | None = None
     approvals: list[ToolCallApproval] = Field(default_factory=list)
+
+
+class AuditEventCreate(BaseModel):
+    thread_id: str | None = None
+    source: Literal["prompt", "tool"]
+    category: str
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    reason: str
+    subject: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditEvent(AuditEventCreate):
+    id: int
+    created_at: datetime
 
 
 class SkillInfo(BaseModel):

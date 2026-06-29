@@ -68,6 +68,18 @@ export interface DeleteThreadResponse {
   deleted: boolean
 }
 
+export interface AuditEvent {
+  id: number
+  created_at: string
+  thread_id: string | null
+  source: 'prompt' | 'tool'
+  category: string
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  reason: string
+  subject: string | null
+  metadata: Record<string, unknown>
+}
+
 // --- SSE Streaming types ---
 
 export interface StreamToken {
@@ -202,6 +214,12 @@ export const api = {
 
   deleteThread: (threadId: string) =>
     request<DeleteThreadResponse>(`/api/threads/${threadId}`, { method: 'DELETE' }),
+
+  listAuditEvents: (threadId?: string) => {
+    const params = new URLSearchParams({ limit: '100' })
+    if (threadId) params.set('thread_id', threadId)
+    return request<AuditEvent[]>(`/api/audit-events?${params.toString()}`)
+  },
 
   listSkills: () => request<SkillInfo[]>('/api/skills'),
 

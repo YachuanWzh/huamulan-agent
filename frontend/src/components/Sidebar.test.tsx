@@ -10,6 +10,7 @@ vi.mock('../lib/api', () => ({
     reloadSkills: vi.fn(),
     replay: vi.fn(),
     deleteThread: vi.fn(),
+    listAuditEvents: vi.fn(),
   },
 }))
 
@@ -35,6 +36,7 @@ describe('Sidebar', () => {
     render(<Sidebar threadId="t1" />)
     expect(screen.getByRole('tab', { name: /skills/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /audit/i })).toBeInTheDocument()
   })
 
   it('displays skills after loading', async () => {
@@ -148,6 +150,34 @@ describe('Sidebar', () => {
     await waitFor(() => {
       expect(mockApi.deleteThread).toHaveBeenCalledWith('t1')
       expect(onThreadCleared).toHaveBeenCalledOnce()
+    })
+  })
+
+  it('shows audit events for the current thread', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.listAuditEvents.mockResolvedValue([
+      {
+        id: 7,
+        created_at: '2026-06-29T04:00:00+00:00',
+        thread_id: 't1',
+        source: 'prompt',
+        category: 'instruction_override',
+        severity: 'HIGH',
+        reason: 'User message attempts to override prior or system instructions.',
+        subject: 'ignore previous instructions',
+        metadata: { prompt_guard_blocked: true },
+      },
+    ])
+
+    const user = userEvent.setup()
+    render(<Sidebar threadId="t1" />)
+
+    await user.click(screen.getByRole('tab', { name: /audit/i }))
+
+    await waitFor(() => {
+      expect(mockApi.listAuditEvents).toHaveBeenCalledWith('t1')
+      expect(screen.getByText('instruction_override')).toBeInTheDocument()
+      expect(screen.getByText('HIGH')).toBeInTheDocument()
     })
   })
 })

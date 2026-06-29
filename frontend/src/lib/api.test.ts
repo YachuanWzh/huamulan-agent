@@ -193,6 +193,35 @@ describe('api', () => {
     })
   })
 
+  describe('listAuditEvents', () => {
+    it('returns audit events for a thread', async () => {
+      server.use(
+        http.get(`${BASE}/api/audit-events`, ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.get('thread_id')).toBe('t1')
+          return HttpResponse.json([
+            {
+              id: 7,
+              created_at: '2026-06-29T04:00:00+00:00',
+              thread_id: 't1',
+              source: 'prompt',
+              category: 'instruction_override',
+              severity: 'HIGH',
+              reason: 'User message attempts to override prior or system instructions.',
+              subject: 'ignore previous instructions',
+              metadata: { prompt_guard_blocked: true },
+            },
+          ])
+        }),
+      )
+
+      const result = await api.listAuditEvents('t1')
+
+      expect(result).toHaveLength(1)
+      expect(result[0]!.category).toBe('instruction_override')
+    })
+  })
+
   describe('listSkills', () => {
     it('returns skills array', async () => {
       server.use(

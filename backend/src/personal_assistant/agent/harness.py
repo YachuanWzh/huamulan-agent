@@ -1,14 +1,73 @@
 import json
+import logging
+import re
 from collections.abc import AsyncGenerator, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from personal_assistant.agent.state import AgentState
-from personal_assistant.api.schemas import ChatResponse, LLMConfig, ToolCallApproval
+from personal_assistant.api.schemas import AuditEventCreate, ChatResponse, LLMConfig, ToolCallApproval
 from personal_assistant.config import Settings
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GuardMatch:
+    category: str
+    severity: str
+    reason: str
+
+
+class SecurityError(RuntimeError):
+    pass
+
+
+_PROMPT_GUARD_MESSAGE = "我不能执行这类会绕过系统安全规则的请求。你可以换一种正常业务问题继续。"
+
+_PROMPT_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "instruction_override",
+        "HIGH",
+        "User message attempts to override prior or system instructions.",
+        r"(?is)(?:\b(?:forget|ignore|disregard)\b.{0,20}\b(?:previous|above|all|system)\b.{0,20}\b(?:instructions?|rules?|prompts?|constraints?)\b|忽略.{0,10}(?:之前|以上|所有|以前).{0,10}(?:指令|指示|设定|规则|命令|约束|限制|要求))",
+    ),
+    (
+        "system_prompt_leak",
+        "HIGH",
+        "User message attempts to reveal hidden system or developer instructions.",
+        r"(?is)(?:\b(?:output|print|show|reveal|repeat|dump)\b.{0,20}\b(?:your|the)\b.{0,10}\b(?:system|developer)\b.{0,10}\b(?:prompt|instructions?)\b|(?:输出|打印|展示|泄露|复述|逐字).{0,10}(?:系统|开发者|角色).{0,10}(?:提示词|指令|设定|规则))",
+    ),
+    (
+        "role_play_jailbreak",
+        "HIGH",
+        "User message attempts to activate a jailbreak role or unsafe mode.",
+        r"(?is)(?:\byou\s+are\s+now\s+(?:dan|developer\s+mode)\b|\benter\s+developer\s+mode\b|你现在是.{0,10}DAN|进入.{0,10}开发者模式)",
+    ),
+    (
+        "identity_spoof",
+        "HIGH",
+        "User message claims privileged identity to bypass policy.",
+        r"(?is)(?:\bi\s+(?:am|have)\b.{0,12}\b(?:root|superuser)\b.{0,12}\b(?:access|privileges?|permissions?)\b|\bi\s+am\s+(?:the\s+)?(?:admin|administrator)\b.{0,12}\b(?:override|bypass|policy|rules?)\b|我是.{0,10}(?:管理员|root|超级用户).{0,10}(?:绕过|无视|覆盖|解除).{0,10}(?:规则|限制|权限|策略))",
+    ),
+)
+
+_TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
+    ("disk_format", "CRITICAL", "Tool command may format or overwrite a disk.", r"(?is)(?:\bmkfs(?:\.\w+)?\b|\bdd\b.{0,80}\bof=/dev/)"),
+    ("fork_bomb", "CRITICAL", "Tool command matches a shell fork bomb.", r"(?s):\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;?\s*:"),
+    ("download_pipe_exec", "CRITICAL", "Tool command downloads content and pipes it to a shell.", r"(?is)\b(?:curl|wget)\b.{0,160}\|.{0,30}\b(?:bash|sh|zsh|powershell|pwsh)\b"),
+    ("reverse_shell", "CRITICAL", "Tool command appears to open a reverse shell.", r"(?is)(?:/dev/tcp/|\bnc\b.{0,80}\s-e\b|\bncat\b.{0,80}\s-e\b)"),
+    ("privilege_escalation", "CRITICAL", "Tool command attempts privilege escalation.", r"(?is)(?:^|[=;&|]\s*)\b(?:sudo|su|doas)\b"),
+    ("delete_or_move_files", "HIGH", "Tool command may delete or move files.", r"(?is)(?:^|[=;&|]\s*)\b(?:rm|del|Remove-Item|mv)\b"),
+    ("shutdown_or_process_control", "HIGH", "Tool command may stop the system or kill processes.", r"(?is)(?:\b(?:shutdown|reboot|Stop-Computer|Restart-Computer|killall|pkill|taskkill)\b|(?:^|[=;&|]\s*)\bkill\b)"),
+    ("scheduled_task_modification", "HIGH", "Tool command may modify scheduled tasks.", r"(?is)\bcrontab\b.{0,40}(?:-e|-r|>)"),
+    ("world_writable_permissions", "HIGH", "Tool command makes files world-writable/executable.", r"(?is)\bchmod\b.{0,40}\b777\b"),
+    ("ssh_key_modification", "HIGH", "Tool command may modify SSH keys.", r"(?is)(?:\.ssh[/\\]|authorized_keys|id_rsa|id_ed25519)"),
+)
 
 
 class AgentHarness:
@@ -24,6 +83,25 @@ class AgentHarness:
         message: str,
         llm_config: LLMConfig | None = None,
     ) -> ChatResponse:
+        match = scan_prompt_guard(message)
+        if match:
+            await _record_audit(
+                self.memory,
+                AuditEventCreate(
+                    thread_id=thread_id,
+                    source="prompt",
+                    category=match.category,
+                    severity=match.severity,
+                    reason=match.reason,
+                    subject=_clip_subject(message),
+                    metadata={"prompt_guard_blocked": True},
+                ),
+            )
+            return ChatResponse(
+                thread_id=thread_id,
+                status="completed",
+                message=_PROMPT_GUARD_MESSAGE,
+            )
         app = self._compile(llm_config)
         result = await app.ainvoke(
             {"messages": [HumanMessage(content=message)]},
@@ -52,6 +130,9 @@ class AgentHarness:
     async def delete_thread(self, thread_id: str) -> None:
         await self.memory.delete_thread(thread_id)
 
+    async def list_audit_events(self, thread_id: str | None = None, limit: int = 100):
+        return await self.memory.list_audit_events(thread_id=thread_id, limit=limit)
+
     async def run_user_turn_stream(
         self,
         thread_id: str,
@@ -60,6 +141,23 @@ class AgentHarness:
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
         try:
+            match = scan_prompt_guard(message)
+            if match:
+                await _record_audit(
+                    self.memory,
+                    AuditEventCreate(
+                        thread_id=thread_id,
+                        source="prompt",
+                        category=match.category,
+                        severity=match.severity,
+                        reason=match.reason,
+                        subject=_clip_subject(message),
+                        metadata={"prompt_guard_blocked": True},
+                    ),
+                )
+                yield _sse_event("done", {"status": "completed", "message": _PROMPT_GUARD_MESSAGE})
+                yield "data: [DONE]\n\n"
+                return
             app = self._compile(llm_config)
             config = {"configurable": {"thread_id": thread_id}}
             async for event in app.astream_events(
@@ -148,6 +246,48 @@ class AgentHarness:
             self.decisions,
             llm_config,
         )
+
+
+def scan_prompt_guard(message: str) -> GuardMatch | None:
+    for category, severity, reason, pattern in _PROMPT_PATTERNS:
+        if re.search(pattern, message):
+            return GuardMatch(category=category, severity=severity, reason=reason)
+    return None
+
+
+def scan_tool_guard(tool_name: str, args: Any) -> GuardMatch | None:
+    haystack = f"{tool_name}\n{_flatten_tool_args(args)}"
+    for category, severity, reason, pattern in _TOOL_PATTERNS:
+        if re.search(pattern, haystack):
+            return GuardMatch(category=category, severity=severity, reason=reason)
+    return None
+
+
+def guard_tool_call(tool_name: str, args: Any) -> None:
+    match = scan_tool_guard(tool_name, args)
+    if match:
+        raise SecurityError(f"{match.category}: {match.reason}")
+
+
+async def _record_audit(memory: Any, event: AuditEventCreate) -> None:
+    try:
+        await memory.record_audit_event(event)
+    except Exception:
+        logger.exception("Failed to record security audit event")
+
+
+def _clip_subject(value: str, limit: int = 500) -> str:
+    return value if len(value) <= limit else f"{value[:limit]}..."
+
+
+def _flatten_tool_args(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return " ".join(f"{key}={_flatten_tool_args(item)}" for key, item in value.items())
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_tool_args(item) for item in value)
+    return str(value)
 
 
 def _sanitize_messages_for_api(

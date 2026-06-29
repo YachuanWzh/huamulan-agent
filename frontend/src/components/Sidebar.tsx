@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type ReplayState, type SkillInfo, type ReplayResponse } from '../lib/api'
+import { api, type AuditEvent, type ReplayState, type SkillInfo, type ReplayResponse } from '../lib/api'
 
 interface Props {
   threadId: string | null
@@ -7,7 +7,7 @@ interface Props {
   onReplayState?: (state: ReplayState) => void
 }
 
-type Tab = 'skills' | 'history'
+type Tab = 'skills' | 'history' | 'audit'
 
 export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
   const [tab, setTab] = useState<Tab>('skills')
@@ -16,6 +16,8 @@ export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
   const [replay, setReplay] = useState<ReplayResponse | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
   const [historyDeleting, setHistoryDeleting] = useState(false)
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
 
   useEffect(() => {
     loadSkills()
@@ -24,6 +26,9 @@ export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
   useEffect(() => {
     if (tab === 'history') {
       loadReplay()
+    }
+    if (tab === 'audit') {
+      loadAuditEvents()
     }
   }, [tab, threadId])
 
@@ -87,6 +92,16 @@ export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
     setHistoryDeleting(false)
   }
 
+  const loadAuditEvents = async () => {
+    setAuditLoading(true)
+    try {
+      setAuditEvents(await api.listAuditEvents(threadId ?? undefined))
+    } catch {
+      setAuditEvents([])
+    }
+    setAuditLoading(false)
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar-tabs">
@@ -105,6 +120,14 @@ export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
           onClick={() => setTab('history')}
         >
           History
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'audit'}
+          className={`tab ${tab === 'audit' ? 'active' : ''}`}
+          onClick={() => setTab('audit')}
+        >
+          Audit
         </button>
       </div>
 
@@ -181,6 +204,39 @@ export function Sidebar({ threadId, onThreadCleared, onReplayState }: Props) {
                   </details>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'audit' && (
+          <div className="audit-panel">
+            <div className="audit-header">
+              <h3>Security Audit</h3>
+              <button onClick={loadAuditEvents} disabled={auditLoading}>
+                Refresh
+              </button>
+            </div>
+            {auditLoading && <div className="loading">Loading...</div>}
+            {!auditLoading && auditEvents.length === 0 && (
+              <div className="empty-state">No audit events for this thread.</div>
+            )}
+            {!auditLoading && auditEvents.length > 0 && (
+              <ul className="audit-list">
+                {auditEvents.map((event) => (
+                  <li key={event.id} className={`audit-item severity-${event.severity.toLowerCase()}`}>
+                    <div className="audit-row">
+                      <span className="audit-category">{event.category}</span>
+                      <span className="audit-severity">{event.severity}</span>
+                    </div>
+                    <div className="audit-reason">{event.reason}</div>
+                    <div className="audit-meta">
+                      <span>{event.source}</span>
+                      {event.created_at && <span>{new Date(event.created_at).toLocaleString()}</span>}
+                    </div>
+                    {event.subject && <div className="audit-subject">{event.subject}</div>}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         )}
