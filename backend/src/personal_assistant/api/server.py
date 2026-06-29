@@ -19,12 +19,19 @@ from personal_assistant.api.schemas import (
 from personal_assistant.config import get_settings
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
+from personal_assistant.tracing import build_langfuse_callback
 
 
 settings = get_settings()
 registry = SkillRegistry(settings.skills_dir)
 memory = PostgresMemory(settings.database_url)
-harness = AgentHarness(settings, registry, memory)
+langfuse_callback = build_langfuse_callback(settings)
+harness = AgentHarness(
+    settings,
+    registry,
+    memory,
+    callbacks=[langfuse_callback] if langfuse_callback else None,
+)
 
 
 @asynccontextmanager
