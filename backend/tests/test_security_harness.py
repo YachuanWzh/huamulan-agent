@@ -28,6 +28,7 @@ class BlockingHarness(AgentHarness):
     def __init__(self) -> None:
         self.memory = FakeMemory()
         self.decisions = {}
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         raise AssertionError("blocked prompt must not compile the agent")
@@ -42,6 +43,7 @@ class ApprovalAuditHarness(AgentHarness):
     def __init__(self) -> None:
         self.memory = FakeMemory()
         self.decisions = {}
+        self.callbacks = []
 
     def _compile(self, _llm_config=None):
         return ApprovalAuditApp()

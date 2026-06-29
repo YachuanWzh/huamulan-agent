@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableConfig
 from pathlib import Path
 
 from personal_assistant.agent.approval import ApprovalGate
@@ -36,17 +37,17 @@ def compile_agent(
     basic_tools = build_basic_tools(getattr(settings, "assistant_workspace_dir", Path.cwd()))
     tool_middlewares = build_default_tool_middlewares()
 
-    async def call_agent(state: AgentState) -> AgentState:
+    async def call_agent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         active_tools = _active_tools_for_state(
             registry,
             state.get("selected_skills", []),
             basic_tools,
         )
         messages = _sanitize_messages_for_api(state["messages"])
-        response = await llm.bind_tools(active_tools).ainvoke(messages)
+        response = await llm.bind_tools(active_tools).ainvoke(messages, config=config)
         return {"messages": [response]}
 
-    async def execute_tools(state: AgentState, config=None) -> AgentState:
+    async def execute_tools(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         active_tools = _active_tools_for_state(
             registry,
             state.get("selected_skills", []),
@@ -55,7 +56,7 @@ def compile_agent(
         messages = state.get("messages", [])
         ai_message = _latest_ai_with_tool_calls(messages)
         if ai_message is None:
-            return await ToolNode(active_tools).ainvoke(state)
+            return await ToolNode(active_tools).ainvoke(state, config=config)
 
         thread_id = None
         if isinstance(config, dict):
@@ -71,7 +72,7 @@ def compile_agent(
         )
 
         if not blocked_messages:
-            return await ToolNode(active_tools).ainvoke(state)
+            return await ToolNode(active_tools).ainvoke(state, config=config)
         if not allowed_calls:
             return {"messages": blocked_messages}
 
@@ -80,7 +81,7 @@ def compile_agent(
             _replace_ai_tool_calls(message, allowed_calls) if message is ai_message else message
             for message in messages
         ]
-        result = await ToolNode(active_tools).ainvoke(guarded_state)
+        result = await ToolNode(active_tools).ainvoke(guarded_state, config=config)
         return {"messages": [*blocked_messages, *result.get("messages", [])]}
 
     async def inspect_approval(state: AgentState) -> AgentState:
