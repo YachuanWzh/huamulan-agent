@@ -235,7 +235,7 @@ class AgentHarness:
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         result = await app.ainvoke(
-            {},
+            {"approval_turn_count": 1},
             config=config,
         )
         return _to_response(thread_id, result)
@@ -290,7 +290,15 @@ class AgentHarness:
                 version="v2",
             ):
                 kind = event["event"]
-                if kind == "on_chat_model_stream":
+                if kind == "on_chain_start":
+                    payload = _compaction_started_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chain_end":
+                    payload = _compaction_completed_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     reasoning = _extract_reasoning_content(chunk)
                     if reasoning:
@@ -346,12 +354,20 @@ class AgentHarness:
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
-                {},
+                {"approval_turn_count": 1},
                 config=config,
                 version="v2",
             ):
                 kind = event["event"]
-                if kind == "on_chat_model_stream":
+                if kind == "on_chain_start":
+                    payload = _compaction_started_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chain_end":
+                    payload = _compaction_completed_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     reasoning = _extract_reasoning_content(chunk)
                     if reasoning:
@@ -559,6 +575,50 @@ def _flatten_tool_args(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return " ".join(_flatten_tool_args(item) for item in value)
     return str(value)
+
+
+def _compaction_started_payload(event: dict[str, Any]) -> dict[str, str] | None:
+    if event.get("name") != "compact_context":
+        return None
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    if not _compaction_input_should_emit(data.get("input")):
+        return None
+    return {"status": "started", "content": "Compacting context"}
+
+
+def _compaction_completed_payload(event: dict[str, Any]) -> dict[str, str] | None:
+    if event.get("name") != "compact_context":
+        return None
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    output = data.get("output")
+    if not isinstance(output, dict) or "messages" not in output:
+        return None
+    return {"status": "completed", "content": "Context compacted"}
+
+
+def _compaction_input_should_emit(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    messages = value.get("messages")
+    if not isinstance(messages, list):
+        return False
+    try:
+        additional_turns = int(value.get("approval_turn_count") or 0)
+    except (TypeError, ValueError):
+        additional_turns = 0
+    human_count = 0
+    token_estimate = 0
+    for message in messages:
+        if isinstance(message, dict):
+            message_type = message.get("type")
+            content = message.get("content", "")
+        else:
+            message_type = getattr(message, "type", None)
+            content = getattr(message, "content", "")
+        if message_type == "human":
+            human_count += 1
+        token_estimate += max(1, len(str(content).split()))
+    return human_count + max(0, additional_turns) > 20 or token_estimate > 900_000
 
 
 async def _pre_tool_security_guard(

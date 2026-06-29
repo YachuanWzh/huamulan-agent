@@ -13,6 +13,7 @@ from personal_assistant.config import Settings
 logger = logging.getLogger(__name__)
 
 try:
+    from langfuse import Langfuse  # type: ignore[import-untyped]
     from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
 
     _LANGFUSE_AVAILABLE = True
@@ -47,6 +48,12 @@ def build_langfuse_callback(
         os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
     if settings.langfuse_host:
         os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_host)
+
+    Langfuse(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_host,
+    )
 
     return CallbackHandler(
         public_key=settings.langfuse_public_key,

@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 class HookStage(str, Enum):
     ROUTE_SKILLS = "route_skills"
+    COMPACT_CONTEXT = "compact_context"
     AGENT = "agent"
+    MEMORY_REFLECTION = "memory_reflection"
     APPROVAL = "approval"
     TOOLS = "tools"
 

@@ -103,6 +103,12 @@ export interface StreamReasoning {
   content: string
 }
 
+export interface StreamCompacting {
+  type: 'compacting'
+  status: 'started' | 'completed'
+  content: string
+}
+
 export interface StreamRequiresApproval {
   type: 'requires_approval'
   approvals: ToolCallApproval[]
@@ -128,6 +134,7 @@ export interface StreamError {
 export type StreamEvent =
   | StreamToken
   | StreamReasoning
+  | StreamCompacting
   | StreamRequiresApproval
   | StreamToolResult
   | StreamDone

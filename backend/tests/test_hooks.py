@@ -57,7 +57,9 @@ def test_default_hook_manager_has_all_necessary_stages():
 
     assert set(manager.stages) == {
         HookStage.ROUTE_SKILLS,
+        HookStage.COMPACT_CONTEXT,
         HookStage.AGENT,
+        HookStage.MEMORY_REFLECTION,
         HookStage.APPROVAL,
         HookStage.TOOLS,
     }
@@ -101,7 +103,14 @@ def test_compile_agent_wraps_necessary_graph_nodes(monkeypatch):
     )
 
     assert result == "compiled"
-    assert set(captured_nodes) == {"route_skills", "agent", "approval", "tools"}
+    assert set(captured_nodes) == {
+        "route_skills",
+        "compact_context",
+        "agent",
+        "memory_reflection",
+        "approval",
+        "tools",
+    }
     assert all(getattr(node, "_hook_stage", None) is not None for node in captured_nodes.values())
     assert captured_nodes["route_skills"]._hook_stage == HookStage.ROUTE_SKILLS
     assert captured_nodes["agent"]._hook_stage == HookStage.AGENT
@@ -147,7 +156,7 @@ async def test_agent_node_propagates_runnable_config_to_llm(monkeypatch):
 
     monkeypatch.setattr(agent_module, "StateGraph", FakeGraph)
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
-    monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace: [])
+    monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
     monkeypatch.setattr(agent_module, "build_skill_router", lambda registry: (lambda state: state))
     monkeypatch.setattr(agent_module, "ToolNode", lambda tools: object())
 

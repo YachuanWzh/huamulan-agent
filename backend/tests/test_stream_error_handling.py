@@ -88,6 +88,43 @@ class ToolResultHarness(AgentHarness):
         return ToolResultStreamApp()
 
 
+class CompactingState:
+    values = {"messages": []}
+
+
+class CompactingStreamApp:
+    async def astream_events(self, *_args, **_kwargs):
+        yield {
+            "event": "on_chain_start",
+            "name": "compact_context",
+            "data": {
+                "input": {
+                    "messages": [
+                        {"type": "human", "content": f"user {index}"}
+                        for index in range(20)
+                    ],
+                    "approval_turn_count": 1,
+                }
+            },
+        }
+        yield {
+            "event": "on_chain_end",
+            "name": "compact_context",
+            "data": {"output": {"messages": ["compacted"]}},
+        }
+
+    async def aget_state(self, *_args, **_kwargs):
+        return CompactingState()
+
+
+class CompactingHarness(AgentHarness):
+    def __init__(self) -> None:
+        self.callbacks = []
+
+    def _compile(self, _llm_config=None):
+        return CompactingStreamApp()
+
+
 class PendingApprovalState:
     values = {
         "pending_approvals": [
@@ -221,6 +258,19 @@ async def test_tool_results_are_sent_as_sse_events() -> None:
         'event: tool_result\ndata: {"name": "resolve_current_time", "content": "2026-06-29 19:30"}\n\n',
         'event: done\ndata: {"status": "completed", "message": ""}\n\n',
         "data: [DONE]\n\n",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_compaction_progress_is_sent_as_sse_events() -> None:
+    chunks = [
+        chunk
+        async for chunk in CompactingHarness().run_user_turn_stream("thread-1", "hello")
+    ]
+
+    assert chunks[:2] == [
+        'event: compacting\ndata: {"status": "started", "content": "Compacting context"}\n\n',
+        'event: compacting\ndata: {"status": "completed", "content": "Context compacted"}\n\n',
     ]
 
 

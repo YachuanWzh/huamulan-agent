@@ -24,6 +24,16 @@ class Settings(BaseSettings):
         default_factory=lambda: str(Path.cwd()),
         alias="ASSISTANT_WORKSPACE_DIR",
     )
+    long_term_memory_dir: str | None = Field(default=None, alias="LONG_TERM_MEMORY_DIR")
+    transcript_dir: str | None = Field(default=None, alias="TRANSCRIPT_DIR")
+    context_compaction_message_count: int = Field(
+        default=20,
+        alias="CONTEXT_COMPACTION_MESSAGE_COUNT",
+    )
+    context_compaction_token_threshold: int = Field(
+        default=1_000_000,
+        alias="CONTEXT_COMPACTION_TOKEN_THRESHOLD",
+    )
     cors_origins: list[str] = Field(
         default=["http://localhost:5173"], alias="CORS_ORIGINS"
     )

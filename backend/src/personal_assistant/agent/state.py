@@ -1,3 +1,4 @@
+import operator
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AnyMessage
@@ -9,3 +10,4 @@ class AgentState(TypedDict, total=False):
     selected_skills: list[str]
     allowed_tools: list[str]
     pending_approvals: list[dict[str, Any]]
+    approval_turn_count: Annotated[int, operator.add]

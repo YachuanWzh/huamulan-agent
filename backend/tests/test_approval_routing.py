@@ -4,9 +4,7 @@ Verifies that the graph correctly handles the resume-after-approval-wait
 scenario without sending unanswered tool_calls to the LLM API.
 """
 
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
 
 from personal_assistant.agent.approval import ApprovalGate
 from personal_assistant.agent.harness import (

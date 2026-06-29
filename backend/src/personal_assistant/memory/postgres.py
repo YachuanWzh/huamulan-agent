@@ -26,6 +26,8 @@ class PostgresMemory:
         self.checkpointer = AsyncPostgresSaver(self.pool)
         await self.checkpointer.setup()
         await self._setup_audit_events()
+        await self._setup_long_term_memories()
+        await self._setup_tool_results()
 
     async def stop(self) -> None:
         if self.pool is not None:
@@ -106,6 +108,63 @@ class PostgresMemory:
                 ),
             )
 
+    async def record_long_term_memory(
+        self,
+        *,
+        slug: str,
+        title: str,
+        summary: str,
+        body: str,
+    ) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO long_term_memories (slug, title, summary, body)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (slug) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    summary = EXCLUDED.summary,
+                    body = EXCLUDED.body,
+                    updated_at = now()
+                """,
+                (slug, title, summary, body),
+            )
+
+    async def record_tool_result(
+        self,
+        *,
+        thread_id: str | None,
+        tool_result_id: str,
+        tool_name: str | None,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO tool_results
+                    (tool_result_id, thread_id, tool_name, content, metadata)
+                VALUES (%s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (tool_result_id) DO UPDATE SET
+                    thread_id = EXCLUDED.thread_id,
+                    tool_name = EXCLUDED.tool_name,
+                    content = EXCLUDED.content,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = now()
+                """,
+                (
+                    tool_result_id,
+                    thread_id,
+                    tool_name,
+                    content,
+                    Jsonb(_jsonable(metadata or {})),
+                ),
+            )
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,
@@ -177,6 +236,47 @@ class PostgresMemory:
                 """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_thread_created
                 ON audit_events (thread_id, created_at DESC)
+                """
+            )
+
+    async def _setup_long_term_memories(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS long_term_memories (
+                    slug TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+
+    async def _setup_tool_results(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tool_results (
+                    tool_result_id TEXT PRIMARY KEY,
+                    thread_id TEXT,
+                    tool_name TEXT,
+                    content TEXT NOT NULL,
+                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tool_results_thread_created
+                ON tool_results (thread_id, created_at DESC)
                 """
             )
 

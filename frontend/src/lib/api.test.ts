@@ -121,6 +121,25 @@ describe('api', () => {
       expect(results[0]).toEqual({ type: 'reasoning', content: 'thinking' })
     })
 
+    it('yields compacting events from SSE stream', async () => {
+      const events: StreamEvent[] = [
+        { type: 'compacting', status: 'started', content: 'Compacting context' },
+        { type: 'compacting', status: 'completed', content: 'Context compacted' },
+      ]
+      server.use(
+        http.post(`${BASE}/api/chat/stream`, () =>
+          new HttpResponse(sseBody(events), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+        ),
+      )
+      const results: StreamEvent[] = []
+      for await (const e of api.chatStream({ thread_id: 't1', message: 'Hi' })) {
+        results.push(e)
+      }
+      expect(results).toEqual(events)
+    })
+
     it('yields requires_approval event', async () => {
       const events: StreamEvent[] = [
         { type: 'requires_approval', approvals: [

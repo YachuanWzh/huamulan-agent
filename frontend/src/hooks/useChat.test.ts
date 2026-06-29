@@ -130,6 +130,28 @@ describe('useChat', () => {
     expect(assistant.content).toBe('Answer')
   })
 
+  it('streams compacting status into the assistant message and collapses it when completed', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'compacting', status: 'started', content: 'Compacting context' },
+        { type: 'compacting', status: 'completed', content: 'Context compacted' },
+        { type: 'done', status: 'completed', message: 'Answer' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('Hi')
+    })
+
+    const assistant = result.current.messages.find((m) => m.role === 'assistant')!
+    expect(assistant.compacting).toBe('Compacting context\nContext compacted')
+    expect(assistant.compactingStreaming).toBe(false)
+    expect(assistant.compactingCollapsed).toBe(true)
+    expect(assistant.content).toBe('Answer')
+  })
+
   it('toggles a completed reasoning card', async () => {
     mockApi.chatStream.mockReturnValue(
       makeStream([

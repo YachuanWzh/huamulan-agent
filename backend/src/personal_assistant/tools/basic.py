@@ -5,12 +5,19 @@ from pathlib import Path
 
 from langchain_core.tools import StructuredTool
 
+from personal_assistant.memory.long_term import LongTermMemoryStore
+
 
 DEFAULT_MAX_READ_BYTES = 200_000
 DEFAULT_MAX_SEARCH_BYTES = 1_000_000
 
 
-def build_basic_tools(workspace_dir: str | Path) -> list[StructuredTool]:
+def build_basic_tools(
+    workspace_dir: str | Path,
+    *,
+    long_term_memory: LongTermMemoryStore | None = None,
+    postgres_memory: object | None = None,
+) -> list[StructuredTool]:
     workspace = Path(workspace_dir).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
 
@@ -119,6 +126,20 @@ def build_basic_tools(workspace_dir: str | Path) -> list[StructuredTool]:
                 break
         return "\n".join(matches)
 
+    async def save_conversation_memory(
+        slug: str,
+        title: str,
+        summary: str,
+        body: str,
+    ) -> str:
+        """Save a user-approved long-term memory."""
+        store = long_term_memory or LongTermMemoryStore(workspace / ".memory")
+        path = store.add_memory(slug=slug, title=title, summary=summary, body=body)
+        record = getattr(postgres_memory, "record_long_term_memory", None)
+        if callable(record):
+            await record(slug=slug, title=title, summary=summary, body=body)
+        return f"saved long-term memory to {_relative(path, workspace)}"
+
     return [
         StructuredTool.from_function(
             shell_command,
@@ -144,6 +165,14 @@ def build_basic_tools(workspace_dir: str | Path) -> list[StructuredTool]:
             search_files,
             name="search_files",
             description="Search file names and UTF-8 text content in the assistant workspace.",
+        ),
+        StructuredTool.from_function(
+            coroutine=save_conversation_memory,
+            name="save_conversation_memory",
+            description=(
+                "Save a user-approved long-term memory. Use only after deciding a "
+                "conversation contains durable user preferences, system facts, or project memory."
+            ),
         ),
     ]
 

@@ -55,3 +55,29 @@ def test_harness_passes_hook_manager_to_compiled_agent(monkeypatch):
             hook_manager,
         )
     ]
+
+
+def test_resume_after_approval_injects_approval_turn_count(monkeypatch):
+    class FakeApp:
+        async def ainvoke(self, state, config=None):
+            calls.append((state, config))
+            return {"messages": []}
+
+    calls = []
+
+    async def fake_record_decision(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "personal_assistant.agent.harness._record_tool_approval_decision",
+        fake_record_decision,
+    )
+
+    harness = AgentHarness(settings="settings", registry="registry", memory="memory")
+    monkeypatch.setattr(harness, "_compile", lambda _llm_config=None: FakeApp())
+
+    import asyncio
+
+    asyncio.run(harness.resume_after_approval("thread-1", "approval-1", True))
+
+    assert calls[0][0]["approval_turn_count"] == 1

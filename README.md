@@ -3,17 +3,23 @@
 > **Secure LangGraph agent with ReAct loop, human-in-the-loop tool approval, auditable execution, and a hot-pluggable skill system.**
 
 基于 **LangGraph** 的个人助理 Agent 原型系统：React 19 前端 + FastAPI/LangGraph 后端，
-单 ReAct Agent + 工具调用审批 + 渐进式 Skill 系统。
+单 ReAct Agent + 工具调用审批 + 渐进式 Skill 系统 + 长短期记忆与上下文压缩。
 
 > 详细技术方案见 [技术方案报告.md](./技术方案报告.md)
 
 ## 功能特性
 
 ### Agent 引擎
-- **ReAct Agent**：LangGraph StateGraph 驱动的推理-行动循环，含 4 个节点（路由/推理/审批/工具）
+- **ReAct Agent**：LangGraph StateGraph 驱动的推理-行动循环，含路由、上下文压缩、推理、记忆反思、审批和工具执行节点
 - **流式响应**：SSE 事件流（token / reasoning / approval / tool_result / done）
 - **推理展示**：DeepSeek thinking 推理过程提取并展示，支持展开/折叠
 - **可配置 LLM**：通过 `LLM_CONFIG` 覆盖 `base_url`、`model`、`api_key`、`temperature`
+
+### 记忆与上下文
+- **长期记忆**：工作区 `.memory/` 维护 `USER.md`、`SYSTEM.md`、`MEMORY.md`，其中 `MEMORY.md` 按“一行一个链接”索引沉淀条目
+- **用户确认沉淀**：会话末尾由 LLM 反思节点判断是否值得保存，只有用户审批 `save_conversation_memory` 后才写入 Markdown 与 PostgreSQL
+- **短期记忆**：继续使用 LangGraph checkpoint 保存线程内消息、审批状态和中间状态
+- **上下文压缩**：上下文阈值为 1M token，超过 90% 或对话超过 20 轮时触发，用户 Approve/Deny 审批点击也计入轮次；保留用户第一条输入、Agent 第一条和最后一条输出，中间替换为摘要；工具结果用 `[tool result can find by tool_result_id: ...]` 引用，并可从 PostgreSQL 反查
 
 ### 安全体系
 - **Prompt Guard**：4 类注入/越狱检测（指令覆盖、系统提示泄露、DAN 越狱、身份伪造）
@@ -37,7 +43,7 @@
 - **工具审批门**：Agent 的所有工具调用需用户 Approve/Deny 后才执行
 - **线程管理**：列出/删除/清空会话线程
 - **Checkpoint 回放**：完整的 LangGraph 状态检查点历史，可回放到任意节点
-- **Hook 扩展**：Agent 生命周期 Hook（route_skills/agent/approval/tools 的 before/after/error 阶段）
+- **Hook 扩展**：Agent 生命周期 Hook（route_skills/compact_context/agent/memory_reflection/approval/tools 的 before/after/error 阶段）
 
 ## 技术栈
 
@@ -46,7 +52,7 @@
 | **前端** | React 19, TypeScript 6, Vite 8, Vitest 4 |
 | **后端** | FastAPI, Uvicorn, Python 3.11 |
 | **Agent** | LangGraph ≥0.2, langchain-deepseek (ChatDeepSeek) |
-| **存储** | PostgreSQL (langgraph-checkpoint-postgres + 审计日志) |
+| **存储** | PostgreSQL (langgraph-checkpoint-postgres + 审计日志 + 长期记忆 + 工具结果) |
 | **工程** | Superharness (TDD + 系统调试 + 代码审查) |
 
 ## 架构概览
@@ -60,8 +66,10 @@ flowchart LR
 
     subgraph Backend["Backend — FastAPI"]
         AH[AgentHarness<br/>Prompt Guard + Tool Guard<br/>+ Middlewares]
-        SG[LangGraph StateGraph<br/>route → LLM → approve → tools]
+        SG[LangGraph StateGraph<br/>route → compact → LLM → memory reflection<br/>→ approve → tools]
         SK[SkillRegistry<br/>渐进加载 + 热插拔]
+        LT[LongTermMemoryStore<br/>.memory/USER.md + SYSTEM.md + MEMORY.md]
+        CT[ContextCompactor<br/>.transcripts/*.jsonl + LLM summary]
     end
 
     subgraph DB["PostgreSQL"]
@@ -69,10 +77,14 @@ flowchart LR
         CW[checkpoint_writes]
         CB[checkpoint_blobs]
         AE[audit_events]
+        LM[long_term_memories]
+        TR[tool_results]
     end
 
     Frontend -->|"HTTP REST + SSE"| Backend
     Backend --> DB
+    SG --> LT
+    SG --> CT
 ```
 
 ## 快速开始
@@ -125,6 +137,10 @@ postgresql://user:password@host:5432/dbname?sslmode=disable
 | `LLM_TEMPERATURE` | `0.2` | 生成温度（0.0–2.0） |
 | `SKILLS_DIR` | `<backend>/skills/` | Skill 定义目录 |
 | `ASSISTANT_WORKSPACE_DIR` | 当前工作目录 | 工具沙箱根目录 |
+| `LONG_TERM_MEMORY_DIR` | `<workspace>/.memory` | 长期记忆 Markdown 文件目录 |
+| `TRANSCRIPT_DIR` | `<workspace>/.transcripts` | 上下文压缩前完整 transcript JSONL 存储目录 |
+| `CONTEXT_COMPACTION_MESSAGE_COUNT` | `20` | 触发上下文压缩的用户对话轮数，含 Approve/Deny 审批点击 |
+| `CONTEXT_COMPACTION_TOKEN_THRESHOLD` | `1000000` | 上下文 token 阈值；超过 90% 时触发压缩 |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | 允许跨域的浏览器来源（JSON 数组） |
 
 ### 前端（Vite）
@@ -194,10 +210,10 @@ npm test
 backend/src/personal_assistant/
 ├── agent/        # Agent 引擎（图编译、安全、Hook、LLM、路由、审批）
 ├── api/          # FastAPI 服务器 + 数据模型
-├── memory/       # PostgreSQL Checkpoint + 审计日志
+├── memory/       # PostgreSQL Checkpoint + 审计日志 + 长期记忆 + 上下文压缩
 ├── skills/       # Skill 系统（渐进加载、脚本工具、热插拔）
 │   └── resolve-time/  # 内置日期时间解析 Skill
-└── tools/        # 基础工具（Shell/文件操作）
+└── tools/        # 基础工具（Shell/文件操作/长期记忆保存）
 
 frontend/src/
 ├── components/   # React 组件

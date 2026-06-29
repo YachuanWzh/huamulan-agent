@@ -32,6 +32,27 @@ describe('MessageBubble', () => {
     expect(screen.getByText('Denied')).toBeInTheDocument()
   })
 
+  it('collapses tool results by default and expands them into a scrollable panel', async () => {
+    const user = userEvent.setup()
+    const longToolOutput = Array.from({ length: 40 }, (_, index) => {
+      return `C:\\idea\\langgraph-claw\\frontend\\src\\file-${index}.tsx`
+    }).join('\n')
+
+    render(<MessageBubble role="tool_call" content={longToolOutput} approvalStatus="approved" />)
+
+    const toggle = screen.getByRole('button', { name: /tool_result/i })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/file-39\.tsx/)).not.toBeInTheDocument()
+
+    await user.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: /tool_result/i })).toHaveClass(
+      'tool-result-content',
+    )
+    expect(screen.getByText(/file-39\.tsx/)).toBeInTheDocument()
+  })
+
   it('renders role label', () => {
     render(<MessageBubble role="user" content="test" />)
     expect(screen.getByText('You')).toBeInTheDocument()
@@ -97,5 +118,22 @@ describe('MessageBubble', () => {
 
     expect(screen.getByText('Working it out')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument()
+  })
+
+  it('renders streaming compacting expanded', () => {
+    render(
+      <MessageBubble
+        id="m1"
+        role="assistant"
+        content=""
+        compacting="Compacting context"
+        compactingStreaming={true}
+        compactingCollapsed={false}
+        onToggleCompacting={() => {}}
+      />,
+    )
+
+    expect(screen.getByText('Compacting context')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /compacting/i })).toBeInTheDocument()
   })
 })

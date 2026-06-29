@@ -11,6 +11,9 @@ export interface Message {
   reasoning?: string
   reasoningStreaming?: boolean
   reasoningCollapsed?: boolean
+  compacting?: string
+  compactingStreaming?: boolean
+  compactingCollapsed?: boolean
 }
 
 export function useChat(
@@ -36,6 +39,7 @@ export function useChat(
       reasoning: message.reasoning,
       reasoningStreaming: false,
       reasoningCollapsed: message.reasoning ? true : undefined,
+      compactingStreaming: false,
     }))
     setMessages(replayMessages)
     setPendingApprovals(replayState.values.pending_approvals ?? [])
@@ -54,6 +58,7 @@ export function useChat(
       let assistantId = ''
       let buffer = ''
       let reasoningBuffer = ''
+      let compactingBuffer = ''
 
       const ensureAssistantMessage = () => {
         if (assistantId) return assistantId
@@ -80,9 +85,38 @@ export function useChat(
         )
       }
 
+      const finishCompacting = () => {
+        if (!assistantId || !compactingBuffer) return
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, compactingStreaming: false, compactingCollapsed: true }
+              : m,
+          ),
+        )
+      }
+
       for await (const event of stream) {
         switch (event.type) {
+          case 'compacting': {
+            const id = ensureAssistantMessage()
+            compactingBuffer += compactingBuffer ? `\n${event.content}` : event.content
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? {
+                      ...m,
+                      compacting: compactingBuffer,
+                      compactingStreaming: event.status === 'started',
+                      compactingCollapsed: event.status === 'completed',
+                    }
+                  : m,
+              ),
+            )
+            break
+          }
           case 'reasoning': {
+            finishCompacting()
             const id = ensureAssistantMessage()
             reasoningBuffer += event.content
             setMessages((prev) =>
@@ -101,6 +135,7 @@ export function useChat(
           }
           case 'token': {
             finishReasoning()
+            finishCompacting()
             buffer += event.content
             if (!assistantId) {
               assistantId = nextId()
@@ -126,6 +161,7 @@ export function useChat(
           }
           case 'requires_approval': {
             finishReasoning()
+            finishCompacting()
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
@@ -136,6 +172,7 @@ export function useChat(
           }
           case 'tool_result': {
             finishReasoning()
+            finishCompacting()
             setMessages((prev) => {
               const pendingToolIndex = prev.findIndex(
                 (m) =>
@@ -164,6 +201,7 @@ export function useChat(
           }
           case 'done': {
             finishReasoning()
+            finishCompacting()
             if (assistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
@@ -199,6 +237,16 @@ export function useChat(
       prev.map((m) =>
         m.id === messageId && m.reasoning
           ? { ...m, reasoningCollapsed: !m.reasoningCollapsed }
+          : m,
+      ),
+    )
+  }, [])
+
+  const toggleCompacting = useCallback((messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.compacting
+          ? { ...m, compactingCollapsed: !m.compactingCollapsed }
           : m,
       ),
     )
@@ -305,5 +353,6 @@ export function useChat(
     clearError,
     cancel,
     toggleReasoning,
+    toggleCompacting,
   }
 }

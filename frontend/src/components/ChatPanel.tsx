@@ -27,6 +27,7 @@ export function ChatPanel({
     deny,
     clearError,
     toggleReasoning,
+    toggleCompacting,
   } = useChat(threadId, onThreadCreated, replayState)
 
   return (
@@ -35,6 +36,7 @@ export function ChatPanel({
         messages={messages}
         loading={loading}
         onToggleReasoning={toggleReasoning}
+        onToggleCompacting={toggleCompacting}
       />
       {error && (
         <div className="error-banner">

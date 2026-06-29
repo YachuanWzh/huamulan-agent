@@ -29,16 +29,38 @@ def test_build_callback_sets_env_vars_when_enabled() -> None:
     settings.langfuse_host = "https://langfuse.example.com"
 
     with patch.dict("os.environ", {}, clear=True):
-        with patch("personal_assistant.tracing.CallbackHandler") as mock_handler_cls:
-            mock_handler = MagicMock()
-            mock_handler_cls.return_value = mock_handler
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler") as mock_handler_cls:
+                mock_handler = MagicMock()
+                mock_handler_cls.return_value = mock_handler
 
-            result = build_langfuse_callback(settings)
+                result = build_langfuse_callback(settings)
 
-            assert os.environ.get("LANGFUSE_SECRET_KEY") == "sk-test"
-            assert os.environ.get("LANGFUSE_HOST") == "https://langfuse.example.com"
-            mock_handler_cls.assert_called_once_with(public_key="pk-test")
-            assert result is mock_handler
+                assert os.environ.get("LANGFUSE_SECRET_KEY") == "sk-test"
+                assert os.environ.get("LANGFUSE_HOST") == "https://langfuse.example.com"
+                mock_handler_cls.assert_called_once_with(public_key="pk-test")
+                assert result is mock_handler
+
+
+def test_build_callback_initializes_langfuse_client_when_enabled() -> None:
+    """Langfuse 4.x requires a client before CallbackHandler can trace."""
+    from personal_assistant.tracing import build_langfuse_callback
+
+    settings = MagicMock()
+    settings.langfuse_enabled = True
+    settings.langfuse_public_key = "pk-test"
+    settings.langfuse_secret_key = "sk-test"
+    settings.langfuse_host = "https://langfuse.example.com"
+
+    with patch("personal_assistant.tracing.Langfuse") as mock_langfuse_cls:
+        with patch("personal_assistant.tracing.CallbackHandler"):
+            build_langfuse_callback(settings)
+
+    mock_langfuse_cls.assert_called_once_with(
+        public_key="pk-test",
+        secret_key="sk-test",
+        host="https://langfuse.example.com",
+    )
 
 
 def test_build_callback_uses_default_host_when_none() -> None:
@@ -52,10 +74,11 @@ def test_build_callback_uses_default_host_when_none() -> None:
     settings.langfuse_host = "https://cloud.langfuse.com"
 
     with patch.dict("os.environ", {}, clear=True):
-        with patch("personal_assistant.tracing.CallbackHandler") as mock_handler_cls:
-            build_langfuse_callback(settings)
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler"):
+                build_langfuse_callback(settings)
 
-            assert os.environ.get("LANGFUSE_HOST") == "https://cloud.langfuse.com"
+                assert os.environ.get("LANGFUSE_HOST") == "https://cloud.langfuse.com"
 
 
 def test_build_callback_returns_none_when_import_fails() -> None:
@@ -81,11 +104,12 @@ def test_build_callback_does_not_set_env_secret_key_when_none() -> None:
     settings.langfuse_host = "https://cloud.langfuse.com"
 
     with patch.dict("os.environ", {}, clear=True):
-        with patch("personal_assistant.tracing.CallbackHandler") as mock_handler_cls:
-            build_langfuse_callback(settings)
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler"):
+                build_langfuse_callback(settings)
 
-            # Should not set LANGFUSE_SECRET_KEY when it's None
-            assert "LANGFUSE_SECRET_KEY" not in os.environ
+                # Should not set LANGFUSE_SECRET_KEY when it's None
+                assert "LANGFUSE_SECRET_KEY" not in os.environ
 
 
 # ── AgentHarness callback injection tests ────────────────────────────────────

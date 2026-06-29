@@ -1,10 +1,11 @@
 from pathlib import Path
 
+from personal_assistant.memory.long_term import LongTermMemoryStore
 from personal_assistant.tools.basic import build_basic_tools
 
 
-def _tool_map(workspace: Path):
-    return {tool.name: tool for tool in build_basic_tools(workspace)}
+def _tool_map(workspace: Path, **kwargs):
+    return {tool.name: tool for tool in build_basic_tools(workspace, **kwargs)}
 
 
 class TestBasicToolRegistration:
@@ -17,6 +18,7 @@ class TestBasicToolRegistration:
             "write_file",
             "list_directory",
             "search_files",
+            "save_conversation_memory",
         }
 
 
@@ -83,3 +85,24 @@ class TestFileTools:
 
         assert "notes/today.txt" in result
         assert "notes/later.txt" not in result
+
+
+class TestLongTermMemoryTool:
+    async def test_save_conversation_memory_writes_markdown_memory(self, tmp_path: Path):
+        store = LongTermMemoryStore(tmp_path / ".memory")
+        tools = _tool_map(tmp_path, long_term_memory=store)
+
+        result = await tools["save_conversation_memory"].ainvoke(
+            {
+                "slug": "user-prefers-tabs",
+                "title": "user-prefers-tabs",
+                "summary": "User prefers tabs",
+                "body": "User prefers tabs over spaces.",
+            }
+        )
+
+        assert "saved long-term memory" in result
+        assert (tmp_path / ".memory" / "user-prefers-tabs.md").exists()
+        assert "User prefers tabs" in (tmp_path / ".memory" / "MEMORY.md").read_text(
+            encoding="utf-8"
+        )
