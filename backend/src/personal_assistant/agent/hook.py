@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from personal_assistant.agent.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ class HookEvent:
     stage: HookStage
     phase: str
     state: AgentState
-    config: Any = None
+    config: RunnableConfig | None = None
     result: Any = None
     error: BaseException | None = None
 
@@ -50,7 +52,7 @@ def with_hooks(
     stage: HookStage,
     node: Callable[..., Any],
 ) -> Callable[..., Awaitable[Any]]:
-    async def wrapped(state: AgentState, config: Any = None) -> Any:
+    async def wrapped(state: AgentState, config: RunnableConfig | None = None) -> Any:
         await manager.emit(HookEvent(stage=stage, phase="before", state=state, config=config))
         try:
             result = await _call_node(node, state, config)
@@ -68,7 +70,11 @@ def with_hooks(
     return wrapped
 
 
-async def _call_node(node: Callable[..., Any], state: AgentState, config: Any) -> Any:
+async def _call_node(
+    node: Callable[..., Any],
+    state: AgentState,
+    config: RunnableConfig | None,
+) -> Any:
     if _accepts_config(node):
         result = node(state, config)
     else:

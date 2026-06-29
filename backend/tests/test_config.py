@@ -19,6 +19,7 @@ def test_langfuse_disabled_by_default() -> None:
         settings = Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
+            _env_file=None,
         )
         assert settings.langfuse_enabled is False
         assert settings.langfuse_public_key is None
@@ -35,6 +36,7 @@ def test_langfuse_enabled_when_keys_are_set() -> None:
         settings = Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
+            _env_file=None,
         )
         assert settings.langfuse_enabled is True
 
@@ -49,6 +51,7 @@ def test_langfuse_custom_host() -> None:
         settings = Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
+            _env_file=None,
         )
         assert settings.langfuse_host == "https://selfhosted.example.com"
 
@@ -57,10 +60,11 @@ def test_langfuse_disabled_when_only_public_key_is_set() -> None:
     """Langfuse stays disabled when only the public key is configured."""
     with patch.dict("os.environ", {
         "LANGFUSE_PUBLIC_KEY": "pk-test",
-    }, clear=False):
+    }, clear=True):
         settings = Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
+            _env_file=None,
         )
         assert settings.langfuse_enabled is False
 
@@ -69,9 +73,10 @@ def test_langfuse_disabled_when_only_secret_key_is_set() -> None:
     """Langfuse stays disabled when only the secret key is configured."""
     with patch.dict("os.environ", {
         "LANGFUSE_SECRET_KEY": "sk-test",
-    }, clear=False):
+    }, clear=True):
         settings = Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
+            _env_file=None,
         )
         assert settings.langfuse_enabled is False
