@@ -127,6 +127,12 @@ class AgentHarness:
         llm_config: LLMConfig | None = None,
     ) -> ChatResponse:
         self.decisions[approval_id] = approved
+        await _record_tool_approval_decision(
+            getattr(self, "memory", None),
+            thread_id,
+            approval_id,
+            approved,
+        )
         app = self._compile(llm_config)
         result = await app.ainvoke(
             {},
@@ -137,8 +143,14 @@ class AgentHarness:
     async def replay(self, thread_id: str) -> list[dict[str, Any]]:
         return await self.memory.replay(thread_id)
 
+    async def list_threads(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self.memory.list_threads(limit=limit)
+
     async def delete_thread(self, thread_id: str) -> None:
         await self.memory.delete_thread(thread_id)
+
+    async def clear_threads(self) -> list[str]:
+        return await self.memory.clear_threads()
 
     async def list_audit_events(self, thread_id: str | None = None, limit: int = 100):
         return await self.memory.list_audit_events(thread_id=thread_id, limit=limit)
@@ -190,6 +202,11 @@ class AgentHarness:
             pending = values.get("pending_approvals") or []
 
             if pending:
+                await _record_tool_approval_requests(
+                    getattr(self, "memory", None),
+                    thread_id,
+                    pending,
+                )
                 yield _sse_event("requires_approval", {
                     "approvals": [
                         {"approval_id": a["approval_id"], "tool_call_id": a["tool_call_id"],
@@ -214,6 +231,12 @@ class AgentHarness:
     ) -> AsyncGenerator[str, None]:
         """Resume after approval with streaming SSE events."""
         self.decisions[approval_id] = approved
+        await _record_tool_approval_decision(
+            getattr(self, "memory", None),
+            thread_id,
+            approval_id,
+            approved,
+        )
 
         try:
             app = self._compile(llm_config)
@@ -231,12 +254,19 @@ class AgentHarness:
                         yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
+                elif kind == "on_tool_end":
+                    yield _sse_event("tool_result", _tool_result_payload(event))
 
             state = await app.aget_state(config)
             values = state.values if state.values else {}
             pending = values.get("pending_approvals") or []
 
             if pending:
+                await _record_tool_approval_requests(
+                    getattr(self, "memory", None),
+                    thread_id,
+                    pending,
+                )
                 yield _sse_event("requires_approval", {
                     "approvals": [
                         {"approval_id": a["approval_id"], "tool_call_id": a["tool_call_id"],
@@ -311,6 +341,72 @@ async def _record_audit(memory: Any, event: AuditEventCreate) -> None:
         await memory.record_audit_event(event)
     except Exception:
         logger.exception("Failed to record security audit event")
+
+
+async def _record_tool_approval_decision(
+    memory: Any,
+    thread_id: str,
+    approval_id: str,
+    approved: bool,
+) -> None:
+    await _record_audit(
+        memory,
+        AuditEventCreate(
+            thread_id=thread_id,
+            source="tool",
+            category="tool_approval_decision",
+            severity="LOW",
+            reason="User approved a tool call." if approved else "User denied a tool call.",
+            subject=approval_id,
+            metadata={"approval_id": approval_id, "approved": approved},
+        ),
+    )
+
+
+async def _record_tool_approval_requests(
+    memory: Any,
+    thread_id: str,
+    approvals: list[dict[str, Any]],
+) -> None:
+    for approval in approvals:
+        await _record_audit(
+            memory,
+            AuditEventCreate(
+                thread_id=thread_id,
+                source="tool",
+                category="tool_approval_requested",
+                severity="LOW",
+                reason="Tool call is waiting for user approval.",
+                subject=approval.get("name"),
+                metadata={
+                    "approval_id": approval.get("approval_id"),
+                    "tool_call_id": approval.get("tool_call_id"),
+                    "tool_name": approval.get("name"),
+                    "tool_args": approval.get("args", {}),
+                },
+            ),
+        )
+
+
+def _tool_result_payload(event: dict[str, Any]) -> dict[str, str]:
+    name = event.get("name")
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    output = data.get("output") if isinstance(data, dict) else None
+    return {
+        "name": name if isinstance(name, str) else "tool",
+        "content": _tool_output_text(output),
+    }
+
+
+def _tool_output_text(output: Any) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, str):
+        return output
+    try:
+        return json.dumps(output, ensure_ascii=False)
+    except TypeError:
+        return str(output)
 
 
 def _clip_subject(value: str, limit: int = 500) -> str:

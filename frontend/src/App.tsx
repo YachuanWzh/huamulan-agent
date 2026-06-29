@@ -29,15 +29,20 @@ function App() {
     handleThreadCreated()
   }
 
+  const handleThreadSelected = (id: string) => {
+    localStorage.setItem('threadId', id)
+    setThreadId(id)
+  }
+
   return (
     <div className="app">
-      <header className="app-header">
+      <header className="app-header" aria-label="Assistant console">
         <h1>LangGraph Assistant</h1>
         <div className="thread-info" title={threadId ?? ''}>
           Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
         </div>
       </header>
-      <main className="app-body">
+      <main className="app-body" aria-label="Conversation workspace">
         <ChatPanel
           key={threadId ?? 'empty-thread'}
           threadId={threadId}
@@ -48,6 +53,7 @@ function App() {
         <Sidebar
           threadId={threadId}
           onThreadCleared={handleThreadCleared}
+          onThreadSelected={handleThreadSelected}
           onReplayState={setReplayState}
         />
       </main>

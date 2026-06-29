@@ -1,3 +1,5 @@
+import ast
+import json
 from typing import Any
 
 from fastapi.encoders import jsonable_encoder
@@ -38,10 +40,50 @@ class PostgresMemory:
             states.append(_serialize_checkpoint(checkpoint))
         return states
 
+    async def list_threads(self, limit: int = 100) -> list[dict[str, Any]]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT thread_id, MAX((checkpoint->>'ts')::timestamptz) AS updated_at
+                FROM checkpoints
+                GROUP BY thread_id
+                ORDER BY updated_at DESC NULLS LAST, thread_id ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "thread_id": row[0],
+                "updated_at": row[1],
+            }
+            for row in rows
+        ]
+
     async def delete_thread(self, thread_id: str) -> None:
         if self.checkpointer is None:
             raise RuntimeError("Postgres memory is not started")
         await self.checkpointer.adelete_thread(thread_id)
+        if self.pool is not None:
+            async with self.pool.connection() as conn:
+                await conn.execute(
+                    "DELETE FROM audit_events WHERE thread_id = %s",
+                    (thread_id,),
+                )
+
+    async def clear_threads(self) -> list[str]:
+        thread_ids = [
+            thread["thread_id"]
+            for thread in await self.list_threads(limit=500)
+            if thread.get("thread_id")
+        ]
+        for thread_id in thread_ids:
+            await self.delete_thread(thread_id)
+        return thread_ids
 
     async def record_audit_event(self, event: AuditEventCreate) -> None:
         if self.pool is None:
@@ -158,7 +200,11 @@ def _serialize_checkpoint(checkpoint: Any) -> dict[str, Any]:
         "created_at": checkpoint_data.get("ts"),
         "node": _node_from_metadata(metadata),
         "values": _replay_values(values),
-        "messages": [_serialize_message(message) for message in values.get("messages", [])],
+        "messages": [
+            serialized
+            for message in values.get("messages", [])
+            if (serialized := _serialize_message(message)) is not None
+        ],
         "checkpoint": payload,
     }
 
@@ -196,17 +242,47 @@ def _replay_values(values: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_message(message: Any) -> dict[str, Any]:
+def _serialize_message(message: Any) -> dict[str, Any] | None:
     message_type = getattr(message, "type", None)
     role = {
         "human": "user",
         "ai": "assistant",
         "tool": "tool_call",
-    }.get(message_type, message_type or "assistant")
-    content = getattr(message, "content", "")
-    if not isinstance(content, str):
-        content = jsonable_encoder(content)
+    }.get(message_type)
+    if role not in {"user", "assistant", "tool_call"}:
+        return None
+    content = _message_content_text(getattr(message, "content", ""))
     return {"role": role, "content": content}
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith(("{", "[")):
+            try:
+                parsed = ast.literal_eval(stripped)
+            except (SyntaxError, ValueError):
+                return content
+            return _json_text(parsed)
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                text_parts.append(item["text"])
+            else:
+                text_parts.append(_json_text(item))
+        return "\n".join(part for part in text_parts if part)
+    return _json_text(content)
+
+
+def _json_text(value: Any) -> str:
+    encoded = jsonable_encoder(value)
+    if isinstance(encoded, str):
+        return encoded
+    return json.dumps(encoded, ensure_ascii=False)
 
 
 def _jsonable(value: Any) -> Any:

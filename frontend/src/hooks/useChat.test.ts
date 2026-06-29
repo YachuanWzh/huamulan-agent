@@ -217,6 +217,42 @@ describe('useChat', () => {
     expect(last).toMatchObject({ role: 'assistant', content: 'It is 3pm.' })
   })
 
+  it('shows tool execution results from the stream', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+        ]},
+      ]),
+    )
+    mockApi.approveStream.mockReturnValue(
+      makeStream([
+        { type: 'tool_result', name: 'get_time', content: '3pm' },
+        { type: 'done', status: 'completed', message: 'It is 3pm.' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('What time?')
+    })
+
+    await act(async () => {
+      await result.current.approve('a1')
+    })
+
+    expect(result.current.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool_call',
+          content: 'get_time: 3pm',
+          approvalStatus: 'approved',
+        }),
+      ]),
+    )
+  })
+
   it('deny rejects the tool call', async () => {
     mockApi.chatStream.mockReturnValue(
       makeStream([
@@ -331,6 +367,40 @@ describe('useChat', () => {
       },
     ])
     expect(result.current.pendingApprovals).toEqual([])
+  })
+
+  it('keeps replayed reasoning collapsed', () => {
+    const { result, rerender } = renderHook(
+      ({ replayState }: { replayState: ReplayState | null }) =>
+        useChat('thread-1', () => 'thread-1', replayState),
+      { initialProps: { replayState: null as ReplayState | null } },
+    )
+
+    rerender({
+      replayState: {
+        checkpoint_id: 'checkpoint-1',
+        parent_checkpoint_id: null,
+        created_at: '2026-06-29T04:00:00+00:00',
+        node: 'agent',
+        values: {},
+        messages: [
+          {
+            role: 'assistant',
+            content: 'Final answer',
+            reasoning: 'private thinking',
+          },
+        ],
+        checkpoint: {},
+      },
+    })
+
+    expect(result.current.messages[0]).toMatchObject({
+      role: 'assistant',
+      content: 'Final answer',
+      reasoning: 'private thinking',
+      reasoningCollapsed: true,
+      reasoningStreaming: false,
+    })
   })
 
   it('sets error when the stream yields an error event', async () => {

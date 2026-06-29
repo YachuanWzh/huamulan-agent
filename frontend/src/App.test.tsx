@@ -8,9 +8,11 @@ vi.mock('./components/ChatPanel', async () => {
   return {
     ChatPanel: ({
       threadId,
+      replayState,
       onThreadCreated,
     }: {
       threadId: string | null
+      replayState?: { checkpoint_id: string } | null
       onThreadCreated: () => string
     }) => {
       const [initialThreadId] = React.useState(threadId)
@@ -18,6 +20,7 @@ vi.mock('./components/ChatPanel', async () => {
         <div>
           <div data-testid="chat-thread">{threadId}</div>
           <div data-testid="chat-initial-thread">{initialThreadId}</div>
+          <div data-testid="chat-replay">{replayState?.checkpoint_id ?? ''}</div>
           <button onClick={onThreadCreated}>Mock create thread</button>
         </div>
       )
@@ -29,13 +32,25 @@ vi.mock('./components/Sidebar', () => ({
   Sidebar: ({
     threadId,
     onThreadCleared,
+    onThreadSelected,
+    onReplayState,
   }: {
     threadId: string | null
     onThreadCleared: () => void
+    onThreadSelected: (threadId: string) => void
+    onReplayState: (state: { checkpoint_id: string }) => void
   }) => (
-    <div>
+    <div data-testid="sidebar-shell">
       <div data-testid="sidebar-thread">{threadId}</div>
       <button onClick={onThreadCleared}>Mock new thread</button>
+      <button
+        onClick={() => {
+          onThreadSelected('history-thread')
+          onReplayState({ checkpoint_id: 'history-checkpoint' })
+        }}
+      >
+        Mock select history
+      </button>
     </div>
   ),
 }))
@@ -83,5 +98,32 @@ describe('App thread id', () => {
     expect(randomUUID).toHaveBeenCalledOnce()
     expect(localStorage.getItem('threadId')).toBe('created-thread')
     expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('created-thread')
+  })
+
+  it('switches to a selected history thread', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /mock select history/i }))
+
+    expect(screen.getByTestId('chat-thread')).toHaveTextContent('history-thread')
+    expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('history-thread')
+    expect(screen.getByTestId('chat-replay')).toHaveTextContent('history-checkpoint')
+    expect(localStorage.getItem('threadId')).toBe('history-thread')
+  })
+
+  it('exposes the redesigned console shell without changing core controls', () => {
+    render(<App />)
+
+    expect(
+      screen.getByRole('banner', { name: /assistant console/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('main', { name: /conversation workspace/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('sidebar-shell')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: /langgraph assistant/i }),
+    ).toBeInTheDocument()
   })
 })

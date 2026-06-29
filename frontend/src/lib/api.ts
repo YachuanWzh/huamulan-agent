@@ -43,6 +43,7 @@ export interface SkillInfo {
 export interface ReplayMessage {
   role: 'user' | 'assistant' | 'tool_call'
   content: string
+  reasoning?: string
 }
 
 export interface ReplayState {
@@ -63,9 +64,19 @@ export interface ReplayResponse {
   states: ReplayState[]
 }
 
+export interface ThreadSummary {
+  thread_id: string
+  updated_at: string | null
+}
+
 export interface DeleteThreadResponse {
   thread_id: string
   deleted: boolean
+}
+
+export interface ClearThreadsResponse {
+  thread_ids: string[]
+  deleted: number
 }
 
 export interface AuditEvent {
@@ -97,6 +108,12 @@ export interface StreamRequiresApproval {
   approvals: ToolCallApproval[]
 }
 
+export interface StreamToolResult {
+  type: 'tool_result'
+  name: string
+  content: string
+}
+
 export interface StreamDone {
   type: 'done'
   status: 'completed'
@@ -112,6 +129,7 @@ export type StreamEvent =
   | StreamToken
   | StreamReasoning
   | StreamRequiresApproval
+  | StreamToolResult
   | StreamDone
   | StreamError
 
@@ -222,8 +240,14 @@ export const api = {
   replay: (threadId: string) =>
     request<ReplayResponse>(`/api/threads/${threadId}/replay`),
 
+  listThreads: () =>
+    request<ThreadSummary[]>('/api/threads?limit=100'),
+
   deleteThread: (threadId: string) =>
     request<DeleteThreadResponse>(`/api/threads/${threadId}`, { method: 'DELETE' }),
+
+  clearThreads: () =>
+    request<ClearThreadsResponse>('/api/threads', { method: 'DELETE' }),
 
   listAuditEvents: (threadId?: string) => {
     const params = new URLSearchParams({ limit: '100' })

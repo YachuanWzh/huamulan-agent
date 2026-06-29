@@ -65,6 +65,16 @@ class ReplayResponse(BaseModel):
     states: list[dict[str, Any]]
 
 
+class ThreadSummary(BaseModel):
+    thread_id: str
+    updated_at: datetime | None = None
+
+
 class DeleteThreadResponse(BaseModel):
     thread_id: str
     deleted: bool = True
+
+
+class ClearThreadsResponse(BaseModel):
+    thread_ids: list[str]
+    deleted: int

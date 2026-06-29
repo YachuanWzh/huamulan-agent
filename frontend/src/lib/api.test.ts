@@ -213,6 +213,46 @@ describe('api', () => {
     })
   })
 
+  describe('clearThreads', () => {
+    it('deletes all conversation sessions', async () => {
+      server.use(
+        http.delete(`${BASE}/api/threads`, () =>
+          HttpResponse.json({ thread_ids: ['thread-1', 'thread-2'], deleted: 2 }),
+        ),
+      )
+
+      const result = await api.clearThreads()
+
+      expect(result).toEqual({ thread_ids: ['thread-1', 'thread-2'], deleted: 2 })
+    })
+  })
+
+  describe('listThreads', () => {
+    it('returns conversation sessions', async () => {
+      server.use(
+        http.get(`${BASE}/api/threads`, ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.get('limit')).toBe('100')
+          return HttpResponse.json([
+            {
+              thread_id: 'thread-2',
+              updated_at: '2026-06-29T05:00:00+00:00',
+            },
+          ])
+        }),
+      )
+
+      const result = await api.listThreads()
+
+      expect(result).toEqual([
+        {
+          thread_id: 'thread-2',
+          updated_at: '2026-06-29T05:00:00+00:00',
+        },
+      ])
+    })
+  })
+
   describe('listAuditEvents', () => {
     it('returns audit events for a thread', async () => {
       server.use(

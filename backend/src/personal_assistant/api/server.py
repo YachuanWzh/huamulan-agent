@@ -10,9 +10,11 @@ from personal_assistant.api.schemas import (
     AuditEvent,
     ChatRequest,
     ChatResponse,
+    ClearThreadsResponse,
     DeleteThreadResponse,
     ReplayResponse,
     SkillInfo,
+    ThreadSummary,
 )
 from personal_assistant.config import get_settings
 from personal_assistant.memory.postgres import PostgresMemory
@@ -90,6 +92,17 @@ async def approve_stream(request: ApprovalDecision) -> StreamingResponse:
 @app.get("/api/threads/{thread_id}/replay", response_model=ReplayResponse)
 async def replay(thread_id: str) -> ReplayResponse:
     return ReplayResponse(thread_id=thread_id, states=await harness.replay(thread_id))
+
+
+@app.get("/api/threads", response_model=list[ThreadSummary])
+async def list_threads(limit: int = 100) -> list[ThreadSummary]:
+    return await harness.list_threads(limit=limit)
+
+
+@app.delete("/api/threads", response_model=ClearThreadsResponse)
+async def clear_threads() -> ClearThreadsResponse:
+    thread_ids = await harness.clear_threads()
+    return ClearThreadsResponse(thread_ids=thread_ids, deleted=len(thread_ids))
 
 
 @app.delete("/api/threads/{thread_id}", response_model=DeleteThreadResponse)

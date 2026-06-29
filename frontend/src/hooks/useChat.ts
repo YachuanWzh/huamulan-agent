@@ -33,13 +33,16 @@ export function useChat(
       id: `replay-${replayState.checkpoint_id}-${index}`,
       role: message.role,
       content: message.content,
+      reasoning: message.reasoning,
+      reasoningStreaming: false,
+      reasoningCollapsed: message.reasoning ? true : undefined,
     }))
     setMessages(replayMessages)
     setPendingApprovals(replayState.values.pending_approvals ?? [])
     setError(null)
     setLoading(false)
     idRef.current = replayMessages.length
-  }, [replayState?.checkpoint_id])
+  }, [replayState])
 
   const cancel = useCallback(() => {
     abortRef.current?.abort()
@@ -138,6 +141,34 @@ export function useChat(
             }))
             setMessages((prev) => [...prev, ...toolMessages])
             return
+          }
+          case 'tool_result': {
+            finishReasoning()
+            setMessages((prev) => {
+              const pendingToolIndex = prev.findIndex(
+                (m) =>
+                  m.role === 'tool_call' &&
+                  m.approvalStatus === 'approved' &&
+                  m.content === event.name,
+              )
+              if (pendingToolIndex === -1) {
+                return [
+                  ...prev,
+                  {
+                    id: nextId(),
+                    role: 'tool_call' as const,
+                    content: `${event.name}: ${event.content}`,
+                    approvalStatus: 'approved' as const,
+                  },
+                ]
+              }
+              return prev.map((m, index) =>
+                index === pendingToolIndex
+                  ? { ...m, content: `${event.name}: ${event.content}` }
+                  : m,
+              )
+            })
+            break
           }
           case 'done': {
             finishReasoning()
