@@ -136,4 +136,45 @@ describe('MessageBubble', () => {
     expect(screen.getByText('Compacting context')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /compacting/i })).toBeInTheDocument()
   })
+
+  it('renders assistant message as markdown with bold and italic', () => {
+    render(<MessageBubble role="assistant" content="**bold** and *italic*" />)
+
+    const bold = screen.getByText('bold')
+    expect(bold).toBeInTheDocument()
+    expect(bold.tagName).toBe('STRONG')
+
+    const italic = screen.getByText('italic')
+    expect(italic).toBeInTheDocument()
+    expect(italic.tagName).toBe('EM')
+  })
+
+  it('renders assistant message code block', () => {
+    render(<MessageBubble role="assistant" content={'```js\nconst x = 1;\n```'} />)
+
+    expect(screen.getByText(/const x = 1/)).toBeInTheDocument()
+  })
+
+  it('does not render user message as markdown', () => {
+    render(<MessageBubble role="user" content="**not bold**" />)
+
+    const text = screen.getByText('**not bold**')
+    expect(text).toBeInTheDocument()
+    // user messages should stay as plain text, not be parsed as markdown
+    expect(text.tagName).not.toBe('STRONG')
+  })
+
+  it('renders tool call message as plain text (no markdown)', () => {
+    render(<MessageBubble role="tool_call" content="**tool output**" approvalStatus="approved" />)
+
+    expect(screen.getByText('**tool output**')).toBeInTheDocument()
+  })
+
+  it('shows typewriter cursor on assistant message when streaming', () => {
+    const { container } = render(
+      <MessageBubble role="assistant" content="typing..." streaming={true} />,
+    )
+    const cursor = container.querySelector('.typewriter-cursor')
+    expect(cursor).toBeInTheDocument()
+  })
 })

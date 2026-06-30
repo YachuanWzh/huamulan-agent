@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Message } from '../hooks/useChat'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
   id?: string
@@ -123,6 +124,8 @@ export function MessageBubble({
           )}
           {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
         </div>
+      ) : role === 'assistant' ? (
+        <MarkdownRenderer content={content} streaming={streaming} />
       ) : (
         <div className="message-content">
           {content}
