@@ -103,11 +103,11 @@ def test_redis_url_accepts_redis_scheme() -> None:
     settings = Settings(
         DATABASE_URL="postgresql://localhost/test",
         LLM_MODEL="test-model",
-        REDIS_URL="redis://192.168.5.7:6379/0",
+        REDIS_URL="redis://redis.example.local:6379/0",
         _env_file=None,
     )
 
-    assert settings.redis_url == "redis://192.168.5.7:6379/0"
+    assert settings.redis_url == "redis://redis.example.local:6379/0"
 
 
 def test_redis_url_rejects_http_scheme() -> None:
@@ -115,6 +115,6 @@ def test_redis_url_rejects_http_scheme() -> None:
         Settings(
             DATABASE_URL="postgresql://localhost/test",
             LLM_MODEL="test-model",
-            REDIS_URL="http://192.168.5.7:6379",
+            REDIS_URL="http://redis.example.local:6379",
             _env_file=None,
         )

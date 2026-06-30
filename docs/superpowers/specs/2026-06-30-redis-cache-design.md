@@ -15,8 +15,8 @@ Redis will be introduced as a low-risk acceleration layer and observability poin
 must not replace PostgreSQL as the source of truth, and it must not cache final LLM
 answers in the first implementation.
 
-The intended Redis service is reachable at host `192.168.5.7` port `6379`. The backend
-configuration should use a Redis URL such as `redis://192.168.5.7:6379/0`.
+The intended Redis service should be configured through `REDIS_URL`. The backend
+configuration should use a Redis URL such as `redis://redis.example.local:6379/0`.
 
 ## Goals
 
@@ -114,10 +114,10 @@ For this environment, set:
 
 ```ini
 CACHE_ENABLED=true
-REDIS_URL=redis://192.168.5.7:6379/0
+REDIS_URL=redis://redis.example.local:6379/0
 ```
 
-If the user supplies `http://192.168.5.7:6379`, startup validation should reject it with
+If the user supplies `http://redis.example.local:6379`, startup validation should reject it with
 a clear message that `REDIS_URL` must use the `redis://` or `rediss://` scheme. This keeps
 configuration errors visible instead of silently connecting to the wrong protocol.
 
@@ -199,7 +199,7 @@ Required tests:
 - Long-term memory cache hits when files are unchanged and misses when a memory Markdown
   file mtime or size changes.
 
-Integration smoke testing can optionally run against `redis://192.168.5.7:6379/0`, but
+Integration smoke testing can optionally run against a real Redis URL such as `redis://redis.example.local:6379/0`, but
 unit tests must remain deterministic without network access.
 
 ## Rollout Plan
@@ -208,7 +208,7 @@ unit tests must remain deterministic without network access.
 2. Wrap `PostgresMemory` with `CachedPostgresMemory` in `server.py`.
 3. Add cached reads and explicit invalidation for operational APIs.
 4. Add long-term memory prompt cache.
-5. Enable Redis with `REDIS_URL=redis://192.168.5.7:6379/0`.
+5. Enable Redis with `REDIS_URL=redis://redis.example.local:6379/0`.
 6. Compare logs for hit rate and request latency before deciding whether to expand caching.
 
 ## Acceptance Criteria

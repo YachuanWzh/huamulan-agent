@@ -101,7 +101,7 @@ def test_build_callback_sets_no_proxy_for_langfuse_host() -> None:
     settings.langfuse_enabled = True
     settings.langfuse_public_key = "pk-test"
     settings.langfuse_secret_key = "sk-test"
-    settings.langfuse_host = "http://192.168.5.7:3000"
+    settings.langfuse_host = "http://langfuse.internal.example:3000"
 
     with patch.dict("os.environ", {"HTTP_PROXY": "http://127.0.0.1:7897"}, clear=True):
         with patch("personal_assistant.tracing.Langfuse"):
@@ -109,7 +109,7 @@ def test_build_callback_sets_no_proxy_for_langfuse_host() -> None:
                 build_langfuse_callback(settings)
 
                 no_proxy = os.environ.get("NO_PROXY", "")
-                assert "192.168.5.7" in no_proxy
+                assert "langfuse.internal.example" in no_proxy
 
 
 def test_build_callback_appends_to_existing_no_proxy() -> None:
@@ -120,7 +120,7 @@ def test_build_callback_appends_to_existing_no_proxy() -> None:
     settings.langfuse_enabled = True
     settings.langfuse_public_key = "pk-test"
     settings.langfuse_secret_key = "sk-test"
-    settings.langfuse_host = "http://192.168.5.7:3000"
+    settings.langfuse_host = "http://langfuse.internal.example:3000"
 
     with patch.dict(
         "os.environ",
@@ -134,7 +134,7 @@ def test_build_callback_appends_to_existing_no_proxy() -> None:
                 no_proxy = os.environ.get("NO_PROXY", "")
                 assert "localhost" in no_proxy
                 assert "127.0.0.1" in no_proxy
-                assert "192.168.5.7" in no_proxy
+                assert "langfuse.internal.example" in no_proxy
 
 
 def test_build_callback_no_proxy_skips_cloud_langfuse() -> None:

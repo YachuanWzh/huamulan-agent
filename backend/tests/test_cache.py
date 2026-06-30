@@ -19,7 +19,7 @@ def test_build_cache_returns_noop_when_cache_disabled() -> None:
         DATABASE_URL="postgresql://localhost/test",
         LLM_MODEL="test-model",
         CACHE_ENABLED=False,
-        REDIS_URL="redis://192.168.5.7:6379/0",
+        REDIS_URL="redis://redis.example.local:6379/0",
         _env_file=None,
     )
 

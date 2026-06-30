@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Redis URL for this environment is `redis://192.168.5.7:6379/0`.
+- Redis URL examples must use placeholders such as `redis://redis.example.local:6379/0`.
 - Redis is optional; missing or unavailable Redis must not break chat, replay, audit, or thread APIs.
 - PostgreSQL remains the source of truth for checkpoints, audit events, execution logs, tool results, and long-term memory writes.
 - Do not cache final chat responses or substitute cached data for tool execution.
