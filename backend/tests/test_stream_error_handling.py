@@ -191,6 +191,43 @@ class BackgroundReflectionHarness(AgentHarness):
         self.scheduled_values.append((thread_id, values, llm_config, callbacks))
 
 
+class BatchApprovalStreamApp:
+    def __init__(self) -> None:
+        self.inputs = []
+
+    async def astream_events(self, input_values, *_args, **_kwargs):
+        self.inputs.append(input_values)
+        yield {"event": "on_chat_model_stream", "data": {"chunk": FakeChunk(content="Done")}}
+
+    async def aget_state(self, *_args, **_kwargs):
+        return CompletedState()
+
+
+class BatchApprovalHarness(AgentHarness):
+    def __init__(self) -> None:
+        self.decisions = {}
+        self.callbacks = []
+        self.app = BatchApprovalStreamApp()
+
+    def _compile(self, _llm_config=None):
+        return self.app
+
+
+class ApprovalBackgroundReflectionHarness(AgentHarness):
+    def __init__(self) -> None:
+        self.decisions = {}
+        self.callbacks = []
+        self.scheduled_values = []
+        self.app = BatchApprovalStreamApp()
+
+    def _compile(self, _llm_config=None, *, enable_memory_reflection=True):
+        assert enable_memory_reflection is False
+        return self.app
+
+    def _schedule_memory_reflection(self, thread_id, values, llm_config, callbacks):
+        self.scheduled_values.append((thread_id, values, llm_config, callbacks))
+
+
 @pytest.mark.asyncio
 async def test_streaming_llm_errors_are_sent_as_sse_error_events() -> None:
     chunks = [
@@ -336,6 +373,75 @@ async def test_stream_done_is_sent_before_background_memory_reflection() -> None
     assert chunks == [
         'event: token\ndata: {"content": "Final"}\n\n',
         'event: token\ndata: {"content": " answer"}\n\n',
+        'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    assert harness.scheduled_values == [
+        ("thread-1", CompletedState.values, None, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_approval_stream_records_all_decisions_and_resumes_once() -> None:
+    harness = BatchApprovalHarness()
+
+    chunks = [
+        chunk
+        async for chunk in harness.resume_after_approvals_stream(
+            "thread-1",
+            [
+                {"approval_id": "approval-1", "approved": True},
+                {"approval_id": "approval-2", "approved": False},
+            ],
+        )
+    ]
+
+    assert harness.decisions == {"approval-1": True, "approval-2": False}
+    assert harness.app.inputs == [{"approval_turn_count": 2}]
+    assert chunks == [
+        'event: token\ndata: {"content": "Done"}\n\n',
+        'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
+        "data: [DONE]\n\n",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_approval_resume_stream_schedules_memory_reflection_in_background() -> None:
+    harness = ApprovalBackgroundReflectionHarness()
+
+    chunks = [
+        chunk
+        async for chunk in harness.resume_after_approval_stream(
+            "thread-1",
+            "approval-1",
+            True,
+        )
+    ]
+
+    assert chunks == [
+        'event: token\ndata: {"content": "Done"}\n\n',
+        'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    assert harness.scheduled_values == [
+        ("thread-1", CompletedState.values, None, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_batch_approval_resume_stream_schedules_memory_reflection_in_background() -> None:
+    harness = ApprovalBackgroundReflectionHarness()
+
+    chunks = [
+        chunk
+        async for chunk in harness.resume_after_approvals_stream(
+            "thread-1",
+            [{"approval_id": "approval-1", "approved": True}],
+        )
+    ]
+
+    assert chunks == [
+        'event: token\ndata: {"content": "Done"}\n\n',
         'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
         "data: [DONE]\n\n",
     ]

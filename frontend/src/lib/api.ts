@@ -33,6 +33,16 @@ export interface ApprovalDecision {
   approved: boolean
 }
 
+export interface ApprovalBatchItem {
+  approval_id: string
+  approved: boolean
+}
+
+export interface ApprovalBatchDecision {
+  thread_id: string
+  decisions: ApprovalBatchItem[]
+}
+
 export interface SkillInfo {
   name: string
   description: string
@@ -288,6 +298,9 @@ export const api = {
 
   approveStream: (body: ApprovalDecision) =>
     streamRequest('/api/approve/stream', body),
+
+  approveBatchStream: (body: ApprovalBatchDecision) =>
+    streamRequest('/api/approvals/stream', body),
 
   listPendingApprovals: (threadId: string) =>
     request<ToolCallApproval[]>(`/api/threads/${threadId}/pending-approvals`),

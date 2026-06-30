@@ -12,6 +12,7 @@ vi.mock('../lib/api', () => ({
     chatStream: vi.fn(),
     approve: vi.fn(),
     approveStream: vi.fn(),
+    approveBatchStream: vi.fn(),
     listPendingApprovals: vi.fn(),
   },
 }))
@@ -123,8 +124,55 @@ describe('ChatPanel', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('resolve_current_time').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /deny/i })).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: /approve/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByRole('button', { name: /deny/i }).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('submits multiple tool approvals as one batch stream', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        { type: 'requires_approval', approvals: [
+          {
+            approval_id: 'a1',
+            tool_call_id: 'tc1',
+            name: 'resolve_current_time',
+            args: {},
+          },
+          {
+            approval_id: 'a2',
+            tool_call_id: 'tc2',
+            name: 'get_weather',
+            args: { city: 'Shanghai' },
+          },
+        ]},
+      ]),
+    )
+    mockApi.approveBatchStream.mockReturnValue(
+      makeStream([{ type: 'done', status: 'completed', message: 'Done.' }]),
+    )
+
+    const user = userEvent.setup()
+    renderChatPanel()
+
+    await user.type(screen.getByPlaceholderText(/type your message/i), 'Time and weather?')
+    await user.click(screen.getByRole('button', { name: /send/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 tool approvals required/i)).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /submit approvals/i }))
+
+    await waitFor(() => {
+      expect(mockApi.approveBatchStream).toHaveBeenCalledWith({
+        thread_id: 't1',
+        decisions: [
+          { approval_id: 'a1', approved: true },
+          { approval_id: 'a2', approved: true },
+        ],
+      })
+      expect(mockApi.approveStream).not.toHaveBeenCalled()
     })
   })
 

@@ -2,6 +2,7 @@ import { useChat } from '../hooks/useChat'
 import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { ToolApprovalCard } from './ToolApprovalCard'
+import { ToolApprovalBatchCard } from './ToolApprovalBatchCard'
 import type { ReplayState } from '../lib/api'
 
 interface Props {
@@ -26,6 +27,7 @@ export function ChatPanel({
     error,
     send,
     approve,
+    approveBatch,
     deny,
     clearError,
     toggleReasoning,
@@ -59,14 +61,16 @@ export function ChatPanel({
           ))}
         </div>
       )}
-      {pendingApprovals.map((approval) => (
+      {pendingApprovals.length === 1 && (
         <ToolApprovalCard
-          key={approval.approval_id}
-          approval={approval}
+          approval={pendingApprovals[0]!}
           onApprove={approve}
           onDeny={deny}
         />
-      ))}
+      )}
+      {pendingApprovals.length > 1 && (
+        <ToolApprovalBatchCard approvals={pendingApprovals} onSubmit={approveBatch} />
+      )}
       <MessageInput
         onSend={send}
         onNewConversation={onNewConversation}

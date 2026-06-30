@@ -35,6 +35,7 @@ _cache_logger.propagate = False
 
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.api.schemas import (
+    ApprovalBatchDecision,
     ApprovalDecision,
     AuditEvent,
     ChatRequest,
@@ -134,6 +135,18 @@ async def approve_stream(request: ApprovalDecision) -> StreamingResponse:
             request.thread_id,
             request.approval_id,
             request.approved,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/approvals/stream")
+async def approve_batch_stream(request: ApprovalBatchDecision) -> StreamingResponse:
+    return StreamingResponse(
+        harness.resume_after_approvals_stream(
+            request.thread_id,
+            [decision.model_dump() for decision in request.decisions],
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},

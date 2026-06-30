@@ -693,6 +693,7 @@ button {
 }
 
 .approval-card {
+  max-width: 100%;
   flex-shrink: 0;
   margin: 0 clamp(18px, 4vw, 56px) var(--space-3);
   padding: var(--space-3) var(--space-4);
@@ -701,6 +702,10 @@ button {
   border-radius: var(--radius);
   background: #fff8e5;
   animation: message-in 0.2s ease-out both;
+}
+
+.approval-batch-card {
+  overflow: hidden;
 }
 
 .memory-approval-card {
@@ -750,6 +755,71 @@ button {
 .approval-actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.approval-batch-toolbar {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.approval-batch-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.approval-batch-item {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid #ecd082;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.approval-batch-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.approval-batch-item .tool-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family:
+    "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", ui-monospace,
+    monospace;
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.approval-decision {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: 800;
+}
+
+.approval-decision.approved {
+  color: var(--color-success);
+}
+
+.approval-decision.denied {
+  color: var(--color-danger);
+}
+
+.approval-batch-submit {
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+}
+
+.approval-batch-item .tool-args {
+  max-width: 100%;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .btn-approve,

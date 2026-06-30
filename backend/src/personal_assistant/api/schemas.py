@@ -23,6 +23,16 @@ class ApprovalDecision(BaseModel):
     approved: bool
 
 
+class ApprovalBatchItem(BaseModel):
+    approval_id: str
+    approved: bool
+
+
+class ApprovalBatchDecision(BaseModel):
+    thread_id: str
+    decisions: list[ApprovalBatchItem]
+
+
 class ToolCallApproval(BaseModel):
     approval_id: str
     tool_call_id: str

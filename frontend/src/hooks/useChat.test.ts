@@ -10,6 +10,7 @@ vi.mock('../lib/api', () => ({
     chatStream: vi.fn(),
     approve: vi.fn(),
     approveStream: vi.fn(),
+    approveBatchStream: vi.fn(),
     listPendingApprovals: vi.fn(),
   },
 }))
@@ -291,6 +292,49 @@ describe('useChat', () => {
     })
     const last = result.current.messages[result.current.messages.length - 1]!
     expect(last).toMatchObject({ role: 'assistant', content: 'It is 3pm.' })
+  })
+
+  it('approveBatch submits multiple decisions through one stream', async () => {
+    const approvals = [
+      { approval_id: 'a1', tool_call_id: 'tc1', name: 'get_time', args: {} },
+      { approval_id: 'a2', tool_call_id: 'tc2', name: 'get_weather', args: {} },
+    ]
+    mockApi.chatStream.mockReturnValue(
+      makeStream([{ type: 'requires_approval', approvals }]),
+    )
+    mockApi.approveBatchStream.mockReturnValue(
+      makeStream([
+        { type: 'token', content: 'Done.' },
+        { type: 'done', status: 'completed', message: 'Done.' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('Time and weather?')
+    })
+
+    await act(async () => {
+      await result.current.approveBatch([
+        { approval_id: 'a1', approved: true },
+        { approval_id: 'a2', approved: false },
+      ])
+    })
+
+    expect(result.current.pendingApprovals).toEqual([])
+    expect(mockApi.approveBatchStream).toHaveBeenCalledWith({
+      thread_id: 'thread-1',
+      decisions: [
+        { approval_id: 'a1', approved: true },
+        { approval_id: 'a2', approved: false },
+      ],
+    })
+    expect(mockApi.approveStream).not.toHaveBeenCalled()
+    expect(result.current.messages[result.current.messages.length - 1]).toMatchObject({
+      role: 'assistant',
+      content: 'Done.',
+    })
   })
 
   it('shows tool execution results from the stream', async () => {

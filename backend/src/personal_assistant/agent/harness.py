@@ -293,13 +293,15 @@ class AgentHarness:
             approval_id,
             approved,
         )
-        app = self._compile(llm_config)
+        app = self._compile_without_memory_reflection(llm_config)
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         result = await app.ainvoke(
             {"approval_turn_count": 1},
             config=config,
         )
+        if not (result.get("pending_approvals") or []):
+            self._schedule_memory_reflection(thread_id, result, llm_config, callbacks)
         return _to_response(thread_id, result)
 
     async def replay(self, thread_id: str) -> list[dict[str, Any]]:
@@ -434,7 +436,7 @@ class AgentHarness:
         )
 
         try:
-            app = self._compile(llm_config)
+            app = self._compile_without_memory_reflection(llm_config)
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
@@ -481,6 +483,80 @@ class AgentHarness:
             else:
                 msg = _extract_last_ai_message(values.get("messages", []))
                 yield _sse_event("done", {"status": "completed", "message": msg})
+                self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
+        except Exception as exc:
+            yield _sse_event("error", {"message": _stream_error_message(exc)})
+
+        yield "data: [DONE]\n\n"
+
+    async def resume_after_approvals_stream(
+        self,
+        thread_id: str,
+        decisions: list[dict[str, Any]],
+        llm_config: LLMConfig | None = None,
+        callbacks: list[Any] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Resume after a batch of approval decisions with one streaming run."""
+        for decision in decisions:
+            approval_id = str(decision["approval_id"])
+            approved = bool(decision["approved"])
+            self.decisions[approval_id] = approved
+            await _record_tool_approval_decision(
+                getattr(self, "memory", None),
+                thread_id,
+                approval_id,
+                approved,
+            )
+
+        try:
+            app = self._compile_without_memory_reflection(llm_config)
+            config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+            _merge_callbacks(config, self.callbacks, thread_id, callbacks)
+            async for event in app.astream_events(
+                {"approval_turn_count": len(decisions)},
+                config=config,
+                version="v2",
+            ):
+                kind = event["event"]
+                if kind == "on_chain_start":
+                    payload = _compaction_started_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chain_end":
+                    payload = _compaction_completed_payload(event)
+                    if payload is not None:
+                        yield _sse_event("compacting", payload)
+                elif kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    reasoning = _extract_reasoning_content(chunk)
+                    if reasoning:
+                        yield _sse_event("reasoning", {"content": reasoning})
+                    if chunk.content:
+                        yield _sse_event("token", {"content": chunk.content})
+                elif kind == "on_tool_end":
+                    yield _sse_event("tool_result", _tool_result_payload(event))
+
+            state = await app.aget_state(config)
+            values = state.values if state.values else {}
+            pending = values.get("pending_approvals") or []
+
+            if pending:
+                await _record_tool_approval_requests(
+                    getattr(self, "memory", None),
+                    thread_id,
+                    pending,
+                )
+                yield _sse_event("requires_approval", {
+                    "approvals": [
+                        {"approval_id": a["approval_id"], "tool_call_id": a["tool_call_id"],
+                         "name": a["name"], "args": a["args"]}
+                        for a in pending
+                    ]
+                })
+            else:
+                msg = _extract_last_ai_message(values.get("messages", []))
+                yield _sse_event("done", {"status": "completed", "message": msg})
+                self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
             yield _sse_event("error", {"message": _stream_error_message(exc)})
 

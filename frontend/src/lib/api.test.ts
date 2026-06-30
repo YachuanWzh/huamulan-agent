@@ -274,6 +274,46 @@ describe('api', () => {
     })
   })
 
+  describe('approveBatchStream', () => {
+    it('streams tokens after a batch approval decision', async () => {
+      const events: StreamEvent[] = [
+        { type: 'token', content: 'The tools are complete.' },
+        { type: 'done', status: 'completed', message: 'The tools are complete.' },
+      ]
+      server.use(
+        http.post(`${BASE}/api/approvals/stream`, async ({ request }) => {
+          const body = (await request.json()) as {
+            thread_id: string
+            decisions: { approval_id: string; approved: boolean }[]
+          }
+          expect(body).toEqual({
+            thread_id: 't1',
+            decisions: [
+              { approval_id: 'a1', approved: true },
+              { approval_id: 'a2', approved: false },
+            ],
+          })
+          return new HttpResponse(sseBody(events), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }),
+      )
+
+      const results: StreamEvent[] = []
+      for await (const e of api.approveBatchStream({
+        thread_id: 't1',
+        decisions: [
+          { approval_id: 'a1', approved: true },
+          { approval_id: 'a2', approved: false },
+        ],
+      })) {
+        results.push(e)
+      }
+
+      expect(results).toEqual(events)
+    })
+  })
+
   describe('listAuditEvents', () => {
     it('returns audit events for a thread', async () => {
       server.use(

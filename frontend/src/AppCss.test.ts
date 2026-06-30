@@ -16,4 +16,13 @@ describe('App stylesheet decorations', () => {
     expect(appCss).toMatch(/\.tool-result-content\s*\{[^}]*max-height:\s*240px/s)
     expect(appCss).toMatch(/\.tool-result-content\s*\{[^}]*overflow:\s*auto/s)
   })
+
+  it('keeps batch approval cards and args from overflowing the chat panel', () => {
+    expect(appCss).toMatch(/\.approval-card\s*\{[^}]*max-width:\s*100%/s)
+    expect(appCss).toMatch(/\.approval-batch-card\s*\{[^}]*overflow:\s*hidden/s)
+    expect(appCss).toMatch(/\.approval-batch-item\s*\{[^}]*min-width:\s*0/s)
+    expect(appCss).toMatch(/\.approval-batch-item \.tool-args\s*\{[^}]*overflow:\s*auto/s)
+    expect(appCss).toMatch(/\.approval-batch-item \.tool-args\s*\{[^}]*white-space:\s*pre-wrap/s)
+    expect(appCss).toMatch(/\.approval-batch-item \.tool-args\s*\{[^}]*overflow-wrap:\s*anywhere/s)
+  })
 })

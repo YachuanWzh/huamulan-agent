@@ -1,5 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { api, type ReplayState, type StreamEvent, type ToolCallApproval } from '../lib/api'
+import {
+  api,
+  type ApprovalBatchItem,
+  type ReplayState,
+  type StreamEvent,
+  type ToolCallApproval,
+} from '../lib/api'
 
 export interface Message {
   id: string
@@ -340,6 +346,45 @@ export function useChat(
     [threadId, ensureThreadId, processStream],
   )
 
+  const approveBatch = useCallback(
+    async (decisions: ApprovalBatchItem[]) => {
+      if (decisions.length === 0) return
+      setError(null)
+      setLoading(true)
+      const approvalIds = new Set(decisions.map((decision) => decision.approval_id))
+      setPendingApprovals((prev) =>
+        prev.filter((approval) => !approvalIds.has(approval.approval_id)),
+      )
+      setMemoryApprovals((prev) =>
+        prev.filter((approval) => !approvalIds.has(approval.approval_id)),
+      )
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (!m.approvalId || !approvalIds.has(m.approvalId)) return m
+          const decision = decisions.find((item) => item.approval_id === m.approvalId)
+          return {
+            ...m,
+            approvalStatus: decision?.approved ? 'approved' as const : 'denied' as const,
+          }
+        }),
+      )
+      try {
+        const activeThreadId = threadId ?? ensureThreadId()
+        const stream = api.approveBatchStream({
+          thread_id: activeThreadId,
+          decisions,
+        })
+        await processStream(stream)
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return
+        setError(e instanceof Error ? e.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [threadId, ensureThreadId, processStream],
+  )
+
   const deny = useCallback(
     async (approvalId: string) => {
       setError(null)
@@ -391,6 +436,7 @@ export function useChat(
     error,
     send,
     approve,
+    approveBatch,
     deny,
     dismissApproval,
     clearError,
