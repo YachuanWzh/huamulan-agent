@@ -54,12 +54,14 @@ describe('MarkdownRenderer', () => {
     expect(heading.tagName).toBe('H2')
   })
 
-  it('renders links', () => {
+  it('renders links with security attributes', () => {
     render(<MarkdownRenderer content="[click here](https://example.com)" />)
     const link = screen.getByText('click here')
     expect(link).toBeInTheDocument()
     expect(link.tagName).toBe('A')
     expect(link).toHaveAttribute('href', 'https://example.com')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
   it('renders blockquotes', () => {
