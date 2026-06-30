@@ -1,9 +1,13 @@
 import re
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import SystemMessage
 
 from personal_assistant.agent.state import AgentState
 from personal_assistant.skills import SkillRegistry
+
+if TYPE_CHECKING:
+    from personal_assistant.memory.long_term import LongTermMemoryStore
 
 _BASE_PROMPT = (
     "You are a personal assistant running as a single ReAct agent. "
@@ -14,7 +18,10 @@ _BASE_PROMPT = (
 )
 
 
-def build_skill_router(registry: SkillRegistry):
+def build_skill_router(
+    registry: SkillRegistry,
+    long_term_memory: "LongTermMemoryStore | None" = None,
+):
     async def route_skills(state: AgentState) -> AgentState:
         user_text = "\n".join(
             getattr(message, "content", "")
@@ -32,7 +39,7 @@ def build_skill_router(registry: SkillRegistry):
         for name in selected:
             registry.load_skill(name)
 
-        system = build_system_prompt(registry, selected)
+        system = build_system_prompt(registry, selected, long_term_memory=long_term_memory)
         return {
             "messages": [system],
             "selected_skills": selected,
@@ -42,9 +49,27 @@ def build_skill_router(registry: SkillRegistry):
     return route_skills
 
 
-def build_system_prompt(registry: SkillRegistry, selected: list[str]) -> SystemMessage:
-    """Build a progressive system prompt with meta overview + detailed selected skills."""
-    sections = [_BASE_PROMPT]
+def build_system_prompt(
+    registry: SkillRegistry,
+    selected: list[str],
+    long_term_memory: "LongTermMemoryStore | None" = None,
+) -> SystemMessage:
+    """Build a progressive system prompt with meta overview + detailed selected skills.
+
+    When *long_term_memory* is provided, the durable memory content (USER.md,
+    SYSTEM.md, MEMORY.md index, and individual memory files) is loaded from
+    disk and prepended to the system prompt so the agent retains context across
+    conversations.
+    """
+    sections: list[str] = []
+
+    # Long-term memory — prepended so it's the first thing the agent sees
+    if long_term_memory is not None:
+        memory_text = long_term_memory.read_all()
+        if memory_text:
+            sections.append(memory_text)
+
+    sections.append(_BASE_PROMPT)
 
     # Meta overview — always present, lightweight
     if registry.skills:

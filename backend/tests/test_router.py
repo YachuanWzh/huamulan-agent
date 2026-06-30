@@ -5,6 +5,7 @@ import pytest
 
 from personal_assistant.skills.loader import SkillRegistry
 from personal_assistant.agent.router import build_skill_router, build_system_prompt, _keyword_route
+from personal_assistant.memory.long_term import LongTermMemoryStore
 
 
 def _make_triggered_skill(tmp_path: Path) -> Path:
@@ -162,3 +163,38 @@ class TestBuildSystemPrompt:
         assert "## Skill: skill-a" in content
         # skill-b should only appear in meta header, not in detailed section
         assert "## Skill: skill-b" not in content
+
+
+class TestMemoryInjection:
+    def test_system_prompt_includes_memory_when_store_provided(self, multi_skill_dir: Path, tmp_path: Path):
+        registry = SkillRegistry(multi_skill_dir)
+        memory_store = LongTermMemoryStore(tmp_path / ".memory")
+        memory_store.ensure_files()
+        (tmp_path / ".memory" / "USER.md").write_text(
+            "# User\n\nCall me Yazuki.\n", encoding="utf-8"
+        )
+
+        msg = build_system_prompt(registry, selected=[], long_term_memory=memory_store)
+        assert "Yazuki" in msg.content
+
+    def test_system_prompt_works_without_memory_store(self, multi_skill_dir: Path):
+        registry = SkillRegistry(multi_skill_dir)
+        msg = build_system_prompt(registry, selected=[], long_term_memory=None)
+        assert "personal assistant" in msg.content.lower()
+
+    def test_memory_appears_before_skills_in_prompt(self, multi_skill_dir: Path, tmp_path: Path):
+        registry = SkillRegistry(multi_skill_dir)
+        memory_store = LongTermMemoryStore(tmp_path / ".memory")
+        memory_store.add_memory(
+            slug="test-mem",
+            title="Test Memory",
+            summary="A test memory",
+            body="This is a test memory entry.",
+        )
+
+        msg = build_system_prompt(registry, selected=[], long_term_memory=memory_store)
+        content = msg.content
+        # Memory should appear near the beginning, before Available Skills
+        mem_pos = content.index("Test Memory")
+        skills_pos = content.index("Available Skills")
+        assert mem_pos < skills_pos, "Memory should appear before skills in system prompt"

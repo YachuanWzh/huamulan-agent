@@ -200,7 +200,7 @@ def compile_agent(
     graph = StateGraph(AgentState)
     graph.add_node(
         "route_skills",
-        with_hooks(hooks, HookStage.ROUTE_SKILLS, build_skill_router(registry)),
+        with_hooks(hooks, HookStage.ROUTE_SKILLS, build_skill_router(registry, long_term_memory=long_term_memory)),
     )
     graph.add_node(
         "compact_context",

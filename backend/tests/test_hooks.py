@@ -89,7 +89,7 @@ def test_compile_agent_wraps_necessary_graph_nodes(monkeypatch):
 
     monkeypatch.setattr(agent_module, "StateGraph", FakeGraph)
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: object())
-    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry: (lambda state: state))
+    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, long_term_memory=None: (lambda state: state))
     monkeypatch.setattr(agent_module, "ToolNode", lambda tools: object())
 
     manager = AgentHookManager()
@@ -157,7 +157,7 @@ async def test_agent_node_propagates_runnable_config_to_llm(monkeypatch):
     monkeypatch.setattr(agent_module, "StateGraph", FakeGraph)
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
     monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
-    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry: (lambda state: state))
+    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, long_term_memory=None: (lambda state: state))
     monkeypatch.setattr(agent_module, "ToolNode", lambda tools: object())
 
     agent_module.compile_agent(
