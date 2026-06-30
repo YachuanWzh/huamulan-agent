@@ -58,9 +58,16 @@ class PostgresMemory:
         async with self.pool.connection() as conn:
             cursor = await conn.execute(
                 """
-                SELECT thread_id, MAX((checkpoint->>'ts')::timestamptz) AS updated_at
-                FROM checkpoints
-                GROUP BY thread_id
+                WITH latest AS (
+                    SELECT DISTINCT ON (thread_id)
+                        thread_id,
+                        (checkpoint->>'ts')::timestamptz AS updated_at,
+                        checkpoint
+                    FROM checkpoints
+                    ORDER BY thread_id, (checkpoint->>'ts')::timestamptz DESC NULLS LAST
+                )
+                SELECT thread_id, updated_at, checkpoint
+                FROM latest
                 ORDER BY updated_at DESC NULLS LAST, thread_id ASC
                 LIMIT %s
                 """,
@@ -71,6 +78,7 @@ class PostgresMemory:
             {
                 "thread_id": row[0],
                 "updated_at": row[1],
+                "summary": _thread_summary_from_checkpoint(row[2]),
             }
             for row in rows
         ]
@@ -588,6 +596,59 @@ def _serialize_checkpoint(checkpoint: Any) -> dict[str, Any]:
     }
 
 
+def _thread_summary_from_checkpoint(checkpoint: Any) -> str | None:
+    checkpoint_data = checkpoint if isinstance(checkpoint, dict) else {}
+    values = checkpoint_data.get("channel_values", {})
+    if not isinstance(values, dict):
+        return None
+    messages = values.get("messages", [])
+    if not isinstance(messages, list):
+        return None
+
+    for message in messages:
+        if _message_role(message) == "user":
+            content = _message_content_text(_message_content(message)).strip()
+            if content:
+                return _clip_text(content)
+    for message in messages:
+        content = _message_content_text(_message_content(message)).strip()
+        if content:
+            return _clip_text(content)
+    return None
+
+
+def _message_role(message: Any) -> str | None:
+    message_type = getattr(message, "type", None)
+    if message_type is None and isinstance(message, dict):
+        message_type = message.get("type")
+        if message_type is None and isinstance(message.get("id"), list):
+            type_name = str(message["id"][-1])
+            if type_name.endswith("Message"):
+                type_name = type_name[: -len("Message")]
+            message_type = type_name.lower()
+    return {
+        "human": "user",
+        "ai": "assistant",
+        "tool": "tool_call",
+    }.get(message_type)
+
+
+def _message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        if "content" in message:
+            return message.get("content", "")
+        kwargs = message.get("kwargs")
+        if isinstance(kwargs, dict):
+            return kwargs.get("content", "")
+        return ""
+    return getattr(message, "content", "")
+
+
+def _clip_text(value: str, limit: int = 80) -> str:
+    single_line = " ".join(value.split())
+    return single_line if len(single_line) <= limit else f"{single_line[:limit].rstrip()}..."
+
+
 def _checkpoint_data(checkpoint: Any) -> dict[str, Any]:
     data = getattr(checkpoint, "checkpoint", None)
     if data is None and isinstance(checkpoint, dict):
@@ -622,15 +683,10 @@ def _replay_values(values: Any) -> dict[str, Any]:
 
 
 def _serialize_message(message: Any) -> dict[str, Any] | None:
-    message_type = getattr(message, "type", None)
-    role = {
-        "human": "user",
-        "ai": "assistant",
-        "tool": "tool_call",
-    }.get(message_type)
+    role = _message_role(message)
     if role not in {"user", "assistant", "tool_call"}:
         return None
-    content = _message_content_text(getattr(message, "content", ""))
+    content = _message_content_text(_message_content(message))
     return {"role": role, "content": content}
 
 

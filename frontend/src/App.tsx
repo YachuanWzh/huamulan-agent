@@ -13,6 +13,7 @@ function createThreadId() {
 
 function App() {
   const [threadId, setThreadId] = useState<string | null>(null)
+  const [conversationKey, setConversationKey] = useState('empty-thread')
   const [replayState, setReplayState] = useState<ReplayState | null>(null)
   const [activePanel, setActivePanel] = useState<'chat' | 'checkpoint' | 'audit'>('chat')
 
@@ -24,13 +25,19 @@ function App() {
     return id
   }
 
+  const handleNewConversation = () => {
+    const id = handleThreadCreated()
+    setConversationKey(id)
+  }
+
   const handleThreadCleared = () => {
-    handleThreadCreated()
+    handleNewConversation()
   }
 
   const handleThreadSelected = (id: string) => {
     localStorage.setItem('threadId', id)
     setThreadId(id)
+    setConversationKey(id)
     setActivePanel('chat')
   }
 
@@ -55,10 +62,10 @@ function App() {
       <main className="app-body" aria-label="Conversation workspace">
         {activePanel === 'chat' ? (
           <ChatPanel
-            key={threadId ?? 'empty-thread'}
+            key={conversationKey}
             threadId={threadId}
             onThreadCreated={handleThreadCreated}
-            onNewConversation={handleThreadCreated}
+            onNewConversation={handleNewConversation}
             replayState={replayState}
           />
         ) : (

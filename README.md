@@ -24,6 +24,7 @@
 ### 安全体系
 - **Prompt Guard**：4 类注入/越狱检测（指令覆盖、系统提示泄露、DAN 越狱、身份伪造）
 - **Tool Guard**：10 类危险命令检测（磁盘格式化、Fork 炸弹、反弹 Shell、提权等）
+- **文件写入授权**：`write_file` 写入/追加必须经用户审批；审批通过后允许正常落盘，仍受工作区路径边界保护
 - **调用中间件**：频率限制（50 次/工具/轮）/ 总量限制（20 次/轮）/ 循环检测（15 次相同参数）
 - **审计日志**：所有安全事件持久化到 PostgreSQL，前端 Audit 面板可查询
 - **执行日志追踪**：完整 Agent 执行链路记录（turn / LLM / tool / retry / approval / security），含 token 用量、耗时、输入输出、错误信息等结构化数据，支持按事件类型筛选与重试链可视化
@@ -44,7 +45,7 @@
 - `list_directory` / `search_files` — 目录浏览和内容搜索
 
 ### 审批与回放
-- **工具审批门**：Agent 的所有工具调用需用户 Approve/Deny 后才执行
+- **工具审批门**：Agent 的所有工具调用需用户 Approve/Deny 后才执行；文件写入和更新在用户批准后继续执行
 - **线程管理**：列出/删除/清空会话线程
 - **Checkpoint 回放**：完整的 LangGraph 状态检查点历史，可回放到任意节点
 - **Hook 扩展**：Agent 生命周期 Hook（route_skills/compact_context/agent/memory_reflection/approval/tools 的 before/after/error 阶段）

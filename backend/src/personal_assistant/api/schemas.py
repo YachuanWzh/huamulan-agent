@@ -131,6 +131,7 @@ class ReplayResponse(BaseModel):
 class ThreadSummary(BaseModel):
     thread_id: str
     updated_at: datetime | None = None
+    summary: str | None = None
 
 
 class DeleteThreadResponse(BaseModel):

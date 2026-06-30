@@ -5,6 +5,7 @@ import App from './App'
 
 vi.mock('./components/ChatPanel', async () => {
   const React = await vi.importActual<typeof import('react')>('react')
+  let mountCounter = 0
   return {
     ChatPanel: ({
       threadId,
@@ -16,10 +17,12 @@ vi.mock('./components/ChatPanel', async () => {
       onThreadCreated: () => string
     }) => {
       const [initialThreadId] = React.useState(threadId)
+      const [mountId] = React.useState(() => String(++mountCounter))
       return (
         <div>
           <div data-testid="chat-thread">{threadId}</div>
           <div data-testid="chat-initial-thread">{initialThreadId}</div>
+          <div data-testid="chat-mount-id">{mountId}</div>
           <div data-testid="chat-replay">{replayState?.checkpoint_id ?? ''}</div>
           <button onClick={onThreadCreated}>Mock create thread</button>
         </div>
@@ -117,6 +120,21 @@ describe('App thread id', () => {
 
     expect(randomUUID).toHaveBeenCalledOnce()
     expect(localStorage.getItem('threadId')).toBe('created-thread')
+    expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('created-thread')
+  })
+
+  it('keeps the chat panel mounted when the first message creates a thread', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('created-thread' as `${string}-${string}-${string}-${string}-${string}`)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    const mountIdBefore = screen.getByTestId('chat-mount-id').textContent
+
+    await user.click(screen.getByRole('button', { name: /mock create thread/i }))
+
+    expect(screen.getByTestId('chat-mount-id')).toHaveTextContent(mountIdBefore!)
+    expect(screen.getByTestId('chat-thread')).toHaveTextContent('created-thread')
     expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('created-thread')
   })
 

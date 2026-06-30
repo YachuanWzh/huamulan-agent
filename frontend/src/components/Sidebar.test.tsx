@@ -140,10 +140,12 @@ describe('Sidebar', () => {
       {
         thread_id: 'thread-2',
         updated_at: '2026-06-29T05:00:00+00:00',
+        summary: '修复首次发送消息丢失',
       },
       {
         thread_id: 'thread-1',
         updated_at: '2026-06-29T04:00:00+00:00',
+        summary: '整理历史记录摘要',
       },
     ])
     mockApi.replay.mockResolvedValue({
@@ -163,6 +165,8 @@ describe('Sidebar', () => {
     )
 
     await user.click(screen.getByRole('tab', { name: /history/i }))
+    expect(await screen.findByText('修复首次发送消息丢失')).toBeInTheDocument()
+    expect(screen.getByText('thread-2')).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: /open session thread-2/i }))
 
     expect(mockApi.listThreads).toHaveBeenCalled()
@@ -179,6 +183,7 @@ describe('Sidebar', () => {
       {
         thread_id: 'thread-2',
         updated_at: '2026-06-29T05:00:00+00:00',
+        summary: '等待工具审批',
       },
     ])
     mockApi.replay.mockResolvedValue({
@@ -222,10 +227,12 @@ describe('Sidebar', () => {
       {
         thread_id: 'thread-2',
         updated_at: '2026-06-29T05:00:00+00:00',
+        summary: '删除单条历史',
       },
       {
         thread_id: 'thread-1',
         updated_at: '2026-06-29T04:00:00+00:00',
+        summary: '保留另一条历史',
       },
     ])
     mockApi.deleteThread.mockResolvedValue({ thread_id: 'thread-2', deleted: true })
@@ -249,6 +256,7 @@ describe('Sidebar', () => {
       {
         thread_id: 'thread-2',
         updated_at: '2026-06-29T05:00:00+00:00',
+        summary: '清空历史',
       },
     ])
     mockApi.clearThreads.mockResolvedValue({ thread_ids: ['thread-2'], deleted: 1 })

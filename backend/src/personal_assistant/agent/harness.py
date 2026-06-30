@@ -149,6 +149,7 @@ _TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
 _READ_ONLY_TOOL_NAMES = {"read_file"}
+_WRITE_FILE_TOOL_NAME = "write_file"
 _APPROVAL_OVERRIDABLE_TOOL_GUARD_CATEGORIES = {"delete_or_move_files"}
 
 
@@ -798,11 +799,13 @@ def _approved_tool_guard_override(
     match: GuardMatch,
     approval_decisions: dict[str, bool] | None,
 ) -> bool:
-    if match.category not in _APPROVAL_OVERRIDABLE_TOOL_GUARD_CATEGORIES:
-        return False
     if approval_decisions is None:
         return False
-    return approval_decisions.get(_tool_call_id(call)) is True
+    if approval_decisions.get(_tool_call_id(call)) is not True:
+        return False
+    if _tool_call_name(call) == _WRITE_FILE_TOOL_NAME:
+        return True
+    return match.category in _APPROVAL_OVERRIDABLE_TOOL_GUARD_CATEGORIES
 
 
 def _run_pre_tool_middlewares(

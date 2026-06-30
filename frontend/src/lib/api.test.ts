@@ -256,6 +256,7 @@ describe('api', () => {
             {
               thread_id: 'thread-2',
               updated_at: '2026-06-29T05:00:00+00:00',
+              summary: '修复首次发送消息丢失',
             },
           ])
         }),
@@ -267,6 +268,7 @@ describe('api', () => {
         {
           thread_id: 'thread-2',
           updated_at: '2026-06-29T05:00:00+00:00',
+          summary: '修复首次发送消息丢失',
         },
       ])
     })

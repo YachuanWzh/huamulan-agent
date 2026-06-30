@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from personal_assistant.api import server
-from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.memory.postgres import PostgresMemory, _thread_summary_from_checkpoint
 
 
 class FakeCheckpointer:
@@ -84,10 +84,12 @@ def test_list_threads_endpoint_returns_sessions(monkeypatch: pytest.MonkeyPatch)
                 {
                     "thread_id": "thread-2",
                     "updated_at": "2026-06-29T05:00:00+00:00",
+                    "summary": "修复首次发送消息丢失",
                 },
                 {
                     "thread_id": "thread-1",
                     "updated_at": "2026-06-29T04:00:00+00:00",
+                    "summary": None,
                 },
             ]
 
@@ -97,6 +99,28 @@ def test_list_threads_endpoint_returns_sessions(monkeypatch: pytest.MonkeyPatch)
 
     assert response.status_code == 200
     assert response.json() == [
-        {"thread_id": "thread-2", "updated_at": "2026-06-29T05:00:00Z"},
-        {"thread_id": "thread-1", "updated_at": "2026-06-29T04:00:00Z"},
+        {
+            "thread_id": "thread-2",
+            "updated_at": "2026-06-29T05:00:00Z",
+            "summary": "修复首次发送消息丢失",
+        },
+        {
+            "thread_id": "thread-1",
+            "updated_at": "2026-06-29T04:00:00Z",
+            "summary": None,
+        },
     ]
+
+
+def test_thread_summary_uses_first_user_message_from_checkpoint() -> None:
+    checkpoint = {
+        "channel_values": {
+            "messages": [
+                {"type": "system", "content": "hidden"},
+                {"type": "human", "content": "帮我修复首次发送消息被吞掉的问题"},
+                {"type": "ai", "content": "好的"},
+            ],
+        }
+    }
+
+    assert _thread_summary_from_checkpoint(checkpoint) == "帮我修复首次发送消息被吞掉的问题"

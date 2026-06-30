@@ -2,7 +2,7 @@
 ## Superharness
 
 This project uses **superharness**, loaded as a Codex plugin from the local
-marketplace at `.Codex/superharness` (enabled in `.Codex/settings.json` via
+marketplace at `.claude/superharness` (enabled in `.Codex/settings.json` via
 `extraKnownMarketplaces` + `enabledPlugins`). Its SessionStart hook injects
 `HARNESS.md` into every session. If that context is missing, read
 `.Codex/superharness/plugins/superharness/HARNESS.md` now and follow it for all

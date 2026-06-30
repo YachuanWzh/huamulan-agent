@@ -67,6 +67,7 @@ export interface ReplayResponse {
 export interface ThreadSummary {
   thread_id: string
   updated_at: string | null
+  summary?: string | null
 }
 
 export interface DeleteThreadResponse {

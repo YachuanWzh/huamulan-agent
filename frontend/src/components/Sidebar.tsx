@@ -218,9 +218,12 @@ export function Sidebar({
                         disabled={openingThreadId === thread.thread_id}
                         onClick={() => openThread(thread.thread_id)}
                       >
-                        <span className="history-role">Session</span>
+                        <span className="history-role">Thread</span>
                         <span className="history-preview">
-                          <span>{thread.thread_id}</span>
+                          <span className="history-summary">
+                            {thread.summary || 'Untitled conversation'}
+                          </span>
+                          <span className="history-thread-id">{thread.thread_id}</span>
                           {thread.updated_at && (
                             <span className="history-time">
                               {new Date(thread.updated_at).toLocaleString()}

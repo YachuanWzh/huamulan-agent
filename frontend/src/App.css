@@ -973,6 +973,20 @@ button {
   display: block;
 }
 
+.history-summary {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.history-thread-id {
+  margin-top: 2px;
+  color: var(--color-muted);
+  font-family:
+    "SF Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", ui-monospace,
+    monospace;
+  font-size: var(--text-xs);
+}
+
 .history-time {
   margin-top: 3px;
   color: var(--color-muted);
