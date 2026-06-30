@@ -105,6 +105,36 @@ export interface ToolError {
   will_retry: boolean
 }
 
+export interface ExecutionLog {
+  id: number
+  created_at: string
+  thread_id: string
+  run_id?: string | null
+  parent_id?: string | null
+  event_type: 'turn' | 'skill_route' | 'llm' | 'tool' | 'tool_retry' | 'approval' | 'security'
+  status: 'started' | 'completed' | 'failed' | 'blocked' | 'retrying' | 'approved' | 'denied'
+  name: string | null
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  error: Record<string, unknown>
+  duration_ms: number | null
+  token_usage: Record<string, unknown>
+  metadata: Record<string, unknown>
+}
+
+export interface ExecutionSummary {
+  thread_id: string
+  total_events: number
+  total_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+  tool_calls: number
+  tool_errors: number
+  tool_retries: number
+  security_events: number
+  total_duration_ms: number
+}
+
 // --- SSE Streaming types ---
 
 export interface StreamToken {
@@ -281,6 +311,16 @@ export const api = {
     if (threadId) params.set('thread_id', threadId)
     return request<ToolError[]>(`/api/tool-errors?${params.toString()}`)
   },
+
+  listExecutionLogs: (threadId: string) =>
+    request<ExecutionLog[]>(
+      `/api/threads/${threadId}/execution-logs?limit=500`,
+    ),
+
+  getExecutionSummary: (threadId: string) =>
+    request<ExecutionSummary>(
+      `/api/threads/${threadId}/execution-summary`,
+    ),
 
   listSkills: () => request<SkillInfo[]>('/api/skills'),
 

@@ -334,6 +334,62 @@ describe('api', () => {
     })
   })
 
+  describe('execution audit', () => {
+    it('returns execution logs for a thread', async () => {
+      server.use(
+        http.get(`${BASE}/api/threads/thread-1/execution-logs`, ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.get('limit')).toBe('500')
+          return HttpResponse.json([
+            {
+              id: 1,
+              created_at: '2026-06-30T01:00:00Z',
+              thread_id: 'thread-1',
+              event_type: 'llm',
+              status: 'completed',
+              name: 'agent',
+              input: {},
+              output: {},
+              error: {},
+              duration_ms: 30,
+              token_usage: { total_tokens: 42 },
+              metadata: {},
+            },
+          ])
+        }),
+      )
+
+      const result = await api.listExecutionLogs('thread-1')
+
+      expect(result[0]!.event_type).toBe('llm')
+      expect(result[0]!.token_usage.total_tokens).toBe(42)
+    })
+
+    it('returns execution summary for a thread', async () => {
+      server.use(
+        http.get(`${BASE}/api/threads/thread-1/execution-summary`, () =>
+          HttpResponse.json({
+            thread_id: 'thread-1',
+            total_events: 4,
+            total_tokens: 100,
+            prompt_tokens: 70,
+            completion_tokens: 30,
+            tool_calls: 2,
+            tool_errors: 1,
+            tool_retries: 1,
+            security_events: 0,
+            total_duration_ms: 250,
+          }),
+        ),
+      )
+
+      const result = await api.getExecutionSummary('thread-1')
+
+      expect(result.total_tokens).toBe(100)
+      expect(result.tool_retries).toBe(1)
+    })
+  })
+
   describe('listSkills', () => {
     it('returns skills array', async () => {
       server.use(

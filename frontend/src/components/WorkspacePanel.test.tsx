@@ -10,6 +10,8 @@ vi.mock('../lib/api', () => ({
     deleteThread: vi.fn(),
     listAuditEvents: vi.fn(),
     listToolErrors: vi.fn(),
+    listExecutionLogs: vi.fn(),
+    getExecutionSummary: vi.fn(),
   },
 }))
 
@@ -20,36 +22,111 @@ describe('WorkspacePanel', () => {
     vi.clearAllMocks()
   })
 
-  it('uses the main workspace for tool error lookup', async () => {
-    mockApi.listAuditEvents.mockResolvedValue([])
-    mockApi.listToolErrors.mockResolvedValue([
+  it('renders audit summary, token usage, and grouped retry chain', async () => {
+    mockApi.getExecutionSummary.mockResolvedValue({
+      thread_id: 't1',
+      total_events: 4,
+      total_tokens: 120,
+      prompt_tokens: 80,
+      completion_tokens: 40,
+      tool_calls: 1,
+      tool_errors: 2,
+      tool_retries: 2,
+      security_events: 0,
+      total_duration_ms: 320,
+    })
+    mockApi.listExecutionLogs.mockResolvedValue([
       {
-        id: 12,
-        created_at: '2026-06-30T01:00:00+00:00',
+        id: 1,
+        created_at: '2026-06-30T01:00:00Z',
         thread_id: 't1',
-        tool_call_id: 'call-1',
-        tool_name: 'lookup',
-        tool_args: { query: 'alpha' },
-        attempt: 3,
-        max_attempts: 4,
-        error_type: 'ValueError',
-        error_message: 'bad query',
-        will_retry: false,
+        event_type: 'llm',
+        status: 'completed',
+        name: 'agent',
+        input: {},
+        output: { content: 'thinking' },
+        error: {},
+        duration_ms: 90,
+        token_usage: { prompt_tokens: 80, completion_tokens: 40, total_tokens: 120 },
+        metadata: {},
+      },
+      {
+        id: 2,
+        created_at: '2026-06-30T01:00:01Z',
+        thread_id: 't1',
+        event_type: 'tool_retry',
+        status: 'retrying',
+        name: 'lookup',
+        input: { query: 'alpha' },
+        output: {},
+        error: { type: 'ValueError', message: 'bad query 1' },
+        duration_ms: 20,
+        token_usage: {},
+        metadata: { tool_call_id: 'call-1', attempt: 1, max_attempts: 3, will_retry: true },
+      },
+      {
+        id: 3,
+        created_at: '2026-06-30T01:00:02Z',
+        thread_id: 't1',
+        event_type: 'tool_retry',
+        status: 'retrying',
+        name: 'lookup',
+        input: { query: 'alpha' },
+        output: {},
+        error: { type: 'ValueError', message: 'bad query 2' },
+        duration_ms: 25,
+        token_usage: {},
+        metadata: { tool_call_id: 'call-1', attempt: 2, max_attempts: 3, will_retry: true },
+      },
+      {
+        id: 4,
+        created_at: '2026-06-30T01:00:03Z',
+        thread_id: 't1',
+        event_type: 'tool',
+        status: 'completed',
+        name: 'lookup',
+        input: { query: 'alpha' },
+        output: { content: '{"answer":"ok"}' },
+        error: {},
+        duration_ms: 40,
+        token_usage: {},
+        metadata: { tool_call_id: 'call-1', attempt: 3 },
       },
     ])
 
-    const user = userEvent.setup()
     render(<WorkspacePanel panel="audit" threadId="t1" />)
 
-    await user.click(screen.getByRole('tab', { name: /tool errors/i }))
+    expect(await screen.findByText('120')).toBeInTheDocument()
+    expect(screen.getByText(/Total Tokens/i)).toBeInTheDocument()
+    expect(screen.getByText(/Prompt 80 \/ Completion 40/i)).toBeInTheDocument()
+    expect(screen.getByText(/lookup retry chain/i)).toBeInTheDocument()
+    expect(screen.getByText(/Attempt 1 failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/Attempt 2 failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/Attempt 3 completed/i)).toBeInTheDocument()
+  })
+
+  it('uses the main workspace for execution audit lookup', async () => {
+    mockApi.getExecutionSummary.mockResolvedValue({
+      thread_id: 't1',
+      total_events: 0,
+      total_tokens: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      tool_calls: 0,
+      tool_errors: 0,
+      tool_retries: 0,
+      security_events: 0,
+      total_duration_ms: 0,
+    })
+    mockApi.listExecutionLogs.mockResolvedValue([])
+
+    render(<WorkspacePanel panel="audit" threadId="t1" />)
 
     await waitFor(() => {
-      expect(mockApi.listToolErrors).toHaveBeenCalledWith('t1')
+      expect(mockApi.getExecutionSummary).toHaveBeenCalledWith('t1')
+      expect(mockApi.listExecutionLogs).toHaveBeenCalledWith('t1')
       expect(screen.getByRole('region', { name: /operations workspace/i })).toBeInTheDocument()
-      expect(screen.getByText('lookup')).toBeInTheDocument()
-      expect(screen.getByText('ValueError: bad query')).toBeInTheDocument()
-      expect(screen.getByText(/attempt 3 \/ 4/i)).toBeInTheDocument()
-      expect(screen.getByText(/"query": "alpha"/i)).toBeInTheDocument()
+      expect(screen.getByText(/no execution logs for this thread/i)).toBeInTheDocument()
     })
   })
 

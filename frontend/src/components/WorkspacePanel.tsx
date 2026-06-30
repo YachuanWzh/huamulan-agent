@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type AuditEvent, type ReplayResponse, type ReplayState, type ToolError } from '../lib/api'
+import {
+  api,
+  type ExecutionLog,
+  type ExecutionSummary,
+  type ReplayResponse,
+  type ReplayState,
+} from '../lib/api'
 
 interface Props {
   panel: 'checkpoint' | 'audit'
@@ -8,7 +14,7 @@ interface Props {
   onReplayState?: (state: ReplayState) => void
 }
 
-type AuditView = 'security' | 'tool-errors'
+type AuditFilter = 'all' | 'llm' | 'tool' | 'tool_retry' | 'security' | 'approval'
 
 export function WorkspacePanel({
   panel,
@@ -19,11 +25,10 @@ export function WorkspacePanel({
   const [replay, setReplay] = useState<ReplayResponse | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
   const [historyDeleting, setHistoryDeleting] = useState(false)
-  const [auditView, setAuditView] = useState<AuditView>('security')
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
-  const [auditLoading, setAuditLoading] = useState(false)
-  const [toolErrors, setToolErrors] = useState<ToolError[]>([])
-  const [toolErrorsLoading, setToolErrorsLoading] = useState(false)
+  const [executionLogs, setExecutionLogs] = useState<ExecutionLog[]>([])
+  const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null)
+  const [executionLoading, setExecutionLoading] = useState(false)
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>('all')
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -39,24 +44,25 @@ export function WorkspacePanel({
     setReplayLoading(false)
   }, [threadId])
 
-  const loadAuditEvents = useCallback(async () => {
-    setAuditLoading(true)
-    try {
-      setAuditEvents(await api.listAuditEvents(threadId ?? undefined))
-    } catch {
-      setAuditEvents([])
+  const loadExecutionAudit = useCallback(async () => {
+    if (!threadId) {
+      setExecutionLogs([])
+      setExecutionSummary(null)
+      return
     }
-    setAuditLoading(false)
-  }, [threadId])
-
-  const loadToolErrors = useCallback(async () => {
-    setToolErrorsLoading(true)
+    setExecutionLoading(true)
     try {
-      setToolErrors(await api.listToolErrors(threadId ?? undefined))
+      const [summary, logs] = await Promise.all([
+        api.getExecutionSummary(threadId),
+        api.listExecutionLogs(threadId),
+      ])
+      setExecutionSummary(summary)
+      setExecutionLogs(logs)
     } catch {
-      setToolErrors([])
+      setExecutionSummary(null)
+      setExecutionLogs([])
     }
-    setToolErrorsLoading(false)
+    setExecutionLoading(false)
   }, [threadId])
 
   useEffect(() => {
@@ -66,13 +72,10 @@ export function WorkspacePanel({
   }, [loadReplay, panel])
 
   useEffect(() => {
-    if (panel !== 'audit') return
-    if (auditView === 'security') {
-      loadAuditEvents()
-    } else {
-      loadToolErrors()
+    if (panel === 'audit') {
+      loadExecutionAudit()
     }
-  }, [auditView, loadAuditEvents, loadToolErrors, panel])
+  }, [loadExecutionAudit, panel])
 
   const deleteCurrentHistory = async () => {
     if (!threadId) return
@@ -99,6 +102,12 @@ export function WorkspacePanel({
     }
     setHistoryDeleting(false)
   }
+
+  const visibleLogs =
+    auditFilter === 'all'
+      ? executionLogs
+      : executionLogs.filter((log) => log.event_type === auditFilter)
+  const retryChains = buildRetryChains(executionLogs)
 
   return (
     <section className="workspace-panel" aria-label="Operations workspace">
@@ -160,89 +169,139 @@ export function WorkspacePanel({
           <div className="workspace-header">
             <div>
               <h2>Operational Audit</h2>
-              <p>Review security decisions and tool failures with full-width detail.</p>
+              <p>Inspect the thread trace, token usage, tool results, and retry chains.</p>
             </div>
-            <div className="workspace-tabs" role="tablist" aria-label="Audit views">
-              <button
-                role="tab"
-                aria-selected={auditView === 'security'}
-                className={auditView === 'security' ? 'active' : ''}
-                onClick={() => setAuditView('security')}
-              >
-                Security Audit
-              </button>
-              <button
-                role="tab"
-                aria-selected={auditView === 'tool-errors'}
-                className={auditView === 'tool-errors' ? 'active' : ''}
-                onClick={() => setAuditView('tool-errors')}
-              >
-                Tool Errors
+            <div className="workspace-actions">
+              <button onClick={loadExecutionAudit} disabled={executionLoading}>
+                Refresh
               </button>
             </div>
           </div>
 
-          {auditView === 'security' && (
-            <>
-              <div className="workspace-actions">
-                <button onClick={loadAuditEvents} disabled={auditLoading}>Refresh</button>
-              </div>
-              {auditLoading && <div className="loading">Loading...</div>}
-              {!auditLoading && auditEvents.length === 0 && (
-                <div className="workspace-empty">No audit events for this thread.</div>
-              )}
-              {!auditLoading && auditEvents.length > 0 && (
-                <ul className="workspace-audit-list">
-                  {auditEvents.map((event) => (
-                    <li key={event.id} className={`workspace-audit-item severity-${event.severity.toLowerCase()}`}>
-                      <div className="workspace-row">
-                        <span>{event.category}</span>
-                        <strong>{event.severity}</strong>
-                      </div>
-                      <p>{event.reason}</p>
-                      <div className="workspace-meta">
-                        <span>{event.source}</span>
-                        {event.created_at && <span>{new Date(event.created_at).toLocaleString()}</span>}
-                      </div>
-                      {event.subject && <pre>{event.subject}</pre>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
+          <div className="audit-summary-grid">
+            <div className="audit-metric">
+              <span>Total Tokens</span>
+              <strong>{executionSummary?.total_tokens ?? 0}</strong>
+              <small>
+                Prompt {executionSummary?.prompt_tokens ?? 0} / Completion{' '}
+                {executionSummary?.completion_tokens ?? 0}
+              </small>
+            </div>
+            <div className="audit-metric">
+              <span>Tool Calls</span>
+              <strong>{executionSummary?.tool_calls ?? 0}</strong>
+            </div>
+            <div className="audit-metric">
+              <span>Errors</span>
+              <strong>{executionSummary?.tool_errors ?? 0}</strong>
+            </div>
+            <div className="audit-metric">
+              <span>Retries</span>
+              <strong>{executionSummary?.tool_retries ?? 0}</strong>
+            </div>
+            <div className="audit-metric">
+              <span>Duration</span>
+              <strong>{executionSummary?.total_duration_ms ?? 0}ms</strong>
+            </div>
+          </div>
 
-          {auditView === 'tool-errors' && (
-            <>
-              <div className="workspace-actions">
-                <button onClick={loadToolErrors} disabled={toolErrorsLoading}>Refresh</button>
-              </div>
-              {toolErrorsLoading && <div className="loading">Loading...</div>}
-              {!toolErrorsLoading && toolErrors.length === 0 && (
-                <div className="workspace-empty">No tool errors for this thread.</div>
-              )}
-              {!toolErrorsLoading && toolErrors.length > 0 && (
-                <ul className="workspace-error-list">
-                  {toolErrors.map((error) => (
-                    <li key={error.id} className="workspace-error-item">
-                      <div className="workspace-row">
-                        <span>{error.tool_name}</span>
-                        <strong>{error.will_retry ? 'Retrying' : 'Final'}</strong>
-                      </div>
-                      <p>{error.error_type}: {error.error_message}</p>
-                      <div className="workspace-meta">
-                        <span>Attempt {error.attempt} / {error.max_attempts}</span>
-                        {error.created_at && <span>{new Date(error.created_at).toLocaleString()}</span>}
-                      </div>
-                      <pre>{JSON.stringify(error.tool_args, null, 2)}</pre>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
+          <div className="workspace-tabs" role="tablist" aria-label="Audit filters">
+            {(['all', 'llm', 'tool', 'tool_retry', 'security', 'approval'] as const).map(
+              (filter) => (
+                <button
+                  key={filter}
+                  role="tab"
+                  aria-selected={auditFilter === filter}
+                  className={auditFilter === filter ? 'active' : ''}
+                  onClick={() => setAuditFilter(filter)}
+                >
+                  {filter === 'all' ? 'All' : filter}
+                </button>
+              ),
+            )}
+          </div>
+
+          {executionLoading && <div className="loading">Loading...</div>}
+          {!executionLoading && executionLogs.length === 0 && (
+            <div className="workspace-empty">No execution logs for this thread.</div>
+          )}
+          {!executionLoading && retryChains.length > 0 && (
+            <div className="retry-chain-list">
+              {retryChains.map((chain) => (
+                <section key={chain.toolCallId} className="retry-chain">
+                  <h3>{chain.name} retry chain</h3>
+                  <div className="retry-chain-steps">
+                    {chain.attempts.map((attempt) => (
+                      <span key={attempt.id}>
+                        Attempt {String(attempt.metadata.attempt ?? '?')}{' '}
+                        {attempt.status === 'completed' ? 'completed' : 'failed'}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+          {!executionLoading && visibleLogs.length > 0 && (
+            <ol className="audit-timeline">
+              {visibleLogs.map((log) => (
+                <li
+                  key={log.id}
+                  className={`audit-event event-${log.event_type} status-${log.status}`}
+                >
+                  <details>
+                    <summary>
+                      <span className="audit-time">
+                        {new Date(log.created_at).toLocaleString()}
+                      </span>
+                      <strong>{log.name ?? log.event_type}</strong>
+                      <span>{log.status}</span>
+                      {log.duration_ms != null && <span>{log.duration_ms}ms</span>}
+                      {Number(log.token_usage.total_tokens ?? 0) > 0 && (
+                        <span>{String(log.token_usage.total_tokens)} tokens</span>
+                      )}
+                    </summary>
+                    <pre>
+                      {JSON.stringify(
+                        {
+                          input: log.input,
+                          output: log.output,
+                          error: log.error,
+                          metadata: log.metadata,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       )}
     </section>
+  )
+}
+
+function buildRetryChains(logs: ExecutionLog[]) {
+  const chains = new Map<string, ExecutionLog[]>()
+  for (const log of logs) {
+    const toolCallId =
+      typeof log.metadata.tool_call_id === 'string'
+        ? log.metadata.tool_call_id
+        : null
+    if (!toolCallId) continue
+    if (log.event_type !== 'tool_retry' && log.event_type !== 'tool') continue
+    const existing = chains.get(toolCallId) ?? []
+    existing.push(log)
+    chains.set(toolCallId, existing)
+  }
+  return Array.from(chains, ([toolCallId, attempts]) => ({
+    toolCallId,
+    name: attempts[0]?.name ?? 'tool',
+    attempts,
+  })).filter((chain) =>
+    chain.attempts.some((log) => log.event_type === 'tool_retry'),
   )
 }
