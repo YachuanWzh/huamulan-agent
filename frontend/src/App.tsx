@@ -39,14 +39,14 @@ function App() {
       <header className="app-header" aria-label="Assistant console">
         <h1>LangGraph Assistant</h1>
         <div className="header-actions">
-          <button
+          {/* <button
             type="button"
             className="header-audit-button"
             aria-label="Open audit workspace"
             onClick={() => setActivePanel('audit')}
           >
             Audit
-          </button>
+          </button> */}
           <div className="thread-info" title={threadId ?? ''}>
             Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
           </div>
