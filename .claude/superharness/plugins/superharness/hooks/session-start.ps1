@@ -25,6 +25,61 @@ if (Test-Path $stackPath) {
     }
 }
 
+# Append project memory from backend/.memory/ (MEMORY.md index + linked files + SYSTEM.md + USER.md)
+# The plugin root is .claude/superharness/plugins/superharness/ so project root is 4 levels up.
+$projectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $pluginRoot)))
+$memoryDir = Join-Path $projectRoot 'backend\.memory'
+if (Test-Path $memoryDir) {
+    $memoryIndexPath = Join-Path $memoryDir 'MEMORY.md'
+    if (Test-Path $memoryIndexPath) {
+        $memoryIndexContent = Get-Content $memoryIndexPath -Raw -Encoding UTF8
+        if ($memoryIndexContent) {
+            # Parse MEMORY.md for linked memory files: markdown links like [title](filename.md)
+            $linkedFiles = @()
+            $linkPattern = '\[([^\]]+)\]\(([^)]+\.md)\)'
+            $matches = [regex]::Matches($memoryIndexContent, $linkPattern)
+            foreach ($m in $matches) {
+                $linkedFiles += $m.Groups[2].Value
+            }
+
+            # Build memory context
+            $memoryContext = "`n`n<MEMORY>`n## Project Memory (from backend/.memory/)`n`n$memoryIndexContent`n"
+
+            # Read SYSTEM.md
+            $systemPath = Join-Path $memoryDir 'SYSTEM.md'
+            if (Test-Path $systemPath) {
+                $systemContent = Get-Content $systemPath -Raw -Encoding UTF8
+                if ($systemContent -and $systemContent.Trim() -ne '# System') {
+                    $memoryContext += "`n### System Context`n$systemContent`n"
+                }
+            }
+
+            # Read USER.md
+            $userPath = Join-Path $memoryDir 'USER.md'
+            if (Test-Path $userPath) {
+                $userContent = Get-Content $userPath -Raw -Encoding UTF8
+                if ($userContent -and $userContent.Trim() -ne '# User') {
+                    $memoryContext += "`n### User Context`n$userContent`n"
+                }
+            }
+
+            # Read each linked memory file
+            foreach ($file in $linkedFiles) {
+                $filePath = Join-Path $memoryDir $file
+                if (Test-Path $filePath) {
+                    $fileContent = Get-Content $filePath -Raw -Encoding UTF8
+                    if ($fileContent) {
+                        $memoryContext += "`n---`n$fileContent`n"
+                    }
+                }
+            }
+
+            $memoryContext += "</MEMORY>"
+            $context += $memoryContext
+        }
+    }
+}
+
 $payload = @{
     hookSpecificOutput = @{
         hookEventName     = 'SessionStart'
