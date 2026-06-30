@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import re
 
@@ -82,6 +83,36 @@ class LongTermMemoryStore:
                             parts.append(body)
 
         return "\n\n".join(parts)
+
+    async def read_all_cached(self, cache, ttl_seconds: int = 60) -> str:
+        key = f"pa:v1:long_term_memory:{_safe_slug(str(self.root))}:{self._files_version_hash()}"
+        try:
+            cached = await cache.get_json(key)
+        except Exception:
+            cached = None
+        if isinstance(cached, str):
+            return cached
+        value = self.read_all()
+        try:
+            await cache.set_json(key, value, ttl_seconds=ttl_seconds)
+        except Exception:
+            pass
+        return value
+
+    def _files_version_hash(self) -> str:
+        digest = hashlib.sha1()
+        if not self.root.exists():
+            digest.update(b"missing")
+            return digest.hexdigest()
+        for path in sorted(self.root.glob("*.md")):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            digest.update(str(path.relative_to(self.root)).encode("utf-8"))
+            digest.update(str(stat.st_mtime_ns).encode("ascii"))
+            digest.update(str(stat.st_size).encode("ascii"))
+        return digest.hexdigest()
 
 
 def _is_template_only(content: str, heading: str) -> bool:

@@ -21,6 +21,8 @@ _BASE_PROMPT = (
 def build_skill_router(
     registry: SkillRegistry,
     long_term_memory: "LongTermMemoryStore | None" = None,
+    cache=None,
+    memory_cache_ttl_seconds: int = 60,
 ):
     async def route_skills(state: AgentState) -> AgentState:
         user_text = "\n".join(
@@ -39,7 +41,18 @@ def build_skill_router(
         for name in selected:
             registry.load_skill(name)
 
-        system = build_system_prompt(registry, selected, long_term_memory=long_term_memory)
+        memory_text = None
+        if long_term_memory is not None and cache is not None:
+            memory_text = await long_term_memory.read_all_cached(
+                cache,
+                ttl_seconds=memory_cache_ttl_seconds,
+            )
+        system = build_system_prompt(
+            registry,
+            selected,
+            long_term_memory=long_term_memory,
+            memory_text=memory_text,
+        )
         return {
             "messages": [system],
             "selected_skills": selected,
@@ -53,6 +66,7 @@ def build_system_prompt(
     registry: SkillRegistry,
     selected: list[str],
     long_term_memory: "LongTermMemoryStore | None" = None,
+    memory_text: str | None = None,
 ) -> SystemMessage:
     """Build a progressive system prompt with meta overview + detailed selected skills.
 
@@ -65,7 +79,8 @@ def build_system_prompt(
 
     # Long-term memory — prepended so it's the first thing the agent sees
     if long_term_memory is not None:
-        memory_text = long_term_memory.read_all()
+        if memory_text is None:
+            memory_text = long_term_memory.read_all()
         if memory_text:
             sections.append(memory_text)
 

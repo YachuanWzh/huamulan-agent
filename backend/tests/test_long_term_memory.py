@@ -87,3 +87,54 @@ def test_read_all_handles_empty_store(tmp_path: Path) -> None:
 
     # Should return empty string or minimal content when files are just templates
     assert isinstance(result, str)
+
+
+class FakeCache:
+    def __init__(self):
+        self.values = {}
+        self.set_calls = []
+
+    async def get_json(self, key):
+        return self.values.get(key)
+
+    async def set_json(self, key, value, ttl_seconds):
+        self.values[key] = value
+        self.set_calls.append((key, ttl_seconds))
+
+    async def delete(self, key):
+        self.values.pop(key, None)
+
+    async def delete_pattern(self, pattern):
+        return None
+
+    async def close(self):
+        return None
+
+
+async def test_read_all_cached_reuses_value_when_memory_files_are_unchanged(tmp_path: Path) -> None:
+    store = LongTermMemoryStore(tmp_path)
+    store.ensure_files()
+    (tmp_path / "USER.md").write_text("# User\n\nFirst value.\n", encoding="utf-8")
+    cache = FakeCache()
+
+    first = await store.read_all_cached(cache, ttl_seconds=60)
+    second = await store.read_all_cached(cache, ttl_seconds=60)
+
+    assert "First value" in first
+    assert second == first
+    assert len(cache.set_calls) == 1
+
+
+async def test_read_all_cached_misses_when_memory_file_size_changes(tmp_path: Path) -> None:
+    store = LongTermMemoryStore(tmp_path)
+    store.ensure_files()
+    (tmp_path / "USER.md").write_text("# User\n\nShort.\n", encoding="utf-8")
+    cache = FakeCache()
+
+    first = await store.read_all_cached(cache, ttl_seconds=60)
+    (tmp_path / "USER.md").write_text("# User\n\nA much longer memory value.\n", encoding="utf-8")
+    second = await store.read_all_cached(cache, ttl_seconds=60)
+
+    assert "Short" in first
+    assert "much longer" in second
+    assert len(cache.set_calls) == 2

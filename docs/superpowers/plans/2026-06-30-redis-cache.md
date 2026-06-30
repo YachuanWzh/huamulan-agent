@@ -54,7 +54,7 @@ Add tests that assert `NoopCache` always misses and cache settings validate Redi
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cd backend; uv run pytest tests/test_cache.py tests/test_config.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cache.py tests/test_config.py -v`
 Expected: FAIL because `personal_assistant.cache` and cache settings do not exist.
 
 - [ ] **Step 3: Implement minimal code**
@@ -63,7 +63,7 @@ Create the cache package, add `NoopCache`, and add config fields with validation
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
-Run: `cd backend; uv run pytest tests/test_cache.py tests/test_config.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cache.py tests/test_config.py -v`
 Expected: PASS.
 
 ## Task 2: CachedPostgresMemory Wrapper
@@ -83,7 +83,7 @@ Add fake cache and fake memory tests for cached summary reads, invalidation afte
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cd backend; uv run pytest tests/test_cached_memory.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cached_memory.py -v`
 Expected: FAIL because `personal_assistant.memory.cached` does not exist.
 
 - [ ] **Step 3: Implement minimal code**
@@ -92,7 +92,7 @@ Implement cache keys, JSON-compatible serialization, selected cached read method
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
-Run: `cd backend; uv run pytest tests/test_cached_memory.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cached_memory.py -v`
 Expected: PASS.
 
 ## Task 3: Long-Term Memory Cache
@@ -117,7 +117,7 @@ Extend long-term memory tests to verify cache hit when files are unchanged and m
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cd backend; uv run pytest tests/test_long_term_memory.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_long_term_memory.py -v`
 Expected: FAIL because `read_all_cached` does not exist.
 
 - [ ] **Step 3: Implement minimal code**
@@ -126,7 +126,7 @@ Add file-version hashing and cached read helper. Thread the optional cache throu
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
-Run: `cd backend; uv run pytest tests/test_long_term_memory.py tests/test_agent_split.py tests/test_hooks.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_long_term_memory.py tests/test_agent_split.py tests/test_hooks.py -v`
 Expected: PASS.
 
 ## Task 4: RedisCache And Server Wiring
@@ -148,7 +148,7 @@ Add tests that `build_cache` returns `NoopCache` when disabled or URL is absent,
 
 - [ ] **Step 2: Run tests to verify RED**
 
-Run: `cd backend; uv run pytest tests/test_cache.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cache.py -v`
 Expected: FAIL because `redis_cache.py` and `build_cache` do not exist.
 
 - [ ] **Step 3: Implement minimal code**
@@ -157,7 +157,7 @@ Add `redis>=5`, implement Redis-backed JSON get/set/delete/delete_pattern with s
 
 - [ ] **Step 4: Run tests to verify GREEN**
 
-Run: `cd backend; uv run pytest tests/test_cache.py tests/test_config.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cache.py tests/test_config.py -v`
 Expected: PASS.
 
 ## Task 5: Full Verification
@@ -171,12 +171,12 @@ Expected: PASS.
 
 - [ ] **Step 1: Run focused backend tests**
 
-Run: `cd backend; uv run pytest tests/test_cache.py tests/test_cached_memory.py tests/test_long_term_memory.py tests/test_config.py tests/test_agent_split.py tests/test_hooks.py -v`
+Run: `cd backend; uv run --extra dev pytest tests/test_cache.py tests/test_cached_memory.py tests/test_long_term_memory.py tests/test_config.py tests/test_agent_split.py tests/test_hooks.py -v`
 Expected: PASS.
 
 - [ ] **Step 2: Run full backend test suite**
 
-Run: `cd backend; uv run pytest -v`
+Run: `cd backend; uv run --extra dev pytest -v`
 Expected: PASS.
 
 - [ ] **Step 3: Review diff**

@@ -185,12 +185,14 @@ class AgentHarness:
         memory: PostgresMemory,
         hook_manager: AgentHookManager | None = None,
         callbacks: list[Any] | None = None,
+        cache: Any | None = None,
     ):
         self.settings = settings
         self.registry = registry
         self.memory = memory
         self.hook_manager = hook_manager
         self.callbacks = list(callbacks or [])
+        self.cache = cache
         self.decisions: dict[str, bool] = {}
 
     async def run_user_turn(
@@ -494,6 +496,8 @@ class AgentHarness:
         kwargs = {}
         if "enable_memory_reflection" in inspect.signature(agent_module.compile_agent).parameters:
             kwargs["enable_memory_reflection"] = enable_memory_reflection
+        if self.cache is not None:
+            kwargs["cache"] = self.cache
 
         if self.hook_manager is None:
             return agent_module.compile_agent(

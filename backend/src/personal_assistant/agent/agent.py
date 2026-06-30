@@ -38,6 +38,7 @@ def compile_agent(
     llm_config: LLMConfig | None = None,
     hook_manager: AgentHookManager | None = None,
     enable_memory_reflection: bool = True,
+    cache=None,
 ):
     llm = build_llm(settings, llm_config)
     approval_gate = ApprovalGate(decisions, requires_approval=requires_tool_approval)
@@ -199,9 +200,21 @@ def compile_agent(
         return approval_gate.inspect(state)
 
     graph = StateGraph(AgentState)
+    router_kwargs = {"long_term_memory": long_term_memory}
+    if cache is not None:
+        router_kwargs.update(
+            {
+                "cache": cache,
+                "memory_cache_ttl_seconds": getattr(settings, "cache_memory_ttl_seconds", 60),
+            }
+        )
     graph.add_node(
         "route_skills",
-        with_hooks(hooks, HookStage.ROUTE_SKILLS, build_skill_router(registry, long_term_memory=long_term_memory)),
+        with_hooks(
+            hooks,
+            HookStage.ROUTE_SKILLS,
+            build_skill_router(registry, **router_kwargs),
+        ),
     )
     graph.add_node(
         "compact_context",

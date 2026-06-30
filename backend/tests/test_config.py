@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from personal_assistant.config import Settings
 
 
@@ -80,3 +82,39 @@ def test_langfuse_disabled_when_only_secret_key_is_set() -> None:
             _env_file=None,
         )
         assert settings.langfuse_enabled is False
+
+
+def test_cache_defaults_to_enabled_without_redis_url() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.cache_enabled is True
+    assert settings.redis_url is None
+    assert settings.cache_default_ttl_seconds == 10
+    assert settings.cache_log_ttl_seconds == 5
+    assert settings.cache_memory_ttl_seconds == 60
+
+
+def test_redis_url_accepts_redis_scheme() -> None:
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        REDIS_URL="redis://192.168.5.7:6379/0",
+        _env_file=None,
+    )
+
+    assert settings.redis_url == "redis://192.168.5.7:6379/0"
+
+
+def test_redis_url_rejects_http_scheme() -> None:
+    with pytest.raises(ValueError, match="REDIS_URL must use redis:// or rediss://"):
+        Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            REDIS_URL="http://192.168.5.7:6379",
+            _env_file=None,
+        )

@@ -21,6 +21,8 @@ from personal_assistant.api.schemas import (
     ToolCallApproval,
 )
 from personal_assistant.config import get_settings
+from personal_assistant.cache import build_cache
+from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.tracing import build_langfuse_callback
@@ -28,25 +30,34 @@ from personal_assistant.tracing import build_langfuse_callback
 
 settings = get_settings()
 registry = SkillRegistry(settings.skills_dir)
-memory = PostgresMemory(settings.database_url)
+cache = build_cache(settings)
+postgres_memory = PostgresMemory(settings.database_url)
+memory = CachedPostgresMemory(
+    postgres_memory,
+    cache,
+    default_ttl_seconds=settings.cache_default_ttl_seconds,
+    log_ttl_seconds=settings.cache_log_ttl_seconds,
+)
 langfuse_callback = build_langfuse_callback(settings)
 harness = AgentHarness(
     settings,
     registry,
     memory,
     callbacks=[langfuse_callback] if langfuse_callback else None,
+    cache=cache,
 )
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await memory.start()
+    await postgres_memory.start()
     registry.start_watching()
     try:
         yield
     finally:
         registry.stop_watching()
-        await memory.stop()
+        await cache.close()
+        await postgres_memory.stop()
 
 
 app = FastAPI(title="LangGraph Personal Assistant", lifespan=lifespan)
