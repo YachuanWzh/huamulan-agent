@@ -28,3 +28,5 @@ frontend/dist/
 
 # Local Memory
 .memory
+
+.transcripts
