@@ -71,7 +71,9 @@ def build_cache(settings) -> RedisCache | NoopCache:
     if not redis_url:
         return NoopCache()
     try:
-        return RedisCache.from_url(redis_url)
+        cache = RedisCache.from_url(redis_url)
+        logger.info("Redis cache connected — %s", redis_url)
+        return cache
     except Exception as exc:
         logger.warning("Redis cache disabled after initialization error: %s", exc)
         return NoopCache()

@@ -1,8 +1,37 @@
+import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+
+# Make cache hit/miss events visible regardless of how the server is started.
+class _CacheFormatter(logging.Formatter):
+    """Render extra fields (event, namespace, duration_ms) when present."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        event = getattr(record, "event", "")
+        namespace = getattr(record, "namespace", "")
+        duration_ms = getattr(record, "duration_ms", "")
+        parts = [
+            self.formatTime(record, "%H:%M:%S"),
+            f"{record.levelname:<8}",
+            f"[{event}]" if event else f"[{record.name}]",
+        ]
+        if namespace:
+            parts.append(f"{namespace:<25}")
+        if duration_ms:
+            parts.append(f"{duration_ms}ms")
+        return "  ".join(parts)
+
+
+_cache_handler = logging.StreamHandler(sys.stderr)
+_cache_handler.setFormatter(_CacheFormatter())
+_cache_logger = logging.getLogger("personal_assistant.cache")
+_cache_logger.addHandler(_cache_handler)
+_cache_logger.setLevel(logging.DEBUG)
+_cache_logger.propagate = False
 
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.api.schemas import (
