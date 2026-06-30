@@ -12,6 +12,8 @@ from personal_assistant.api.schemas import (
     ChatResponse,
     ClearThreadsResponse,
     DeleteThreadResponse,
+    ExecutionLog,
+    ExecutionSummary,
     ReplayResponse,
     SkillInfo,
     ThreadSummary,
@@ -100,6 +102,16 @@ async def approve_stream(request: ApprovalDecision) -> StreamingResponse:
 @app.get("/api/threads/{thread_id}/replay", response_model=ReplayResponse)
 async def replay(thread_id: str) -> ReplayResponse:
     return ReplayResponse(thread_id=thread_id, states=await harness.replay(thread_id))
+
+
+@app.get("/api/threads/{thread_id}/execution-logs", response_model=list[ExecutionLog])
+async def list_execution_logs(thread_id: str, limit: int = 500) -> list[ExecutionLog]:
+    return await harness.list_execution_logs(thread_id=thread_id, limit=limit)
+
+
+@app.get("/api/threads/{thread_id}/execution-summary", response_model=ExecutionSummary)
+async def execution_log_summary(thread_id: str) -> ExecutionSummary:
+    return await harness.execution_log_summary(thread_id=thread_id)
 
 
 @app.get("/api/threads", response_model=list[ThreadSummary])

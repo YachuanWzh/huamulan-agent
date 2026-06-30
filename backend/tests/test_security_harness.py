@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,7 +16,7 @@ from personal_assistant.agent.harness import (
     scan_tool_guard,
 )
 from personal_assistant.api import server
-from personal_assistant.api.schemas import AuditEvent
+from personal_assistant.api.schemas import AuditEvent, ExecutionLog, ExecutionSummary
 
 
 class FakeMemory:
@@ -235,3 +237,60 @@ def test_audit_events_endpoint_lists_thread_events(monkeypatch: pytest.MonkeyPat
 
     assert response.status_code == 200
     assert response.json()[0]["category"] == "instruction_override"
+
+
+def test_execution_logs_endpoint_lists_thread_logs(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeHarness:
+        async def list_execution_logs(self, thread_id, limit=500):
+            assert thread_id == "thread-1"
+            assert limit == 50
+            return [
+                ExecutionLog(
+                    id=1,
+                    created_at=datetime(2026, 6, 30, tzinfo=UTC),
+                    thread_id="thread-1",
+                    event_type="llm",
+                    status="completed",
+                    name="agent",
+                    token_usage={"total_tokens": 42},
+                )
+            ]
+
+    monkeypatch.setattr(server, "harness", FakeHarness())
+
+    response = TestClient(server.app).get(
+        "/api/threads/thread-1/execution-logs?limit=50"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["thread_id"] == "thread-1"
+    assert body[0]["event_type"] == "llm"
+    assert body[0]["token_usage"]["total_tokens"] == 42
+
+
+def test_execution_summary_endpoint_returns_thread_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeHarness:
+        async def execution_log_summary(self, thread_id):
+            assert thread_id == "thread-1"
+            return ExecutionSummary(
+                thread_id="thread-1",
+                total_events=3,
+                total_tokens=99,
+                tool_calls=2,
+                tool_retries=1,
+            )
+
+    monkeypatch.setattr(server, "harness", FakeHarness())
+
+    response = TestClient(server.app).get("/api/threads/thread-1/execution-summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["thread_id"] == "thread-1"
+    assert body["total_events"] == 3
+    assert body["total_tokens"] == 99
+    assert body["tool_calls"] == 2
+    assert body["tool_retries"] == 1

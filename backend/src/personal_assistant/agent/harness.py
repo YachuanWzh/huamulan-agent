@@ -260,6 +260,12 @@ class AgentHarness:
     async def list_tool_errors(self, thread_id: str | None = None, limit: int = 100):
         return await self.memory.list_tool_errors(thread_id=thread_id, limit=limit)
 
+    async def list_execution_logs(self, thread_id: str, limit: int = 500):
+        return await self.memory.list_execution_logs(thread_id=thread_id, limit=limit)
+
+    async def execution_log_summary(self, thread_id: str):
+        return await self.memory.execution_log_summary(thread_id=thread_id)
+
     async def run_user_turn_stream(
         self,
         thread_id: str,
