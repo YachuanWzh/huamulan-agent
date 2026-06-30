@@ -7,7 +7,14 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from personal_assistant.api.schemas import AuditEvent, AuditEventCreate, ToolError
+from personal_assistant.api.schemas import (
+    AuditEvent,
+    AuditEventCreate,
+    ExecutionLog,
+    ExecutionLogCreate,
+    ExecutionSummary,
+    ToolError,
+)
 
 
 class PostgresMemory:
@@ -26,6 +33,7 @@ class PostgresMemory:
         self.checkpointer = AsyncPostgresSaver(self.pool)
         await self.checkpointer.setup()
         await self._setup_audit_events()
+        await self._setup_execution_logs()
         await self._setup_long_term_memories()
         await self._setup_tool_results()
         await self._setup_tool_errors()
@@ -81,6 +89,10 @@ class PostgresMemory:
                     "DELETE FROM tool_errors WHERE thread_id = %s",
                     (thread_id,),
                 )
+                await conn.execute(
+                    "DELETE FROM agent_execution_logs WHERE thread_id = %s",
+                    (thread_id,),
+                )
 
     async def clear_threads(self) -> list[str]:
         thread_ids = [
@@ -110,6 +122,34 @@ class PostgresMemory:
                     event.reason,
                     event.subject,
                     Jsonb(_jsonable(event.metadata)),
+                ),
+            )
+
+    async def record_execution_log(self, log: ExecutionLogCreate) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO agent_execution_logs
+                    (thread_id, run_id, parent_id, event_type, status, name,
+                     input, output, error, duration_ms, token_usage, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
+                        %s, %s::jsonb, %s::jsonb)
+                """,
+                (
+                    log.thread_id,
+                    log.run_id,
+                    log.parent_id,
+                    log.event_type,
+                    log.status,
+                    log.name,
+                    Jsonb(_jsonable(log.input)),
+                    Jsonb(_jsonable(log.output)),
+                    Jsonb(_jsonable(log.error)),
+                    log.duration_ms,
+                    Jsonb(_jsonable(log.token_usage)),
+                    Jsonb(_jsonable(log.metadata)),
                 ),
             )
 
@@ -254,6 +294,87 @@ class PostgresMemory:
             for row in rows
         ]
 
+    async def list_execution_logs(
+        self,
+        thread_id: str,
+        limit: int = 500,
+    ) -> list[ExecutionLog]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT id, created_at, thread_id, run_id, parent_id, event_type,
+                       status, name, input, output, error, duration_ms,
+                       token_usage, metadata
+                FROM agent_execution_logs
+                WHERE thread_id = %s
+                ORDER BY created_at ASC, id ASC
+                LIMIT %s
+                """,
+                (thread_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [
+            ExecutionLog(
+                id=row[0],
+                created_at=row[1],
+                thread_id=row[2],
+                run_id=row[3],
+                parent_id=row[4],
+                event_type=row[5],
+                status=row[6],
+                name=row[7],
+                input=row[8] or {},
+                output=row[9] or {},
+                error=row[10] or {},
+                duration_ms=row[11],
+                token_usage=row[12] or {},
+                metadata=row[13] or {},
+            )
+            for row in rows
+        ]
+
+    async def execution_log_summary(self, thread_id: str) -> ExecutionSummary:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    COUNT(*)::int AS total_events,
+                    COUNT(*) FILTER (WHERE event_type = 'tool')::int AS tool_calls,
+                    COUNT(*) FILTER (
+                        WHERE status = 'failed' OR event_type = 'tool_retry'
+                    )::int AS tool_errors,
+                    COUNT(*) FILTER (WHERE event_type = 'tool_retry')::int AS tool_retries,
+                    COUNT(*) FILTER (WHERE event_type = 'security')::int AS security_events,
+                    COALESCE(SUM((token_usage->>'prompt_tokens')::int), 0)::int AS prompt_tokens,
+                    COALESCE(SUM((token_usage->>'completion_tokens')::int), 0)::int AS completion_tokens,
+                    COALESCE(SUM((token_usage->>'total_tokens')::int), 0)::int AS total_tokens,
+                    COALESCE(SUM(duration_ms), 0)::int AS total_duration_ms
+                FROM agent_execution_logs
+                WHERE thread_id = %s
+                """,
+                (thread_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return ExecutionSummary(thread_id=thread_id)
+        return ExecutionSummary(
+            thread_id=thread_id,
+            total_events=row[0],
+            tool_calls=row[1],
+            tool_errors=row[2],
+            tool_retries=row[3],
+            security_events=row[4],
+            prompt_tokens=row[5],
+            completion_tokens=row[6],
+            total_tokens=row[7],
+            total_duration_ms=row[8],
+        )
+
     async def list_tool_errors(
         self,
         thread_id: str | None = None,
@@ -329,6 +450,43 @@ class PostgresMemory:
                 """
                 CREATE INDEX IF NOT EXISTS idx_audit_events_thread_created
                 ON audit_events (thread_id, created_at DESC)
+                """
+            )
+
+    async def _setup_execution_logs(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_execution_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    thread_id TEXT NOT NULL,
+                    run_id TEXT,
+                    parent_id TEXT,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    name TEXT,
+                    input JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    output JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    error JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    duration_ms INTEGER,
+                    token_usage JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_agent_execution_logs_thread_created
+                ON agent_execution_logs (thread_id, created_at ASC, id ASC)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_agent_execution_logs_thread_type
+                ON agent_execution_logs (thread_id, event_type, created_at ASC)
                 """
             )
 

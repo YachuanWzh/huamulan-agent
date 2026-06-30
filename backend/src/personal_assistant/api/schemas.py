@@ -66,6 +66,55 @@ class ToolError(BaseModel):
     will_retry: bool
 
 
+class ExecutionLogCreate(BaseModel):
+    thread_id: str
+    run_id: str | None = None
+    parent_id: str | None = None
+    event_type: Literal[
+        "turn",
+        "skill_route",
+        "llm",
+        "tool",
+        "tool_retry",
+        "approval",
+        "security",
+    ]
+    status: Literal[
+        "started",
+        "completed",
+        "failed",
+        "blocked",
+        "retrying",
+        "approved",
+        "denied",
+    ]
+    name: str | None = None
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] = Field(default_factory=dict)
+    duration_ms: int | None = None
+    token_usage: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExecutionLog(ExecutionLogCreate):
+    id: int
+    created_at: datetime
+
+
+class ExecutionSummary(BaseModel):
+    thread_id: str
+    total_events: int = 0
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    tool_calls: int = 0
+    tool_errors: int = 0
+    tool_retries: int = 0
+    security_events: int = 0
+    total_duration_ms: int = 0
+
+
 class SkillInfo(BaseModel):
     name: str
     description: str
