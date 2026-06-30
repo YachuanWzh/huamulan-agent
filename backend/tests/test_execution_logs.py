@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+from langchain_core.messages import AIMessage
+
+from personal_assistant.agent.agent import _execute_tool_calls_with_retry, _extract_token_usage
 from personal_assistant.api.schemas import ExecutionLogCreate, ExecutionSummary
 from personal_assistant.memory.postgres import PostgresMemory
 
@@ -136,3 +139,81 @@ async def test_execution_log_summary_aggregates_counts_and_tokens() -> None:
     assert summary.completion_tokens == 800
     assert summary.total_tokens == 2000
     assert summary.total_duration_ms == 345
+
+
+class RetryMemory:
+    def __init__(self):
+        self.execution_logs = []
+        self.tool_errors = []
+
+    async def record_execution_log(self, log):
+        self.execution_logs.append(log)
+
+    async def record_tool_error(self, **kwargs):
+        self.tool_errors.append(kwargs)
+
+
+class FlakyTool:
+    name = "lookup"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def ainvoke(self, args, config=None):
+        self.calls += 1
+        if self.calls < 3:
+            raise ValueError(f"bad query {self.calls}")
+        return {"answer": "ok"}
+
+
+async def no_sleep(_seconds):
+    return None
+
+
+def test_extract_token_usage_normalizes_response_metadata() -> None:
+    message = AIMessage(
+        content="hello",
+        response_metadata={
+            "token_usage": {
+                "prompt_tokens": 4,
+                "completion_tokens": 6,
+                "total_tokens": 10,
+            }
+        },
+    )
+
+    usage = _extract_token_usage(message)
+
+    assert usage["prompt_tokens"] == 4
+    assert usage["completion_tokens"] == 6
+    assert usage["total_tokens"] == 10
+    assert usage["raw"]["prompt_tokens"] == 4
+
+
+async def test_tool_retries_record_execution_logs_for_each_failed_attempt() -> None:
+    memory = RetryMemory()
+    tool = FlakyTool()
+
+    messages = await _execute_tool_calls_with_retry(
+        [tool],
+        [{"id": "call-1", "name": "lookup", "args": {"query": "alpha"}}],
+        memory=memory,
+        thread_id="thread-1",
+        sleep=no_sleep,
+    )
+
+    assert messages[0].content == '{"answer": "ok"}'
+    retry_logs = [
+        log for log in memory.execution_logs if log.event_type == "tool_retry"
+    ]
+    tool_logs = [
+        log for log in memory.execution_logs if log.event_type == "tool"
+    ]
+    assert len(retry_logs) == 2
+    assert retry_logs[0].status == "retrying"
+    assert retry_logs[0].metadata["attempt"] == 1
+    assert retry_logs[0].metadata["will_retry"] is True
+    assert retry_logs[1].metadata["attempt"] == 2
+    assert len(tool_logs) == 1
+    assert tool_logs[0].status == "completed"
+    assert tool_logs[0].metadata["tool_call_id"] == "call-1"

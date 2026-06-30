@@ -1,11 +1,13 @@
 import asyncio
 import json
+import time
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from pathlib import Path
+from typing import Any
 
 from personal_assistant.agent.approval import ApprovalGate, requires_tool_approval
 from personal_assistant.agent.harness import (
@@ -19,7 +21,7 @@ from personal_assistant.agent.hook import AgentHookManager, HookStage, with_hook
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import build_skill_router
 from personal_assistant.agent.state import AgentState
-from personal_assistant.api.schemas import LLMConfig
+from personal_assistant.api.schemas import ExecutionLogCreate, LLMConfig
 from personal_assistant.config import Settings
 from personal_assistant.memory.compaction import ContextCompactor, TOOL_RESULT_REFERENCE_TEMPLATE
 from personal_assistant.memory.long_term import LongTermMemoryStore
@@ -69,7 +71,23 @@ def compile_agent(
             basic_tools,
         )
         messages = _sanitize_messages_for_api(state["messages"])
+        thread_id = _thread_id_from_config(config)
+        started = time.perf_counter()
         response = await llm.bind_tools(active_tools).ainvoke(messages, config=config)
+        await _record_execution_log(
+            memory,
+            ExecutionLogCreate(
+                thread_id=thread_id or "",
+                event_type="llm",
+                status="completed",
+                name="agent",
+                input={"message_count": len(messages), "tool_count": len(active_tools)},
+                output={"content": str(getattr(response, "content", ""))[:1000]},
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                token_usage=_extract_token_usage(response),
+                metadata={"selected_skills": state.get("selected_skills", [])},
+            ),
+        )
         return {"messages": [response]}
 
     async def reflect_memory(
@@ -248,6 +266,7 @@ async def _execute_tool_calls_with_retry(
     tool_map = {tool.name: tool for tool in tools}
     messages: list[ToolMessage] = []
     for call in tool_calls:
+        tool_started = time.perf_counter()
         tool_name = str(call.get("name") or "tool")
         tool_call_id = str(call.get("id") or "")
         tool_args = call.get("args", {})
@@ -274,11 +293,25 @@ async def _execute_tool_calls_with_retry(
         for attempt in range(1, max_attempts + 1):
             try:
                 output = await tool.ainvoke(tool_args, config=config)
+                content = _tool_output_content(output)
                 messages.append(
                     ToolMessage(
                         tool_call_id=tool_call_id,
-                        content=_tool_output_content(output),
+                        content=content,
                     )
+                )
+                await _record_execution_log(
+                    memory,
+                    ExecutionLogCreate(
+                        thread_id=thread_id or "",
+                        event_type="tool",
+                        status="completed",
+                        name=tool_name,
+                        input=tool_args,
+                        output={"content": content},
+                        duration_ms=int((time.perf_counter() - tool_started) * 1000),
+                        metadata={"tool_call_id": tool_call_id, "attempt": attempt},
+                    ),
                 )
                 last_error = None
                 break
@@ -297,9 +330,46 @@ async def _execute_tool_calls_with_retry(
                     error_message=str(exc) or exc.__class__.__name__,
                     will_retry=will_retry,
                 )
+                await _record_execution_log(
+                    memory,
+                    ExecutionLogCreate(
+                        thread_id=thread_id or "",
+                        event_type="tool_retry",
+                        status="retrying" if will_retry else "failed",
+                        name=tool_name,
+                        input=tool_args,
+                        error={
+                            "type": exc.__class__.__name__,
+                            "message": str(exc) or exc.__class__.__name__,
+                        },
+                        duration_ms=int((time.perf_counter() - tool_started) * 1000),
+                        metadata={
+                            "tool_call_id": tool_call_id,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "will_retry": will_retry,
+                        },
+                    ),
+                )
                 if will_retry:
                     await sleep(base_delay * (2 ** (attempt - 1)))
         if last_error is not None:
+            await _record_execution_log(
+                memory,
+                ExecutionLogCreate(
+                    thread_id=thread_id or "",
+                    event_type="tool",
+                    status="failed",
+                    name=tool_name,
+                    input=tool_args,
+                    error={
+                        "type": last_error.__class__.__name__,
+                        "message": str(last_error) or last_error.__class__.__name__,
+                    },
+                    duration_ms=int((time.perf_counter() - tool_started) * 1000),
+                    metadata={"tool_call_id": tool_call_id, "attempt": max_attempts},
+                ),
+            )
             messages.append(
                 ToolMessage(
                     tool_call_id=tool_call_id,
@@ -323,6 +393,54 @@ async def _record_tool_error(memory, **kwargs) -> None:
         await record(**kwargs)
     except Exception:
         return
+
+
+async def _record_execution_log(memory, log: ExecutionLogCreate) -> None:
+    record = getattr(memory, "record_execution_log", None)
+    if not callable(record):
+        return
+    try:
+        await record(log)
+    except Exception:
+        return
+
+
+def _extract_token_usage(response) -> dict[str, Any]:
+    raw = _token_usage_raw(response)
+    prompt = _int_from_keys(raw, "prompt_tokens", "input_tokens")
+    completion = _int_from_keys(raw, "completion_tokens", "output_tokens")
+    total = _int_from_keys(raw, "total_tokens")
+    if total == 0:
+        total = prompt + completion
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+        "raw": raw,
+    }
+
+
+def _token_usage_raw(response) -> dict[str, Any]:
+    for attr in ("usage_metadata", "response_metadata"):
+        value = getattr(response, attr, None)
+        if not isinstance(value, dict):
+            continue
+        token_usage = value.get("token_usage")
+        if isinstance(token_usage, dict):
+            return token_usage
+        if any(str(key).endswith("_tokens") for key in value):
+            return value
+    return {}
+
+
+def _int_from_keys(data: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+    return 0
 
 
 def _tool_output_content(output) -> str:

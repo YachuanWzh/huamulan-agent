@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
@@ -10,7 +11,13 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from personal_assistant.agent.hook import AgentHookManager
 from personal_assistant.agent.state import AgentState
-from personal_assistant.api.schemas import AuditEventCreate, ChatResponse, LLMConfig, ToolCallApproval
+from personal_assistant.api.schemas import (
+    AuditEventCreate,
+    ChatResponse,
+    ExecutionLogCreate,
+    LLMConfig,
+    ToolCallApproval,
+)
 from personal_assistant.config import Settings
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
@@ -204,6 +211,18 @@ class AgentHarness:
                     metadata={"prompt_guard_blocked": True},
                 ),
             )
+            await _record_execution_log(
+                self.memory,
+                ExecutionLogCreate(
+                    thread_id=thread_id,
+                    event_type="security",
+                    status="blocked",
+                    name=match.category,
+                    input={"message": _clip_subject(message)},
+                    error={"reason": match.reason},
+                    metadata={"severity": match.severity, "source": "prompt"},
+                ),
+            )
             return ChatResponse(
                 thread_id=thread_id,
                 status="completed",
@@ -212,9 +231,44 @@ class AgentHarness:
         app = self._compile(llm_config)
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
-        result = await app.ainvoke(
-            {"messages": [HumanMessage(content=message)]},
-            config=config,
+        started = time.perf_counter()
+        await _record_execution_log(
+            self.memory,
+            ExecutionLogCreate(
+                thread_id=thread_id,
+                event_type="turn",
+                status="started",
+                name="user_turn",
+                input={"message": _clip_subject(message)},
+            ),
+        )
+        try:
+            result = await app.ainvoke(
+                {"messages": [HumanMessage(content=message)]},
+                config=config,
+            )
+        except Exception as exc:
+            await _record_execution_log(
+                self.memory,
+                ExecutionLogCreate(
+                    thread_id=thread_id,
+                    event_type="turn",
+                    status="failed",
+                    name="user_turn",
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                    error={"type": exc.__class__.__name__, "message": str(exc)},
+                ),
+            )
+            raise
+        await _record_execution_log(
+            self.memory,
+            ExecutionLogCreate(
+                thread_id=thread_id,
+                event_type="turn",
+                status="completed",
+                name="user_turn",
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            ),
         )
         return _to_response(thread_id, result)
 
@@ -287,6 +341,18 @@ class AgentHarness:
                         reason=match.reason,
                         subject=_clip_subject(message),
                         metadata={"prompt_guard_blocked": True},
+                    ),
+                )
+                await _record_execution_log(
+                    self.memory,
+                    ExecutionLogCreate(
+                        thread_id=thread_id,
+                        event_type="security",
+                        status="blocked",
+                        name=match.category,
+                        input={"message": _clip_subject(message)},
+                        error={"reason": match.reason},
+                        metadata={"severity": match.severity, "source": "prompt"},
                     ),
                 )
                 yield _sse_event("done", {"status": "completed", "message": _PROMPT_GUARD_MESSAGE})
@@ -516,6 +582,16 @@ async def _record_audit(memory: Any, event: AuditEventCreate) -> None:
         logger.exception("Failed to record security audit event")
 
 
+async def _record_execution_log(memory: Any, log: ExecutionLogCreate) -> None:
+    record = getattr(memory, "record_execution_log", None)
+    if not callable(record):
+        return
+    try:
+        await record(log)
+    except Exception:
+        logger.exception("Failed to record execution log")
+
+
 async def _record_tool_approval_decision(
     memory: Any,
     thread_id: str,
@@ -531,6 +607,17 @@ async def _record_tool_approval_decision(
             severity="LOW",
             reason="User approved a tool call." if approved else "User denied a tool call.",
             subject=approval_id,
+            metadata={"approval_id": approval_id, "approved": approved},
+        ),
+    )
+    await _record_execution_log(
+        memory,
+        ExecutionLogCreate(
+            thread_id=thread_id,
+            event_type="approval",
+            status="approved" if approved else "denied",
+            name="tool_approval_decision",
+            input={"approval_id": approval_id},
             metadata={"approval_id": approval_id, "approved": approved},
         ),
     )
@@ -552,6 +639,21 @@ async def _record_tool_approval_requests(
                 reason="Tool call is waiting for user approval.",
                 subject=approval.get("name"),
                 metadata={
+                    "approval_id": approval.get("approval_id"),
+                    "tool_call_id": approval.get("tool_call_id"),
+                    "tool_name": approval.get("name"),
+                    "tool_args": approval.get("args", {}),
+                },
+            ),
+        )
+        await _record_execution_log(
+            memory,
+            ExecutionLogCreate(
+                thread_id=thread_id,
+                event_type="approval",
+                status="started",
+                name="tool_approval_requested",
+                input={
                     "approval_id": approval.get("approval_id"),
                     "tool_call_id": approval.get("tool_call_id"),
                     "tool_name": approval.get("name"),
@@ -666,6 +768,22 @@ async def _pre_tool_security_guard(
                 "tool_name": _tool_call_name(call),
                 "tool_args": call.get("args", {}),
                 "tool_guard_blocked": True,
+            },
+        ),
+    )
+    await _record_execution_log(
+        memory,
+        ExecutionLogCreate(
+            thread_id=thread_id or "",
+            event_type="security",
+            status="blocked",
+            name=match.category,
+            input={"tool_name": _tool_call_name(call), "tool_args": call.get("args", {})},
+            error={"reason": match.reason},
+            metadata={
+                "severity": match.severity,
+                "source": "tool",
+                "tool_call_id": _tool_call_id(call),
             },
         ),
     )
