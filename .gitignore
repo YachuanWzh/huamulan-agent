@@ -23,5 +23,8 @@ frontend/dist/
 # superharness brainstorm mind-map session state (transient)
 .claude/superharness/brainstorm/
 
+# Local implementation worktrees
+.worktrees/
+
 # Local Memory
 .memory
