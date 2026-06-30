@@ -10,14 +10,14 @@
 ## 功能特性
 
 ### Agent 引擎
-- **ReAct Agent**：LangGraph StateGraph 驱动的推理-行动循环，含路由、上下文压缩、推理、记忆反思、审批和工具执行节点
+- **ReAct Agent**：LangGraph StateGraph 驱动的推理-行动循环，含路由、上下文压缩、推理、审批和工具执行节点；长期记忆反思在主回复完成后后台执行
 - **流式响应**：SSE 事件流（token / reasoning / approval / tool_result / done）
 - **推理展示**：DeepSeek thinking 推理过程提取并展示，支持展开/折叠
 - **可配置 LLM**：通过 `LLM_CONFIG` 覆盖 `base_url`、`model`、`api_key`、`temperature`
 
 ### 记忆与上下文
 - **长期记忆**：工作区 `.memory/` 维护 `USER.md`、`SYSTEM.md`、`MEMORY.md`，其中 `MEMORY.md` 按“一行一个链接”索引沉淀条目
-- **用户确认沉淀**：会话末尾由 LLM 反思节点判断是否值得保存，只有用户审批 `save_conversation_memory` 后才写入 Markdown 与 PostgreSQL
+- **用户确认沉淀**：主回复完成后由后台 LLM 静默判断是否值得保存；若需要沉淀，前端在右上角弹出非阻塞确认通知，只有用户审批 `save_conversation_memory` 后才写入 Markdown 与 PostgreSQL
 - **短期记忆**：继续使用 LangGraph checkpoint 保存线程内消息、审批状态和中间状态
 - **上下文压缩**：上下文阈值为 1M token，超过 90% 或对话超过 20 轮时触发，用户 Approve/Deny 审批点击也计入轮次；保留用户第一条输入、Agent 第一条和最后一条输出，中间替换为摘要；工具结果用 `[tool result can find by tool_result_id: ...]` 引用，并可从 PostgreSQL 反查
 
@@ -73,7 +73,7 @@ flowchart LR
 
     subgraph Backend["Backend — FastAPI"]
         AH[AgentHarness<br/>Prompt Guard + Tool Guard<br/>+ Middlewares + Execution Log]
-        SG[LangGraph StateGraph<br/>route → compact → LLM → memory reflection<br/>→ approve → tools]
+        SG[LangGraph StateGraph<br/>route → compact → LLM<br/>→ approve → tools<br/>background memory reflection]
         SK[SkillRegistry<br/>渐进加载 + 热插拔<br/>含 audit-sop Skill]
         LT[LongTermMemoryStore<br/>.memory/USER.md + SYSTEM.md + MEMORY.md]
         CT[ContextCompactor<br/>.transcripts/*.jsonl + LLM summary]

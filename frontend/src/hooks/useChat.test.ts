@@ -10,6 +10,7 @@ vi.mock('../lib/api', () => ({
     chatStream: vi.fn(),
     approve: vi.fn(),
     approveStream: vi.fn(),
+    listPendingApprovals: vi.fn(),
   },
 }))
 
@@ -23,6 +24,7 @@ async function* makeStream(events: StreamEvent[]): AsyncGenerator<StreamEvent> {
 describe('useChat', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockApi.listPendingApprovals.mockResolvedValue([])
   })
 
   it('starts with empty messages and no approvals', () => {
@@ -31,6 +33,60 @@ describe('useChat', () => {
     expect(result.current.pendingApprovals).toEqual([])
     expect(result.current.loading).toBe(false)
     expect(result.current.error).toBeNull()
+  })
+
+  it('keeps input enabled for background memory approval notifications', async () => {
+    const memoryApproval = {
+      approval_id: 'memory-1',
+      tool_call_id: 'memory-tool-1',
+      name: 'save_conversation_memory',
+      args: { slug: 'preference-tabs' },
+    }
+    mockApi.chatStream.mockReturnValue(
+      makeStream([{ type: 'done', status: 'completed', message: 'Noted.' }]),
+    )
+    mockApi.listPendingApprovals.mockResolvedValue([memoryApproval])
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('I prefer tabs')
+    })
+
+    expect(mockApi.listPendingApprovals).toHaveBeenCalledWith('thread-1')
+    expect(result.current.memoryApprovals).toEqual([memoryApproval])
+    expect(result.current.pendingApprovals).toEqual([])
+    expect(result.current.inputDisabled).toBe(false)
+  })
+
+  it('polls briefly when background memory approval is not ready immediately', async () => {
+    vi.useFakeTimers()
+    const memoryApproval = {
+      approval_id: 'memory-1',
+      tool_call_id: 'memory-tool-1',
+      name: 'save_conversation_memory',
+      args: { slug: 'preference-tabs' },
+    }
+    mockApi.chatStream.mockReturnValue(
+      makeStream([{ type: 'done', status: 'completed', message: 'Noted.' }]),
+    )
+    mockApi.listPendingApprovals
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([memoryApproval])
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('I prefer tabs')
+    })
+    expect(result.current.memoryApprovals).toEqual([])
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(result.current.memoryApprovals).toEqual([memoryApproval])
+    vi.useRealTimers()
   })
 
   it('adds user message and assistant response via streaming', async () => {

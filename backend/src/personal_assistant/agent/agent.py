@@ -37,6 +37,7 @@ def compile_agent(
     decisions: dict[str, bool],
     llm_config: LLMConfig | None = None,
     hook_manager: AgentHookManager | None = None,
+    enable_memory_reflection: bool = True,
 ):
     llm = build_llm(settings, llm_config)
     approval_gate = ApprovalGate(decisions, requires_approval=requires_tool_approval)
@@ -207,10 +208,11 @@ def compile_agent(
         with_hooks(hooks, HookStage.COMPACT_CONTEXT, compact_context),
     )
     graph.add_node("agent", with_hooks(hooks, HookStage.AGENT, call_agent))
-    graph.add_node(
-        "memory_reflection",
-        with_hooks(hooks, HookStage.MEMORY_REFLECTION, reflect_memory),
-    )
+    if enable_memory_reflection:
+        graph.add_node(
+            "memory_reflection",
+            with_hooks(hooks, HookStage.MEMORY_REFLECTION, reflect_memory),
+        )
     graph.add_node("approval", with_hooks(hooks, HookStage.APPROVAL, inspect_approval))
     graph.add_node("tools", with_hooks(hooks, HookStage.TOOLS, execute_tools))
 
@@ -223,8 +225,18 @@ def compile_agent(
     )
     graph.add_edge("route_skills", "compact_context")
     graph.add_edge("compact_context", "agent")
-    graph.add_edge("agent", "memory_reflection")
-    graph.add_edge("memory_reflection", "approval")
+    if enable_memory_reflection:
+        graph.add_edge("agent", "memory_reflection")
+        graph.add_edge("memory_reflection", "approval")
+    else:
+        graph.add_conditional_edges(
+            "agent",
+            _agent_route_without_memory_reflection,
+            {
+                "approval": "approval",
+                "end": END,
+            },
+        )
     graph.add_conditional_edges(
         "approval",
         _approval_route,
@@ -237,6 +249,48 @@ def compile_agent(
     )
     graph.add_edge("tools", "agent")
     return graph.compile(checkpointer=memory.checkpointer)
+
+
+async def build_memory_reflection_update(
+    settings: Settings,
+    registry: SkillRegistry,
+    memory: PostgresMemory,
+    decisions: dict[str, bool],
+    messages: list,
+    llm_config: LLMConfig | None = None,
+    config: RunnableConfig | None = None,
+) -> AgentState:
+    llm = build_llm(settings, llm_config)
+    workspace = Path(getattr(settings, "assistant_workspace_dir", Path.cwd()))
+    long_term_dir = getattr(settings, "long_term_memory_dir", None)
+    long_term_memory = LongTermMemoryStore(
+        Path(long_term_dir) if long_term_dir else workspace / ".memory"
+    )
+    basic_tools = build_basic_tools(
+        workspace,
+        long_term_memory=long_term_memory,
+        postgres_memory=memory,
+    )
+    save_tool = next(
+        (tool for tool in basic_tools if tool.name == "save_conversation_memory"),
+        None,
+    )
+    if save_tool is None or _memory_save_already_requested(messages):
+        return {}
+    last = messages[-1] if messages else None
+    if not isinstance(last, AIMessage) or getattr(last, "tool_calls", None):
+        return {}
+    response = await llm.bind_tools([save_tool]).ainvoke(
+        _build_memory_reflection_messages(messages),
+        config=config,
+    )
+    if not getattr(response, "tool_calls", None):
+        return {}
+    approval_update = ApprovalGate(
+        decisions,
+        requires_approval=requires_tool_approval,
+    ).inspect({"messages": [response]})
+    return {"messages": [response], **approval_update}
 
 
 def _latest_ai_with_tool_calls(messages):
@@ -489,6 +543,14 @@ def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
         return None
     thread_id = configurable.get("thread_id")
     return thread_id if isinstance(thread_id, str) else None
+
+
+def _agent_route_without_memory_reflection(state: AgentState) -> str:
+    messages = state.get("messages", [])
+    last = messages[-1] if messages else None
+    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
+        return "approval"
+    return "end"
 
 
 def _replace_messages_update(messages: list) -> AgentState:

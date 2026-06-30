@@ -2,6 +2,8 @@ import json
 import logging
 import re
 import time
+import asyncio
+import inspect
 from collections import deque
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
@@ -229,7 +231,7 @@ class AgentHarness:
                 status="completed",
                 message=_PROMPT_GUARD_MESSAGE,
             )
-        app = self._compile(llm_config)
+        app = self._compile_without_memory_reflection(llm_config)
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         started = time.perf_counter()
@@ -271,6 +273,7 @@ class AgentHarness:
                 duration_ms=int((time.perf_counter() - started) * 1000),
             ),
         )
+        self._schedule_memory_reflection(thread_id, result, llm_config, callbacks)
         return _to_response(thread_id, result)
 
     async def resume_after_approval(
@@ -359,7 +362,7 @@ class AgentHarness:
                 yield _sse_event("done", {"status": "completed", "message": _PROMPT_GUARD_MESSAGE})
                 yield "data: [DONE]\n\n"
                 return
-            app = self._compile(llm_config)
+            app = self._compile_without_memory_reflection(llm_config)
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
@@ -405,6 +408,7 @@ class AgentHarness:
             else:
                 msg = _extract_last_ai_message(values.get("messages", []))
                 yield _sse_event("done", {"status": "completed", "message": msg})
+                self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
             yield _sse_event("error", {"message": _stream_error_message(exc)})
 
@@ -480,8 +484,16 @@ class AgentHarness:
 
         yield "data: [DONE]\n\n"
 
-    def _compile(self, llm_config: LLMConfig | None):
+    def _compile(
+        self,
+        llm_config: LLMConfig | None,
+        *,
+        enable_memory_reflection: bool = True,
+    ):
         from personal_assistant.agent import agent as agent_module
+        kwargs = {}
+        if "enable_memory_reflection" in inspect.signature(agent_module.compile_agent).parameters:
+            kwargs["enable_memory_reflection"] = enable_memory_reflection
 
         if self.hook_manager is None:
             return agent_module.compile_agent(
@@ -490,6 +502,7 @@ class AgentHarness:
                 self.memory,
                 self.decisions,
                 llm_config,
+                **kwargs,
             )
         return agent_module.compile_agent(
             self.settings,
@@ -498,7 +511,72 @@ class AgentHarness:
             self.decisions,
             llm_config,
             hook_manager=self.hook_manager,
+            **kwargs,
         )
+
+    def _schedule_memory_reflection(
+        self,
+        thread_id: str,
+        values: dict[str, Any],
+        llm_config: LLMConfig | None,
+        callbacks: list[Any] | None,
+    ) -> None:
+        asyncio.create_task(
+            self._run_memory_reflection_background(
+                thread_id,
+                values,
+                llm_config,
+                callbacks,
+            )
+        )
+
+    async def _run_memory_reflection_background(
+        self,
+        thread_id: str,
+        values: dict[str, Any],
+        llm_config: LLMConfig | None,
+        callbacks: list[Any] | None,
+    ) -> None:
+        from personal_assistant.agent import agent as agent_module
+
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        _merge_callbacks(config, self.callbacks, thread_id, callbacks)
+        try:
+            update = await agent_module.build_memory_reflection_update(
+                self.settings,
+                self.registry,
+                self.memory,
+                self.decisions,
+                values.get("messages", []),
+                llm_config,
+                config=config,
+            )
+            if not update:
+                return
+            app = self._compile_without_memory_reflection(llm_config)
+            await app.aupdate_state(config, update)
+            pending = update.get("pending_approvals") or []
+            if pending:
+                await _record_tool_approval_requests(self.memory, thread_id, pending)
+        except Exception:
+            logger.exception("Background memory reflection failed")
+
+    async def list_pending_approvals(self, thread_id: str) -> list[dict[str, Any]]:
+        states = await self.replay(thread_id)
+        for state in states:
+            values = state.get("values", {}) if isinstance(state, dict) else {}
+            pending = values.get("pending_approvals") if isinstance(values, dict) else None
+            if pending:
+                return pending
+        return []
+
+    def _compile_without_memory_reflection(self, llm_config: LLMConfig | None):
+        try:
+            return self._compile(llm_config, enable_memory_reflection=False)
+        except TypeError as exc:
+            if "enable_memory_reflection" not in str(exc):
+                raise
+            return self._compile(llm_config)
 
 
 def scan_prompt_guard(message: str) -> GuardMatch | None:

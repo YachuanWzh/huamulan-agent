@@ -23,10 +23,12 @@ export function useChat(
 ) {
   const [messages, setMessages] = useState<Message[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<ToolCallApproval[]>([])
+  const [memoryApprovals, setMemoryApprovals] = useState<ToolCallApproval[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const idRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const memoryPollRef = useRef<number | null>(null)
 
   const nextId = () => String(++idRef.current)
 
@@ -42,11 +44,43 @@ export function useChat(
       compactingStreaming: false,
     }))
     setMessages(replayMessages)
-    setPendingApprovals(replayState.values.pending_approvals ?? [])
+    const approvals = replayState.values.pending_approvals ?? []
+    setPendingApprovals(approvals.filter((approval) => !isMemoryApproval(approval)))
+    setMemoryApprovals(approvals.filter(isMemoryApproval))
     setError(null)
     setLoading(false)
     idRef.current = replayMessages.length
   }, [replayState])
+
+  useEffect(() => {
+    return () => {
+      if (memoryPollRef.current !== null) {
+        window.clearTimeout(memoryPollRef.current)
+      }
+    }
+  }, [])
+
+  const refreshMemoryApprovals = useCallback(async (activeThreadId: string) => {
+    const approvals = await api.listPendingApprovals(activeThreadId)
+    const memoryOnly = approvals.filter(isMemoryApproval)
+    setMemoryApprovals(memoryOnly)
+    return memoryOnly
+  }, [])
+
+  const pollMemoryApprovals = useCallback(
+    async (activeThreadId: string, attempts = 5) => {
+      if (memoryPollRef.current !== null) {
+        window.clearTimeout(memoryPollRef.current)
+        memoryPollRef.current = null
+      }
+      const approvals = await refreshMemoryApprovals(activeThreadId)
+      if (approvals.length > 0 || attempts <= 1) return
+      memoryPollRef.current = window.setTimeout(() => {
+        void pollMemoryApprovals(activeThreadId, attempts - 1)
+      }, 1000)
+    },
+    [refreshMemoryApprovals],
+  )
 
   const cancel = useCallback(() => {
     abortRef.current?.abort()
@@ -167,7 +201,8 @@ export function useChat(
                 prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
               )
             }
-            setPendingApprovals(event.approvals)
+            setPendingApprovals(event.approvals.filter((approval) => !isMemoryApproval(approval)))
+            setMemoryApprovals(event.approvals.filter(isMemoryApproval))
             return
           }
           case 'tool_result': {
@@ -263,6 +298,7 @@ export function useChat(
         const activeThreadId = threadId ?? ensureThreadId()
         const stream = api.chatStream({ thread_id: activeThreadId, message: text })
         await processStream(stream)
+        await pollMemoryApprovals(activeThreadId)
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') return
         setError(e instanceof Error ? e.message : 'Unknown error')
@@ -270,7 +306,7 @@ export function useChat(
         setLoading(false)
       }
     },
-    [threadId, ensureThreadId, processStream],
+    [threadId, ensureThreadId, processStream, pollMemoryApprovals],
   )
 
   const approve = useCallback(
@@ -278,6 +314,7 @@ export function useChat(
       setError(null)
       setLoading(true)
       setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
+      setMemoryApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
       setMessages((prev) =>
         prev.map((m) =>
           m.approvalId === approvalId
@@ -308,6 +345,7 @@ export function useChat(
       setError(null)
       setLoading(true)
       setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
+      setMemoryApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
       setMessages((prev) =>
         prev.map((m) =>
           m.approvalId === approvalId
@@ -335,16 +373,21 @@ export function useChat(
 
   const dismissApproval = useCallback((approvalId: string) => {
     setPendingApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
+    setMemoryApprovals((prev) => prev.filter((a) => a.approval_id !== approvalId))
   }, [])
 
   const clearError = useCallback(() => {
     setError(null)
   }, [])
 
+  const inputDisabled = loading || pendingApprovals.length > 0
+
   return {
     messages,
     pendingApprovals,
+    memoryApprovals,
     loading,
+    inputDisabled,
     error,
     send,
     approve,
@@ -355,4 +398,8 @@ export function useChat(
     toggleReasoning,
     toggleCompacting,
   }
+}
+
+function isMemoryApproval(approval: ToolCallApproval) {
+  return approval.name === 'save_conversation_memory'
 }

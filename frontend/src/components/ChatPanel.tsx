@@ -20,7 +20,9 @@ export function ChatPanel({
   const {
     messages,
     pendingApprovals,
+    memoryApprovals,
     loading,
+    inputDisabled,
     error,
     send,
     approve,
@@ -44,6 +46,19 @@ export function ChatPanel({
           <button className="error-dismiss" onClick={clearError}>✕</button>
         </div>
       )}
+      {memoryApprovals.length > 0 && (
+        <div className="memory-approval-stack" aria-live="polite">
+          {memoryApprovals.map((approval) => (
+            <ToolApprovalCard
+              key={approval.approval_id}
+              approval={approval}
+              onApprove={approve}
+              onDeny={deny}
+              variant="memory"
+            />
+          ))}
+        </div>
+      )}
       {pendingApprovals.map((approval) => (
         <ToolApprovalCard
           key={approval.approval_id}
@@ -55,7 +70,7 @@ export function ChatPanel({
       <MessageInput
         onSend={send}
         onNewConversation={onNewConversation}
-        disabled={loading}
+        disabled={inputDisabled}
       />
     </div>
   )

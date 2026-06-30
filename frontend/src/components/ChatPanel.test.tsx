@@ -12,6 +12,7 @@ vi.mock('../lib/api', () => ({
     chatStream: vi.fn(),
     approve: vi.fn(),
     approveStream: vi.fn(),
+    listPendingApprovals: vi.fn(),
   },
 }))
 
@@ -38,6 +39,7 @@ function renderChatPanel(
 describe('ChatPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockApi.listPendingApprovals.mockResolvedValue([])
   })
 
   it('renders message input and empty state', () => {

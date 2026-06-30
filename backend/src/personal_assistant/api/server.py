@@ -18,6 +18,7 @@ from personal_assistant.api.schemas import (
     SkillInfo,
     ThreadSummary,
     ToolError,
+    ToolCallApproval,
 )
 from personal_assistant.config import get_settings
 from personal_assistant.memory.postgres import PostgresMemory
@@ -112,6 +113,14 @@ async def list_execution_logs(thread_id: str, limit: int = 500) -> list[Executio
 @app.get("/api/threads/{thread_id}/execution-summary", response_model=ExecutionSummary)
 async def execution_log_summary(thread_id: str) -> ExecutionSummary:
     return await harness.execution_log_summary(thread_id=thread_id)
+
+
+@app.get("/api/threads/{thread_id}/pending-approvals", response_model=list[ToolCallApproval])
+async def list_pending_approvals(thread_id: str) -> list[ToolCallApproval]:
+    return [
+        ToolCallApproval(**approval)
+        for approval in await harness.list_pending_approvals(thread_id)
+    ]
 
 
 @app.get("/api/threads", response_model=list[ThreadSummary])

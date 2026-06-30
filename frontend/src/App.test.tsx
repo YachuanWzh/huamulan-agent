@@ -160,14 +160,12 @@ describe('App thread id', () => {
     expect(screen.queryByTestId('chat-thread')).not.toBeInTheDocument()
   })
 
-  it('opens the audit workspace from the top header audit button', async () => {
-    const user = userEvent.setup()
+  it('does not render a top header audit button', () => {
     render(<App />)
 
-    await user.click(screen.getByRole('button', { name: /open audit workspace/i }))
-
-    expect(screen.getByTestId('workspace-panel')).toHaveTextContent('Workspace audit')
-    expect(screen.queryByTestId('chat-thread')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /open audit workspace/i }),
+    ).not.toBeInTheDocument()
   })
 
   it('exposes the redesigned console shell without changing core controls', () => {

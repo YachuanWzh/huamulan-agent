@@ -289,6 +289,9 @@ export const api = {
   approveStream: (body: ApprovalDecision) =>
     streamRequest('/api/approve/stream', body),
 
+  listPendingApprovals: (threadId: string) =>
+    request<ToolCallApproval[]>(`/api/threads/${threadId}/pending-approvals`),
+
   replay: (threadId: string) =>
     request<ReplayResponse>(`/api/threads/${threadId}/replay`),
 

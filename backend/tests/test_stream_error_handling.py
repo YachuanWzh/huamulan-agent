@@ -1,4 +1,5 @@
 import pytest
+from langchain_core.messages import AIMessage
 
 from personal_assistant.agent.harness import AgentHarness
 
@@ -164,6 +165,32 @@ class PendingApprovalHarness(AgentHarness):
         return PendingApprovalStreamApp()
 
 
+class CompletedState:
+    values = {"messages": [AIMessage(content="Final answer")], "pending_approvals": []}
+
+
+class CompletedStreamApp:
+    async def astream_events(self, *_args, **_kwargs):
+        yield {"event": "on_chat_model_stream", "data": {"chunk": FakeChunk(content="Final")}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": FakeChunk(content=" answer")}}
+
+    async def aget_state(self, *_args, **_kwargs):
+        return CompletedState()
+
+
+class BackgroundReflectionHarness(AgentHarness):
+    def __init__(self) -> None:
+        self.callbacks = []
+        self.scheduled_values = []
+
+    def _compile(self, _llm_config=None, *, enable_memory_reflection=True):
+        assert enable_memory_reflection is False
+        return CompletedStreamApp()
+
+    def _schedule_memory_reflection(self, thread_id, values, llm_config, callbacks):
+        self.scheduled_values.append((thread_id, values, llm_config, callbacks))
+
+
 @pytest.mark.asyncio
 async def test_streaming_llm_errors_are_sent_as_sse_error_events() -> None:
     chunks = [
@@ -295,3 +322,23 @@ async def test_pending_tool_approval_requests_are_recorded_to_audit() -> None:
         "tool_name": "resolve_current_time",
         "tool_args": {},
     }
+
+
+@pytest.mark.asyncio
+async def test_stream_done_is_sent_before_background_memory_reflection() -> None:
+    harness = BackgroundReflectionHarness()
+
+    chunks = [
+        chunk
+        async for chunk in harness.run_user_turn_stream("thread-1", "remember this")
+    ]
+
+    assert chunks == [
+        'event: token\ndata: {"content": "Final"}\n\n',
+        'event: token\ndata: {"content": " answer"}\n\n',
+        'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    assert harness.scheduled_values == [
+        ("thread-1", CompletedState.values, None, None),
+    ]
