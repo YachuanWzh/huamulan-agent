@@ -1,5 +1,4 @@
 # Test: session-start.ps1 loads memory files from backend/.memory/
-# This test should FAIL initially (RED) - current hook doesn't load memory.
 
 $ErrorActionPreference = 'Stop'
 
@@ -23,7 +22,6 @@ Write-Output "  Memory dir:   $memoryDir"
 $env:CLAUDE_PLUGIN_ROOT = $pluginRoot
 
 # Run the hook and capture console output
-# The hook uses [Console]::Out.Write() so we must redirect Console.Out
 $hookScript = Join-Path $scriptDir 'session-start.ps1'
 Write-Output "  Running: $hookScript"
 
@@ -54,42 +52,41 @@ if (-not $ctx) {
     throw "FAIL: additionalContext is empty or missing"
 }
 
+# Extract just the MEMORY block for targeted assertions
+$memoryBlock = ''
+if ($ctx -match '(?s)<MEMORY>(.*?)</MEMORY>') {
+    $memoryBlock = $matches[1]
+}
+
 # --- Assertions ---
 $failures = @()
 
-# Assertion 1: Memory file content must be present
-# The user-preferred-name-yachuan.md contains the CJK chars for user's name
-# We read the file to get the exact content to check
-$memFile = Join-Path $memoryDir 'user-preferred-name-yachuan.md'
-$memContent = Get-Content $memFile -Raw -Encoding UTF8
-# Extract first few meaningful chars to match against ctx
-# The memory says to call user by a specific name - check for uniqueness
-# Since CJK may have encoding issues in match, check for the ASCII part
-if ($ctx.Contains('yachuan')) {
-    Write-Output "  PASS: Memory content 'yachuan' found in additionalContext"
+# Assertion 1: Memory file content must be present within MEMORY block
+if ($memoryBlock -and $memoryBlock -match 'yachuan') {
+    Write-Output "  PASS: Memory content 'yachuan' found in MEMORY block"
 } else {
-    $failures += "FAIL: Memory content 'yachuan' NOT found in additionalContext"
+    $failures += "FAIL: Memory content 'yachuan' NOT found in MEMORY block"
 }
 
-# Assertion 2: Memory index (MEMORY.md) content must be present
-if ($ctx -match 'Memory Index') {
-    Write-Output "  PASS: MEMORY.md index content found in additionalContext"
+# Assertion 2: Memory index (MEMORY.md) content must be present within MEMORY block
+if ($memoryBlock -and $memoryBlock -match 'Memory Index') {
+    Write-Output "  PASS: MEMORY.md index content found in MEMORY block"
 } else {
-    $failures += "FAIL: MEMORY.md index content NOT found in additionalContext"
+    $failures += "FAIL: MEMORY.md index content NOT found in MEMORY block"
 }
 
-# Assertion 3: SYSTEM.md content must be present
-if ($ctx -match 'FastAPI') {
-    Write-Output "  PASS: SYSTEM.md content found in additionalContext"
+# Assertion 3: SYSTEM.md must be loaded within MEMORY block (hook injects "### System Context" label)
+if ($memoryBlock -and $memoryBlock -match '### System Context') {
+    Write-Output "  PASS: SYSTEM.md section found in MEMORY block"
 } else {
-    $failures += "FAIL: SYSTEM.md content NOT found in additionalContext"
+    $failures += "FAIL: SYSTEM.md section NOT found in MEMORY block"
 }
 
-# Assertion 4: USER.md content must be present
-if ($ctx -match '# User') {
-    Write-Output "  PASS: USER.md content found in additionalContext"
+# Assertion 4: USER.md must be loaded within MEMORY block (hook injects "### User Context" label)
+if ($memoryBlock -and $memoryBlock -match '### User Context') {
+    Write-Output "  PASS: USER.md section found in MEMORY block"
 } else {
-    $failures += "FAIL: USER.md content NOT found in additionalContext"
+    $failures += "FAIL: USER.md section NOT found in MEMORY block"
 }
 
 # Assertion 5: HARNESS.md content still present (memory must not replace harness)
