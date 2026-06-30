@@ -1,0 +1,3 @@
+display_name: Audit SOP
+short_description: Analyze thread audit logs, token usage, tool retries, and security events.
+default_prompt: Analyze this thread's audit logs and produce a concise report with evidence, token usage, tool retry analysis, security or approval events, and recommendations.

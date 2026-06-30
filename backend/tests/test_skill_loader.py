@@ -169,3 +169,23 @@ class TestSkillRegistryWatching:
             assert "skill-new" in registry.skills
         finally:
             registry.stop_watching()
+
+
+def test_builtin_audit_sop_skill_is_discoverable() -> None:
+    skills_dir = Path("src/personal_assistant/skills")
+    registry = SkillRegistry(skills_dir)
+
+    assert "audit-sop" in registry.skills
+    skill = registry.skills["audit-sop"]
+    assert skill.name == "audit-sop"
+    assert "audit" in skill.description.lower()
+
+
+def test_audit_sop_openai_metadata_exists() -> None:
+    metadata_path = Path("src/personal_assistant/skills/audit-sop/agents/openai.yaml")
+
+    assert metadata_path.exists()
+    text = metadata_path.read_text(encoding="utf-8")
+    assert "display_name:" in text
+    assert "short_description:" in text
+    assert "default_prompt:" in text
