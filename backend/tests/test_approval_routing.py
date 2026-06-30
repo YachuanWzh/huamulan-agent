@@ -6,7 +6,7 @@ scenario without sending unanswered tool_calls to the LLM API.
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from personal_assistant.agent.approval import ApprovalGate
+from personal_assistant.agent.approval import ApprovalGate, requires_tool_approval
 from personal_assistant.agent.harness import (
     _approval_route,
     _entry_route,
@@ -170,6 +170,61 @@ class TestApprovalRoute:
 # ──────────────────────────────────────────
 
 class TestApprovalGateNoDuplicates:
+    def test_read_file_does_not_require_approval(self):
+        """Reading workspace files is auto-allowed."""
+        gate = ApprovalGate(decisions={}, requires_approval=requires_tool_approval)
+
+        state = _state(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "c1", "name": "read_file", "args": {"path": "README.md"}}
+                ],
+            )
+        )
+        result = gate.inspect(state)
+
+        assert result["pending_approvals"] == []
+
+    def test_write_file_requires_approval(self):
+        """Writing workspace files still waits for user approval."""
+        gate = ApprovalGate(decisions={}, requires_approval=requires_tool_approval)
+
+        state = _state(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "c1", "name": "write_file", "args": {"path": "notes.txt", "content": "x"}}
+                ],
+            )
+        )
+        result = gate.inspect(state)
+
+        assert result["pending_approvals"] == [
+            {
+                "approval_id": "c1",
+                "tool_call_id": "c1",
+                "name": "write_file",
+                "args": {"path": "notes.txt", "content": "x"},
+            }
+        ]
+
+    def test_delete_shell_command_requires_approval(self):
+        """Deleting or moving files through shell commands waits for user approval."""
+        gate = ApprovalGate(decisions={}, requires_approval=requires_tool_approval)
+
+        state = _state(
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "c1", "name": "shell_command", "args": {"command": "rm -rf scratch"}}
+                ],
+            )
+        )
+        result = gate.inspect(state)
+
+        assert result["pending_approvals"][0]["tool_call_id"] == "c1"
+
     def test_denial_not_duplicated_on_second_pass(self):
         """A denied tool call should not get a second ToolMessage on re-inspection."""
         gate = ApprovalGate(decisions={"c1": False})

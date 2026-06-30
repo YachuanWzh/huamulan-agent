@@ -8,6 +8,7 @@ from personal_assistant.agent.harness import (
     LoopDetectionMiddleware,
     RateLimitMiddleware,
     SecurityError,
+    apply_pre_tool_guards,
     guard_tool_call,
     scan_prompt_guard,
     scan_tool_guard,
@@ -108,6 +109,10 @@ def test_scan_tool_guard_allows_benign_commands() -> None:
     assert scan_tool_guard("resolve_date", {"day_offset": 2, "timezone": "Asia/Shanghai"}) is None
 
 
+def test_scan_tool_guard_allows_read_file_even_when_path_mentions_blocked_command() -> None:
+    assert scan_tool_guard("read_file", {"path": "notes-about-rm-rf.txt"}) is None
+
+
 def test_guard_tool_call_raises_security_error_with_reason() -> None:
     with pytest.raises(SecurityError) as exc_info:
         guard_tool_call("shell", {"command": "dd if=/dev/zero of=/dev/sda"})
@@ -156,6 +161,37 @@ def test_loop_detection_middleware_blocks_repeated_tool_and_args_in_sliding_wind
     assert response.tool_call_id == "call-4"
     assert "LoopDetectionMiddleware" in response.content
     assert "repeated tool call" in response.content
+
+
+@pytest.mark.asyncio
+async def test_pre_tool_guard_allows_read_file_without_security_intercept() -> None:
+    call = {"id": "call-1", "name": "read_file", "args": {"path": "notes-about-rm-rf.txt"}}
+
+    allowed, blocked = await apply_pre_tool_guards(
+        [call],
+        memory=FakeMemory(),
+        thread_id="thread-1",
+        middlewares=[],
+    )
+
+    assert allowed == [call]
+    assert blocked == []
+
+
+@pytest.mark.asyncio
+async def test_pre_tool_guard_allows_approved_delete_or_move_file_command() -> None:
+    call = {"id": "call-1", "name": "shell_command", "args": {"command": "rm -rf scratch"}}
+
+    allowed, blocked = await apply_pre_tool_guards(
+        [call],
+        memory=FakeMemory(),
+        thread_id="thread-1",
+        middlewares=[],
+        approval_decisions={"call-1": True},
+    )
+
+    assert allowed == [call]
+    assert blocked == []
 
 
 @pytest.mark.asyncio

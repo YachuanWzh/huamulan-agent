@@ -141,6 +141,8 @@ _TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
 )
 
 _REASONING_KEYS = ("reasoning_content", "reasoning", "thinking")
+_READ_ONLY_TOOL_NAMES = {"read_file"}
+_APPROVAL_OVERRIDABLE_TOOL_GUARD_CATEGORIES = {"delete_or_move_files"}
 
 
 def _merge_callbacks(
@@ -431,6 +433,8 @@ def scan_prompt_guard(message: str) -> GuardMatch | None:
 
 
 def scan_tool_guard(tool_name: str, args: Any) -> GuardMatch | None:
+    if tool_name in _READ_ONLY_TOOL_NAMES:
+        return None
     haystack = f"{tool_name}\n{_flatten_tool_args(args)}"
     for category, severity, reason, pattern in _TOOL_PATTERNS:
         if re.search(pattern, haystack):
@@ -458,12 +462,18 @@ async def apply_pre_tool_guards(
     memory: Any,
     thread_id: str | None,
     middlewares: Sequence[ToolMiddleware],
+    approval_decisions: dict[str, bool] | None = None,
 ) -> tuple[list[dict[str, Any]], list[ToolMessage]]:
     allowed_calls: list[dict[str, Any]] = []
     blocked_messages: list[ToolMessage] = []
 
     for call in calls:
-        security_response = await _pre_tool_security_guard(call, memory, thread_id)
+        security_response = await _pre_tool_security_guard(
+            call,
+            memory,
+            thread_id,
+            approval_decisions=approval_decisions,
+        )
         if security_response is not None:
             blocked_messages.append(security_response)
             continue
@@ -625,9 +635,13 @@ async def _pre_tool_security_guard(
     call: dict[str, Any],
     memory: Any,
     thread_id: str | None,
+    *,
+    approval_decisions: dict[str, bool] | None = None,
 ) -> ToolMessage | None:
     match = scan_tool_guard(_tool_call_name(call), call.get("args", {}))
     if match is None:
+        return None
+    if _approved_tool_guard_override(call, match, approval_decisions):
         return None
     await _record_audit(
         memory,
@@ -650,6 +664,18 @@ async def _pre_tool_security_guard(
         call,
         f"SecurityError: {match.category}: {match.reason}",
     )
+
+
+def _approved_tool_guard_override(
+    call: dict[str, Any],
+    match: GuardMatch,
+    approval_decisions: dict[str, bool] | None,
+) -> bool:
+    if match.category not in _APPROVAL_OVERRIDABLE_TOOL_GUARD_CATEGORIES:
+        return False
+    if approval_decisions is None:
+        return False
+    return approval_decisions.get(_tool_call_id(call)) is True
 
 
 def _run_pre_tool_middlewares(

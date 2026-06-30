@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -7,9 +7,22 @@ from langchain_core.messages import AIMessage, ToolMessage
 from personal_assistant.agent.state import AgentState
 
 
+RequiresApproval = Callable[[str, Any], bool]
+
+
+_READ_ONLY_TOOL_NAMES = {"read_file"}
+
+
+def requires_tool_approval(tool_name: str, args: Any) -> bool:
+    if tool_name in _READ_ONLY_TOOL_NAMES:
+        return False
+    return True
+
+
 @dataclass
 class ApprovalGate:
     decisions: dict[str, bool]
+    requires_approval: RequiresApproval | None = None
 
     def inspect(self, state: AgentState) -> AgentState:
         messages = state.get("messages", [])
@@ -33,7 +46,14 @@ class ApprovalGate:
         denial_messages: list[ToolMessage] = []
         for call in tool_calls:
             approval_id = _approval_id(call)
-            if approval_id not in self.decisions:
+            tool_name = str(call.get("name") or "")
+            args = call.get("args", {})
+            requires_approval = (
+                self.requires_approval(tool_name, args)
+                if self.requires_approval is not None
+                else True
+            )
+            if requires_approval and approval_id not in self.decisions:
                 pending.append(
                     {
                         "approval_id": approval_id,
@@ -43,7 +63,8 @@ class ApprovalGate:
                     }
                 )
             elif (
-                self.decisions[approval_id] is False
+                requires_approval
+                and self.decisions.get(approval_id) is False
                 and call["id"] not in answered_ids
             ):
                 denial_messages.append(
