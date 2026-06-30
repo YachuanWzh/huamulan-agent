@@ -38,8 +38,18 @@ function App() {
     <div className="app">
       <header className="app-header" aria-label="Assistant console">
         <h1>LangGraph Assistant</h1>
-        <div className="thread-info" title={threadId ?? ''}>
-          Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
+        <div className="header-actions">
+          <button
+            type="button"
+            className="header-audit-button"
+            aria-label="Open audit workspace"
+            onClick={() => setActivePanel('audit')}
+          >
+            Audit
+          </button>
+          <div className="thread-info" title={threadId ?? ''}>
+            Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
+          </div>
         </div>
       </header>
       <main className="app-body" aria-label="Conversation workspace">
