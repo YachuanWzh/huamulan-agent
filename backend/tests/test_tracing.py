@@ -93,6 +93,69 @@ def test_build_callback_returns_none_when_import_fails() -> None:
         assert result is None
 
 
+def test_build_callback_sets_no_proxy_for_langfuse_host() -> None:
+    """Langfuse host is added to NO_PROXY so trace data bypasses HTTP proxies."""
+    from personal_assistant.tracing import build_langfuse_callback
+
+    settings = MagicMock()
+    settings.langfuse_enabled = True
+    settings.langfuse_public_key = "pk-test"
+    settings.langfuse_secret_key = "sk-test"
+    settings.langfuse_host = "http://192.168.5.7:3000"
+
+    with patch.dict("os.environ", {"HTTP_PROXY": "http://127.0.0.1:7897"}, clear=True):
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler"):
+                build_langfuse_callback(settings)
+
+                no_proxy = os.environ.get("NO_PROXY", "")
+                assert "192.168.5.7" in no_proxy
+
+
+def test_build_callback_appends_to_existing_no_proxy() -> None:
+    """Existing NO_PROXY entries are preserved when adding Langfuse host."""
+    from personal_assistant.tracing import build_langfuse_callback
+
+    settings = MagicMock()
+    settings.langfuse_enabled = True
+    settings.langfuse_public_key = "pk-test"
+    settings.langfuse_secret_key = "sk-test"
+    settings.langfuse_host = "http://192.168.5.7:3000"
+
+    with patch.dict(
+        "os.environ",
+        {"NO_PROXY": "localhost,127.0.0.1"},
+        clear=True,
+    ):
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler"):
+                build_langfuse_callback(settings)
+
+                no_proxy = os.environ.get("NO_PROXY", "")
+                assert "localhost" in no_proxy
+                assert "127.0.0.1" in no_proxy
+                assert "192.168.5.7" in no_proxy
+
+
+def test_build_callback_no_proxy_skips_cloud_langfuse() -> None:
+    """Default cloud.langfuse.com host does not need NO_PROXY bypass."""
+    from personal_assistant.tracing import build_langfuse_callback
+
+    settings = MagicMock()
+    settings.langfuse_enabled = True
+    settings.langfuse_public_key = "pk-test"
+    settings.langfuse_secret_key = "sk-test"
+    settings.langfuse_host = "https://cloud.langfuse.com"
+
+    with patch.dict("os.environ", {}, clear=True):
+        with patch("personal_assistant.tracing.Langfuse"):
+            with patch("personal_assistant.tracing.CallbackHandler"):
+                build_langfuse_callback(settings)
+
+                # Should not set NO_PROXY for cloud host
+                assert "NO_PROXY" not in os.environ
+
+
 def test_build_callback_does_not_set_env_secret_key_when_none() -> None:
     """Does not override other env vars when secret_key is None."""
     from personal_assistant.tracing import build_langfuse_callback
