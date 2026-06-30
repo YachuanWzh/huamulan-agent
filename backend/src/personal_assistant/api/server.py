@@ -15,6 +15,7 @@ from personal_assistant.api.schemas import (
     ReplayResponse,
     SkillInfo,
     ThreadSummary,
+    ToolError,
 )
 from personal_assistant.config import get_settings
 from personal_assistant.memory.postgres import PostgresMemory
@@ -121,6 +122,11 @@ async def delete_thread(thread_id: str) -> DeleteThreadResponse:
 @app.get("/api/audit-events", response_model=list[AuditEvent])
 async def list_audit_events(thread_id: str | None = None, limit: int = 100) -> list[AuditEvent]:
     return await harness.list_audit_events(thread_id=thread_id, limit=limit)
+
+
+@app.get("/api/tool-errors", response_model=list[ToolError])
+async def list_tool_errors(thread_id: str | None = None, limit: int = 100) -> list[ToolError]:
+    return await harness.list_tool_errors(thread_id=thread_id, limit=limit)
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

@@ -301,6 +301,39 @@ describe('api', () => {
     })
   })
 
+  describe('listToolErrors', () => {
+    it('returns archived tool errors for a thread', async () => {
+      server.use(
+        http.get(`${BASE}/api/tool-errors`, ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.get('thread_id')).toBe('t1')
+          expect(url.searchParams.get('limit')).toBe('100')
+          return HttpResponse.json([
+            {
+              id: 12,
+              created_at: '2026-06-30T01:00:00+00:00',
+              thread_id: 't1',
+              tool_call_id: 'call-1',
+              tool_name: 'lookup',
+              tool_args: { query: 'alpha' },
+              attempt: 3,
+              max_attempts: 3,
+              error_type: 'ValueError',
+              error_message: 'bad query',
+              will_retry: false,
+            },
+          ])
+        }),
+      )
+
+      const result = await api.listToolErrors('t1')
+
+      expect(result).toHaveLength(1)
+      expect(result[0]!.tool_name).toBe('lookup')
+      expect(result[0]!.tool_args).toEqual({ query: 'alpha' })
+    })
+  })
+
   describe('listSkills', () => {
     it('returns skills array', async () => {
       server.use(

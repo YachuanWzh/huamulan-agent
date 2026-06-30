@@ -7,7 +7,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from personal_assistant.api.schemas import AuditEvent, AuditEventCreate
+from personal_assistant.api.schemas import AuditEvent, AuditEventCreate, ToolError
 
 
 class PostgresMemory:
@@ -28,6 +28,7 @@ class PostgresMemory:
         await self._setup_audit_events()
         await self._setup_long_term_memories()
         await self._setup_tool_results()
+        await self._setup_tool_errors()
 
     async def stop(self) -> None:
         if self.pool is not None:
@@ -74,6 +75,10 @@ class PostgresMemory:
             async with self.pool.connection() as conn:
                 await conn.execute(
                     "DELETE FROM audit_events WHERE thread_id = %s",
+                    (thread_id,),
+                )
+                await conn.execute(
+                    "DELETE FROM tool_errors WHERE thread_id = %s",
                     (thread_id,),
                 )
 
@@ -165,6 +170,42 @@ class PostgresMemory:
                 ),
             )
 
+    async def record_tool_error(
+        self,
+        *,
+        thread_id: str | None,
+        tool_call_id: str,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        attempt: int,
+        max_attempts: int,
+        error_type: str,
+        error_message: str,
+        will_retry: bool,
+    ) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO tool_errors
+                    (thread_id, tool_call_id, tool_name, attempt, max_attempts,
+                     tool_args, error_type, error_message, will_retry)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                """,
+                (
+                    thread_id,
+                    tool_call_id,
+                    tool_name,
+                    attempt,
+                    max_attempts,
+                    Jsonb(_jsonable(tool_args)),
+                    error_type,
+                    error_message,
+                    will_retry,
+                ),
+            )
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,
@@ -209,6 +250,58 @@ class PostgresMemory:
                 reason=row[6],
                 subject=row[7],
                 metadata=row[8] or {},
+            )
+            for row in rows
+        ]
+
+    async def list_tool_errors(
+        self,
+        thread_id: str | None = None,
+        limit: int = 100,
+    ) -> list[ToolError]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            if thread_id:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, created_at, thread_id, tool_call_id, tool_name,
+                           tool_args, attempt, max_attempts, error_type,
+                           error_message, will_retry
+                    FROM tool_errors
+                    WHERE thread_id = %s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (thread_id, limit),
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, created_at, thread_id, tool_call_id, tool_name,
+                           tool_args, attempt, max_attempts, error_type,
+                           error_message, will_retry
+                    FROM tool_errors
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            rows = await cursor.fetchall()
+        return [
+            ToolError(
+                id=row[0],
+                created_at=row[1],
+                thread_id=row[2],
+                tool_call_id=row[3],
+                tool_name=row[4],
+                tool_args=row[5] or {},
+                attempt=row[6],
+                max_attempts=row[7],
+                error_type=row[8],
+                error_message=row[9],
+                will_retry=row[10],
             )
             for row in rows
         ]
@@ -277,6 +370,34 @@ class PostgresMemory:
                 """
                 CREATE INDEX IF NOT EXISTS idx_tool_results_thread_created
                 ON tool_results (thread_id, created_at DESC)
+                """
+            )
+
+    async def _setup_tool_errors(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tool_errors (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    thread_id TEXT,
+                    tool_call_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    tool_args JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    attempt INTEGER NOT NULL,
+                    max_attempts INTEGER NOT NULL,
+                    error_type TEXT NOT NULL,
+                    error_message TEXT NOT NULL,
+                    will_retry BOOLEAN NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tool_errors_thread_created
+                ON tool_errors (thread_id, created_at DESC)
                 """
             )
 

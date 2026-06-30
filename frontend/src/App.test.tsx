@@ -34,11 +34,13 @@ vi.mock('./components/Sidebar', () => ({
     onThreadCleared,
     onThreadSelected,
     onReplayState,
+    onPanelChange,
   }: {
     threadId: string | null
     onThreadCleared: () => void
     onThreadSelected: (threadId: string) => void
     onReplayState: (state: { checkpoint_id: string }) => void
+    onPanelChange: (panel: 'chat' | 'checkpoint' | 'audit') => void
   }) => (
     <div data-testid="sidebar-shell">
       <div data-testid="sidebar-thread">{threadId}</div>
@@ -51,6 +53,22 @@ vi.mock('./components/Sidebar', () => ({
       >
         Mock select history
       </button>
+      <button onClick={() => onPanelChange('audit')}>Mock audit panel</button>
+      <button onClick={() => onPanelChange('checkpoint')}>Mock checkpoint panel</button>
+    </div>
+  ),
+}))
+
+vi.mock('./components/WorkspacePanel', () => ({
+  WorkspacePanel: ({
+    panel,
+    threadId,
+  }: {
+    panel: 'checkpoint' | 'audit'
+    threadId: string | null
+  }) => (
+    <div data-testid="workspace-panel">
+      Workspace {panel} {threadId}
     </div>
   ),
 }))
@@ -65,14 +83,16 @@ describe('App thread id', () => {
     localStorage.clear()
   })
 
-  it('uses the stored thread id until history is cleared', async () => {
+  it('starts unbound even when a previous thread id is stored', async () => {
     localStorage.setItem('threadId', 'stored-thread')
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('new-thread' as `${string}-${string}-${string}-${string}-${string}`)
 
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByTestId('chat-thread')).toHaveTextContent('stored-thread')
+    expect(screen.getByTestId('chat-thread')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('sidebar-thread')).toBeEmptyDOMElement()
+    expect(screen.getByText(/thread: not started/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /mock new thread/i }))
 
@@ -110,6 +130,16 @@ describe('App thread id', () => {
     expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('history-thread')
     expect(screen.getByTestId('chat-replay')).toHaveTextContent('history-checkpoint')
     expect(localStorage.getItem('threadId')).toBe('history-thread')
+  })
+
+  it('uses the main workspace for operational panels instead of the chat blank state', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /mock audit panel/i }))
+
+    expect(screen.getByTestId('workspace-panel')).toHaveTextContent('Workspace audit')
+    expect(screen.queryByTestId('chat-thread')).not.toBeInTheDocument()
   })
 
   it('exposes the redesigned console shell without changing core controls', () => {

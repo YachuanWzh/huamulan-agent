@@ -82,3 +82,78 @@ async def test_record_tool_result_inserts_tool_result_row() -> None:
         "large result",
     )
     assert params[4].obj == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_record_tool_error_inserts_error_archive_row() -> None:
+    memory = PostgresMemory("postgresql://example")
+    pool = _Pool()
+    memory.pool = pool
+
+    await memory.record_tool_error(
+        thread_id="thread-1",
+        tool_call_id="tool-call-1",
+        tool_name="lookup",
+        tool_args={"query": "alpha"},
+        attempt=2,
+        max_attempts=3,
+        error_type="RuntimeError",
+        error_message="temporary failure",
+        will_retry=True,
+    )
+
+    sql, params = pool.conn.calls[0]
+    assert "INSERT INTO tool_errors" in sql
+    assert params[:5] == (
+        "thread-1",
+        "tool-call-1",
+        "lookup",
+        2,
+        3,
+    )
+    assert params[5].obj == {"query": "alpha"}
+    assert params[6:] == ("RuntimeError", "temporary failure", True)
+
+
+@pytest.mark.asyncio
+async def test_list_tool_errors_maps_rows_to_schema() -> None:
+    class _RowsCursor:
+        async def fetchall(self):
+            return [
+                (
+                    9,
+                    "2026-06-30T01:00:00+00:00",
+                    "thread-1",
+                    "tool-call-1",
+                    "lookup",
+                    {"query": "alpha"},
+                    3,
+                    3,
+                    "ValueError",
+                    "bad query",
+                    False,
+                )
+            ]
+
+    class _RowsConnection(_Connection):
+        async def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+            return _RowsCursor()
+
+    class _RowsPool(_Pool):
+        def __init__(self) -> None:
+            self.conn = _RowsConnection()
+
+    memory = PostgresMemory("postgresql://example")
+    pool = _RowsPool()
+    memory.pool = pool
+
+    errors = await memory.list_tool_errors(thread_id="thread-1", limit=25)
+
+    sql, params = pool.conn.calls[0]
+    assert "FROM tool_errors" in sql
+    assert params == ("thread-1", 25)
+    assert errors[0].id == 9
+    assert errors[0].tool_name == "lookup"
+    assert errors[0].tool_args == {"query": "alpha"}
+    assert errors[0].error_message == "bad query"

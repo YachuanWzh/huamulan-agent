@@ -41,6 +41,25 @@ describe('Sidebar', () => {
     expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /checkpoint/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /audit/i })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /tool errors/i })).not.toBeInTheDocument()
+  })
+
+  it('notifies the app when workspace navigation changes', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.replay.mockResolvedValue({ thread_id: 't1', states: [] })
+    mockApi.listAuditEvents.mockResolvedValue([])
+    const onPanelChange = vi.fn()
+
+    const user = userEvent.setup()
+    render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
+
+    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
+    await user.click(screen.getByRole('tab', { name: /audit/i }))
+    await user.click(screen.getByRole('tab', { name: /skills/i }))
+
+    expect(onPanelChange).toHaveBeenNthCalledWith(1, 'checkpoint')
+    expect(onPanelChange).toHaveBeenNthCalledWith(2, 'audit')
+    expect(onPanelChange).toHaveBeenNthCalledWith(3, 'chat')
   })
 
   it('displays skills after loading', async () => {
@@ -85,39 +104,34 @@ describe('Sidebar', () => {
     })
   })
 
-  it('switches to checkpoint tab and shows replay states', async () => {
+  it('switches to checkpoint tab without duplicating replay controls in the sidebar', async () => {
     mockApi.listSkills.mockResolvedValue([])
-    mockApi.replay.mockResolvedValue({
-      thread_id: 't1',
-      states: [replayState],
-    })
+    const onPanelChange = vi.fn()
 
     const user = userEvent.setup()
-    render(<Sidebar threadId="t1" />)
+    render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
 
     await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
 
-    await waitFor(() => {
-      expect(mockApi.replay).toHaveBeenCalledWith('t1')
-      expect(screen.getByText(/thread replay/i)).toBeInTheDocument()
-    })
+    expect(onPanelChange).toHaveBeenCalledWith('checkpoint')
+    expect(mockApi.replay).not.toHaveBeenCalledWith('t1')
+    expect(screen.queryByRole('button', { name: /replay checkpoint/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /delete checkpoints/i })).not.toBeInTheDocument()
   })
 
-  it('replays a checkpoint from the checkpoint tab', async () => {
+  it('switches to audit tab without duplicating audit results in the sidebar', async () => {
     mockApi.listSkills.mockResolvedValue([])
-    mockApi.replay.mockResolvedValue({
-      thread_id: 't1',
-      states: [replayState],
-    })
-    const onReplayState = vi.fn()
+    const onPanelChange = vi.fn()
 
     const user = userEvent.setup()
-    render(<Sidebar threadId="t1" onReplayState={onReplayState} />)
+    render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
 
-    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
-    await user.click(await screen.findByRole('button', { name: /replay checkpoint 1/i }))
+    await user.click(screen.getByRole('tab', { name: /audit/i }))
 
-    expect(onReplayState).toHaveBeenCalledWith(replayState)
+    expect(onPanelChange).toHaveBeenCalledWith('audit')
+    expect(mockApi.listAuditEvents).not.toHaveBeenCalledWith('t1')
+    expect(screen.queryByText('instruction_override')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument()
   })
 
   it('shows thread sessions in history and opens the selected conversation', async () => {
@@ -253,70 +267,5 @@ describe('Sidebar', () => {
     })
   })
 
-  it('deletes thread checkpoints from the checkpoint tab', async () => {
-    mockApi.listSkills.mockResolvedValue([])
-    mockApi.replay.mockResolvedValue({
-      thread_id: 't1',
-      states: [replayState],
-    })
-    mockApi.deleteThread.mockResolvedValue({ thread_id: 't1', deleted: true })
-
-    const user = userEvent.setup()
-    render(<Sidebar threadId="t1" />)
-
-    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
-    await user.click(await screen.findByRole('button', { name: /delete checkpoints/i }))
-
-    await waitFor(() => {
-      expect(mockApi.deleteThread).toHaveBeenCalledWith('t1')
-      expect(screen.getByText(/no checkpoints for this thread/i)).toBeInTheDocument()
-    })
-  })
-
-  it('clears history and starts a new thread', async () => {
-    mockApi.listSkills.mockResolvedValue([])
-    mockApi.replay.mockResolvedValue({ thread_id: 't1', states: [] })
-    mockApi.deleteThread.mockResolvedValue({ thread_id: 't1', deleted: true })
-    const onThreadCleared = vi.fn()
-
-    const user = userEvent.setup()
-    render(<Sidebar threadId="t1" onThreadCleared={onThreadCleared} />)
-
-    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
-    await user.click(await screen.findByRole('button', { name: /clear and new thread/i }))
-
-    await waitFor(() => {
-      expect(mockApi.deleteThread).toHaveBeenCalledWith('t1')
-      expect(onThreadCleared).toHaveBeenCalledOnce()
-    })
-  })
-
-  it('shows audit events for the current thread', async () => {
-    mockApi.listSkills.mockResolvedValue([])
-    mockApi.listAuditEvents.mockResolvedValue([
-      {
-        id: 7,
-        created_at: '2026-06-29T04:00:00+00:00',
-        thread_id: 't1',
-        source: 'prompt',
-        category: 'instruction_override',
-        severity: 'HIGH',
-        reason: 'User message attempts to override prior or system instructions.',
-        subject: 'ignore previous instructions',
-        metadata: { prompt_guard_blocked: true },
-      },
-    ])
-
-    const user = userEvent.setup()
-    render(<Sidebar threadId="t1" />)
-
-    await user.click(screen.getByRole('tab', { name: /audit/i }))
-
-    await waitFor(() => {
-      expect(mockApi.listAuditEvents).toHaveBeenCalledWith('t1')
-      expect(screen.getByText('instruction_override')).toBeInTheDocument()
-      expect(screen.getByText('HIGH')).toBeInTheDocument()
-    })
-  })
 })
 

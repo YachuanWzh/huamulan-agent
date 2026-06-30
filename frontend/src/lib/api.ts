@@ -91,6 +91,20 @@ export interface AuditEvent {
   metadata: Record<string, unknown>
 }
 
+export interface ToolError {
+  id: number
+  created_at: string
+  thread_id: string | null
+  tool_call_id: string
+  tool_name: string
+  tool_args: Record<string, unknown>
+  attempt: number
+  max_attempts: number
+  error_type: string
+  error_message: string
+  will_retry: boolean
+}
+
 // --- SSE Streaming types ---
 
 export interface StreamToken {
@@ -260,6 +274,12 @@ export const api = {
     const params = new URLSearchParams({ limit: '100' })
     if (threadId) params.set('thread_id', threadId)
     return request<AuditEvent[]>(`/api/audit-events?${params.toString()}`)
+  },
+
+  listToolErrors: (threadId?: string) => {
+    const params = new URLSearchParams({ limit: '100' })
+    if (threadId) params.set('thread_id', threadId)
+    return request<ToolError[]>(`/api/tool-errors?${params.toString()}`)
   },
 
   listSkills: () => request<SkillInfo[]>('/api/skills'),

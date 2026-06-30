@@ -52,6 +52,20 @@ class AuditEvent(AuditEventCreate):
     created_at: datetime
 
 
+class ToolError(BaseModel):
+    id: int
+    created_at: datetime
+    thread_id: str | None = None
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+    attempt: int
+    max_attempts: int
+    error_type: str
+    error_message: str
+    will_retry: bool
+
+
 class SkillInfo(BaseModel):
     name: str
     description: str

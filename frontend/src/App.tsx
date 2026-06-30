@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { Sidebar } from './components/Sidebar'
+import { WorkspacePanel } from './components/WorkspacePanel'
 import type { ReplayState } from './lib/api'
 import './App.css'
 
@@ -11,17 +12,15 @@ function createThreadId() {
 }
 
 function App() {
-  const [threadId, setThreadId] = useState<string | null>(() => {
-    const stored = localStorage.getItem('threadId')
-    if (stored) return stored
-    return null
-  })
+  const [threadId, setThreadId] = useState<string | null>(null)
   const [replayState, setReplayState] = useState<ReplayState | null>(null)
+  const [activePanel, setActivePanel] = useState<'chat' | 'checkpoint' | 'audit'>('chat')
 
   const handleThreadCreated = () => {
     const id = createThreadId()
     setThreadId(id)
     setReplayState(null)
+    setActivePanel('chat')
     return id
   }
 
@@ -32,6 +31,7 @@ function App() {
   const handleThreadSelected = (id: string) => {
     localStorage.setItem('threadId', id)
     setThreadId(id)
+    setActivePanel('chat')
   }
 
   return (
@@ -43,18 +43,31 @@ function App() {
         </div>
       </header>
       <main className="app-body" aria-label="Conversation workspace">
-        <ChatPanel
-          key={threadId ?? 'empty-thread'}
-          threadId={threadId}
-          onThreadCreated={handleThreadCreated}
-          onNewConversation={handleThreadCreated}
-          replayState={replayState}
-        />
+        {activePanel === 'chat' ? (
+          <ChatPanel
+            key={threadId ?? 'empty-thread'}
+            threadId={threadId}
+            onThreadCreated={handleThreadCreated}
+            onNewConversation={handleThreadCreated}
+            replayState={replayState}
+          />
+        ) : (
+          <WorkspacePanel
+            panel={activePanel}
+            threadId={threadId}
+            onThreadCleared={handleThreadCleared}
+            onReplayState={(state) => {
+              setReplayState(state)
+              setActivePanel('chat')
+            }}
+          />
+        )}
         <Sidebar
           threadId={threadId}
           onThreadCleared={handleThreadCleared}
           onThreadSelected={handleThreadSelected}
           onReplayState={setReplayState}
+          onPanelChange={setActivePanel}
         />
       </main>
     </div>

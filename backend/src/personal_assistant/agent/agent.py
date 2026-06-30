@@ -1,3 +1,5 @@
+import asyncio
+import json
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
 from langgraph.prebuilt import ToolNode
@@ -131,7 +133,15 @@ def compile_agent(
         )
 
         if not blocked_messages:
-            result = await ToolNode(active_tools).ainvoke(state, config=config)
+            result = {
+                "messages": await _execute_tool_calls_with_retry(
+                    active_tools,
+                    ai_message.tool_calls,
+                    config=config,
+                    memory=memory,
+                    thread_id=thread_id,
+                )
+            }
             await _record_tool_result_messages(
                 memory,
                 thread_id=thread_id,
@@ -148,12 +158,15 @@ def compile_agent(
             )
             return {"messages": blocked_messages}
 
-        guarded_state = dict(state)
-        guarded_state["messages"] = [
-            _replace_ai_tool_calls(message, allowed_calls) if message is ai_message else message
-            for message in messages
-        ]
-        result = await ToolNode(active_tools).ainvoke(guarded_state, config=config)
+        result = {
+            "messages": await _execute_tool_calls_with_retry(
+                active_tools,
+                allowed_calls,
+                config=config,
+                memory=memory,
+                thread_id=thread_id,
+            )
+        }
         result_messages = [*blocked_messages, *result.get("messages", [])]
         await _record_tool_result_messages(
             memory,
@@ -219,6 +232,126 @@ def _active_tools_for_state(registry: SkillRegistry, selected_skills: list[str],
     tool_map = {tool.name: tool for tool in basic_tools}
     tool_map.update(registry.tool_map_for_skills(selected_skills))
     return list(tool_map.values())
+
+
+async def _execute_tool_calls_with_retry(
+    tools,
+    tool_calls: list[dict],
+    *,
+    config: RunnableConfig | None = None,
+    memory=None,
+    thread_id: str | None = None,
+    max_retries: int = 3,
+    base_delay: float = 0.25,
+    sleep=asyncio.sleep,
+) -> list[ToolMessage]:
+    tool_map = {tool.name: tool for tool in tools}
+    messages: list[ToolMessage] = []
+    for call in tool_calls:
+        tool_name = str(call.get("name") or "tool")
+        tool_call_id = str(call.get("id") or "")
+        tool_args = call.get("args", {})
+        if not isinstance(tool_args, dict):
+            tool_args = {"input": tool_args}
+        tool = tool_map.get(tool_name)
+        if tool is None:
+            messages.append(
+                ToolMessage(
+                    tool_call_id=tool_call_id,
+                    content=_tool_failure_content(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        attempts=1,
+                        error_type="KeyError",
+                        error_message=f"Unknown tool: {tool_name}",
+                    ),
+                )
+            )
+            continue
+
+        last_error: Exception | None = None
+        max_attempts = max_retries + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                output = await tool.ainvoke(tool_args, config=config)
+                messages.append(
+                    ToolMessage(
+                        tool_call_id=tool_call_id,
+                        content=_tool_output_content(output),
+                    )
+                )
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                will_retry = attempt < max_attempts
+                await _record_tool_error(
+                    memory,
+                    thread_id=thread_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_type=exc.__class__.__name__,
+                    error_message=str(exc) or exc.__class__.__name__,
+                    will_retry=will_retry,
+                )
+                if will_retry:
+                    await sleep(base_delay * (2 ** (attempt - 1)))
+        if last_error is not None:
+            messages.append(
+                ToolMessage(
+                    tool_call_id=tool_call_id,
+                    content=_tool_failure_content(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        attempts=max_attempts,
+                        error_type=last_error.__class__.__name__,
+                        error_message=str(last_error) or last_error.__class__.__name__,
+                    ),
+                )
+            )
+    return messages
+
+
+async def _record_tool_error(memory, **kwargs) -> None:
+    record = getattr(memory, "record_tool_error", None)
+    if not callable(record):
+        return
+    try:
+        await record(**kwargs)
+    except Exception:
+        return
+
+
+def _tool_output_content(output) -> str:
+    if isinstance(output, ToolMessage):
+        return str(output.content)
+    if isinstance(output, str):
+        return output
+    try:
+        return json.dumps(output, ensure_ascii=False)
+    except TypeError:
+        return str(output)
+
+
+def _tool_failure_content(
+    *,
+    tool_name: str,
+    tool_args: dict,
+    attempts: int,
+    error_type: str,
+    error_message: str,
+) -> str:
+    args_json = json.dumps(tool_args, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return (
+        f"Tool call failed after {attempts} attempts.\n"
+        f"Tool: {tool_name}\n"
+        f"Arguments: {args_json}\n"
+        f"Error: {error_type}: {error_message}\n"
+        "Use the error and arguments above to decide whether to retry with corrected parameters."
+    )
 
 
 def _replace_ai_tool_calls(message: AIMessage, tool_calls: list[dict]) -> AIMessage:

@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   api,
-  type AuditEvent,
   type ReplayState,
   type SkillInfo,
-  type ReplayResponse,
   type ThreadSummary,
 } from '../lib/api'
 
@@ -13,6 +11,7 @@ interface Props {
   onThreadCleared?: () => void
   onThreadSelected?: (threadId: string) => void
   onReplayState?: (state: ReplayState) => void
+  onPanelChange?: (panel: 'chat' | 'checkpoint' | 'audit') => void
 }
 
 type Tab = 'skills' | 'history' | 'checkpoint' | 'audit'
@@ -22,6 +21,7 @@ export function Sidebar({
   onThreadCleared,
   onThreadSelected,
   onReplayState,
+  onPanelChange,
 }: Props) {
   const [tab, setTab] = useState<Tab>('skills')
   const [skills, setSkills] = useState<SkillInfo[]>([])
@@ -31,11 +31,6 @@ export function Sidebar({
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const [clearingHistory, setClearingHistory] = useState(false)
-  const [replay, setReplay] = useState<ReplayResponse | null>(null)
-  const [replayLoading, setReplayLoading] = useState(false)
-  const [historyDeleting, setHistoryDeleting] = useState(false)
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
-  const [auditLoading, setAuditLoading] = useState(false)
 
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true)
@@ -57,20 +52,6 @@ export function Sidebar({
     setSkillsLoading(false)
   }
 
-  const loadReplay = useCallback(async () => {
-    if (!threadId) {
-      setReplay(null)
-      return
-    }
-    setReplayLoading(true)
-    try {
-      setReplay(await api.replay(threadId))
-    } catch {
-      // silently handle
-    }
-    setReplayLoading(false)
-  }, [threadId])
-
   const loadThreads = useCallback(async () => {
     setThreadsLoading(true)
     try {
@@ -81,42 +62,6 @@ export function Sidebar({
     setThreadsLoading(false)
   }, [])
 
-  const deleteCurrentHistory = async () => {
-    if (!threadId) return
-    setHistoryDeleting(true)
-    try {
-      await api.deleteThread(threadId)
-      setReplay({ thread_id: threadId, states: [] })
-    } catch {
-      // silently handle
-    }
-    setHistoryDeleting(false)
-  }
-
-  const clearAndStartNewThread = async () => {
-    setHistoryDeleting(true)
-    try {
-      if (threadId) {
-        await api.deleteThread(threadId)
-        setReplay({ thread_id: threadId, states: [] })
-      }
-      onThreadCleared?.()
-    } catch {
-      // silently handle
-    }
-    setHistoryDeleting(false)
-  }
-
-  const loadAuditEvents = useCallback(async () => {
-    setAuditLoading(true)
-    try {
-      setAuditEvents(await api.listAuditEvents(threadId ?? undefined))
-    } catch {
-      setAuditEvents([])
-    }
-    setAuditLoading(false)
-  }, [threadId])
-
   useEffect(() => {
     loadSkills()
   }, [loadSkills])
@@ -125,13 +70,7 @@ export function Sidebar({
     if (tab === 'history') {
       loadThreads()
     }
-    if (tab === 'checkpoint') {
-      loadReplay()
-    }
-    if (tab === 'audit') {
-      loadAuditEvents()
-    }
-  }, [loadAuditEvents, loadReplay, loadThreads, tab])
+  }, [loadThreads, tab])
 
   const openThread = async (selectedThreadId: string) => {
     setOpeningThreadId(selectedThreadId)
@@ -175,12 +114,16 @@ export function Sidebar({
     try {
       await api.clearThreads()
       setThreads([])
-      setReplay(null)
       onThreadCleared?.()
     } catch {
       // silently handle
     }
     setClearingHistory(false)
+  }
+
+  const selectTab = (nextTab: Tab, panel: 'chat' | 'checkpoint' | 'audit') => {
+    setTab(nextTab)
+    onPanelChange?.(panel)
   }
 
   return (
@@ -190,7 +133,7 @@ export function Sidebar({
           role="tab"
           aria-selected={tab === 'skills'}
           className={`tab ${tab === 'skills' ? 'active' : ''}`}
-          onClick={() => setTab('skills')}
+          onClick={() => selectTab('skills', 'chat')}
         >
           Skills
         </button>
@@ -198,7 +141,7 @@ export function Sidebar({
           role="tab"
           aria-selected={tab === 'history'}
           className={`tab ${tab === 'history' ? 'active' : ''}`}
-          onClick={() => setTab('history')}
+          onClick={() => selectTab('history', 'chat')}
         >
           History
         </button>
@@ -206,7 +149,7 @@ export function Sidebar({
           role="tab"
           aria-selected={tab === 'checkpoint'}
           className={`tab ${tab === 'checkpoint' ? 'active' : ''}`}
-          onClick={() => setTab('checkpoint')}
+          onClick={() => selectTab('checkpoint', 'checkpoint')}
         >
           Checkpoint
         </button>
@@ -214,7 +157,7 @@ export function Sidebar({
           role="tab"
           aria-selected={tab === 'audit'}
           className={`tab ${tab === 'audit' ? 'active' : ''}`}
-          onClick={() => setTab('audit')}
+          onClick={() => selectTab('audit', 'audit')}
         >
           Audit
         </button>
@@ -279,7 +222,9 @@ export function Sidebar({
                         <span className="history-preview">
                           <span>{thread.thread_id}</span>
                           {thread.updated_at && (
-                            <span className="history-time">{new Date(thread.updated_at).toLocaleString()}</span>
+                            <span className="history-time">
+                              {new Date(thread.updated_at).toLocaleString()}
+                            </span>
                           )}
                         </span>
                       </button>
@@ -301,85 +246,20 @@ export function Sidebar({
         )}
 
         {tab === 'checkpoint' && (
-          <div className="replay-panel">
-            <div className="replay-header">
+          <div className="sidebar-panel-note">
+            <div className="sidebar-panel-note-header">
               <h3>Thread Replay</h3>
-              <div className="replay-actions">
-                <button onClick={deleteCurrentHistory} disabled={historyDeleting}>
-                  Delete Checkpoints
-                </button>
-                <button onClick={clearAndStartNewThread} disabled={historyDeleting}>
-                  Clear and New Thread
-                </button>
-              </div>
             </div>
-            {replayLoading && <div className="loading">Loading...</div>}
-            {!replayLoading && (!replay || replay.states.length === 0) && (
-              <div className="empty-state">No checkpoints for this thread.</div>
-            )}
-            {replay && replay.states.length > 0 && (
-              <div className="replay-states">
-                {replay.states.map((state, i) => (
-                  <details key={i} className="replay-state">
-                    <summary>
-                      <span>
-                        Checkpoint {i + 1}
-                        {state.node ? ` · ${state.node}` : ''}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          onReplayState?.(state)
-                        }}
-                      >
-                        Replay checkpoint {i + 1}
-                      </button>
-                    </summary>
-                    <div className="replay-meta">
-                      {state.created_at && <span>{state.created_at}</span>}
-                      {state.values.selected_skills?.length ? (
-                        <span>Skills: {state.values.selected_skills.join(', ')}</span>
-                      ) : null}
-                    </div>
-                    <pre>{JSON.stringify(state, null, 2)}</pre>
-                  </details>
-                ))}
-              </div>
-            )}
+            <div className="sidebar-panel-note-body">Open in workspace</div>
           </div>
         )}
 
         {tab === 'audit' && (
-          <div className="audit-panel">
-            <div className="audit-header">
-              <h3>Security Audit</h3>
-              <button onClick={loadAuditEvents} disabled={auditLoading}>
-                Refresh
-              </button>
+          <div className="sidebar-panel-note">
+            <div className="sidebar-panel-note-header">
+              <h3>Operational Audit</h3>
             </div>
-            {auditLoading && <div className="loading">Loading...</div>}
-            {!auditLoading && auditEvents.length === 0 && (
-              <div className="empty-state">No audit events for this thread.</div>
-            )}
-            {!auditLoading && auditEvents.length > 0 && (
-              <ul className="audit-list">
-                {auditEvents.map((event) => (
-                  <li key={event.id} className={`audit-item severity-${event.severity.toLowerCase()}`}>
-                    <div className="audit-row">
-                      <span className="audit-category">{event.category}</span>
-                      <span className="audit-severity">{event.severity}</span>
-                    </div>
-                    <div className="audit-reason">{event.reason}</div>
-                    <div className="audit-meta">
-                      <span>{event.source}</span>
-                      {event.created_at && <span>{new Date(event.created_at).toLocaleString()}</span>}
-                    </div>
-                    {event.subject && <div className="audit-subject">{event.subject}</div>}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <div className="sidebar-panel-note-body">Open in workspace</div>
           </div>
         )}
       </div>
