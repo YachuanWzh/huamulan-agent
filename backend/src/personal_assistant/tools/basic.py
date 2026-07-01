@@ -37,6 +37,8 @@ def build_basic_tools(
                 cwd=str(workdir),
                 shell=True,
                 capture_output=True,
+                encoding="utf-8",
+                errors="replace",
                 text=True,
                 timeout=timeout,
             )

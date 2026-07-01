@@ -33,6 +33,25 @@ class TestShellCommandTool:
         assert "exit_code=0" in result
         assert "hello" in result
 
+    def test_shell_command_preserves_utf8_subprocess_output_on_windows_locale(
+        self, tmp_path: Path
+    ):
+        tools = _tool_map(tmp_path)
+
+        result = tools["shell_command"].invoke(
+            {
+                "command": (
+                    "python -c \"import sys; "
+                    "sys.stdout.buffer.write(b'\\xe2\\x94\\x94 stock-result')\""
+                ),
+                "cwd": ".",
+                "timeout_seconds": 5,
+            }
+        )
+
+        assert "exit_code=0" in result
+        assert "└ stock-result" in result
+
     def test_shell_command_rejects_cwd_outside_workspace(self, tmp_path: Path):
         tools = _tool_map(tmp_path)
 

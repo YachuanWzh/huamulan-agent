@@ -705,6 +705,9 @@ button {
 }
 
 .approval-batch-card {
+  max-height: min(68vh, 640px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
@@ -764,8 +767,12 @@ button {
 }
 
 .approval-batch-list {
+  min-height: 0;
   display: grid;
+  align-content: start;
   gap: var(--space-3);
+  overflow-y: auto;
+  padding-right: var(--space-1);
 }
 
 .approval-batch-item {
@@ -810,7 +817,10 @@ button {
 
 .approval-batch-submit {
   justify-content: flex-end;
-  margin-top: var(--space-3);
+  margin: var(--space-3) calc(var(--space-4) * -1) calc(var(--space-3) * -1);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid #ecd082;
+  background: #fff8e5;
 }
 
 .approval-batch-item .tool-args {
