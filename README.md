@@ -60,7 +60,7 @@
 | **前端** | React 19, TypeScript 6, Vite 8, Vitest 4 |
 | **后端** | FastAPI, Uvicorn, Python 3.11 |
 | **Agent** | LangGraph ≥0.2, langchain-deepseek (ChatDeepSeek) |
-| **存储** | PostgreSQL (langgraph-checkpoint-postgres + 审计日志 + 长期记忆 + 工具结果) |
+| **存储** | PostgreSQL (langgraph-checkpoint-postgres + 审计日志 + 长期记忆 + 工具结果) + Qdrant (可选；Skill 向量索引) |
 | **缓存** | Redis (可选；读接口与长期记忆热数据加速) |
 | **可观测性** | Langfuse ≥3.0 (LLM trace + 工具 span + 图节点自动追踪，支持云服务/自托管) |
 | **工程** | Superharness (TDD + 系统调试 + 代码审查) |
@@ -100,14 +100,20 @@ flowchart LR
         RM[long-term memory prompt cache]
     end
 
+    subgraph Qdrant["Qdrant (Optional Vector Store)"]
+        QV[Skill Embedding Index]
+    end
+
     Frontend -->|"HTTP REST + SSE"| Backend
     Backend --> DB
     Backend -.-> Redis
+    Backend -.-> Qdrant
     Backend -->|"CallbackHandler<br/>自动 trace"| LF["Langfuse<br/>(Cloud / Self-Hosted)"]
     AH --> CA
     CA -.-> Redis
     SG --> LT
     SG --> CT
+    SK -.-> Qdrant
 ```
 
 ## 快速开始
