@@ -97,7 +97,7 @@ if __name__ == "__main__":
     elif cmd == "forecast":
         result = extract_forecast(raw)
     else:
-        print(f"Unknown command: {cmd}", file=stderr)
+        print(f"Unknown command: {cmd}", file=sys.stderr)
         sys.exit(1)
 
     print(json.dumps(result, ensure_ascii=False, indent=2))

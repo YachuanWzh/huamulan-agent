@@ -99,6 +99,78 @@ def test_cache_defaults_to_enabled_without_redis_url() -> None:
     assert settings.cache_memory_ttl_seconds == 60
 
 
+def test_skill_routing_semantic_defaults_to_disabled() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.skill_routing_semantic_enabled is False
+    assert settings.skill_routing_embedding_model == "bge-m3"
+    assert settings.skill_routing_ollama_base_url == "http://localhost:11434"
+    assert settings.skill_routing_vector_store == "memory"
+    assert settings.skill_routing_qdrant_url is None
+    assert settings.skill_routing_qdrant_api_key is None
+    assert settings.skill_routing_qdrant_collection == "skill_routes"
+    assert settings.skill_routing_similarity_threshold == 0.72
+    assert settings.skill_routing_top_k == 3
+    assert settings.skill_routing_llm_retry_count == 1
+    assert settings.skill_routing_llm_model is None
+
+
+def test_skill_routing_semantic_can_be_enabled_from_env() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "SKILL_ROUTING_SEMANTIC_ENABLED": "true",
+            "SKILL_ROUTING_EMBEDDING_MODEL": "custom-bge",
+            "SKILL_ROUTING_OLLAMA_BASE_URL": "http://ollama.local:11434",
+            "SKILL_ROUTING_VECTOR_STORE": "qdrant",
+            "SKILL_ROUTING_QDRANT_URL": "http://qdrant.example.test:6333",
+            "SKILL_ROUTING_QDRANT_API_KEY": "qdrant-key",
+            "SKILL_ROUTING_QDRANT_COLLECTION": "assistant_skill_routes",
+            "SKILL_ROUTING_SIMILARITY_THRESHOLD": "0.81",
+            "SKILL_ROUTING_TOP_K": "5",
+            "SKILL_ROUTING_LLM_RETRY_COUNT": "2",
+            "SKILL_ROUTING_LLM_MODEL": "deepseek-v4-flash",
+        },
+        clear=False,
+    ):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.skill_routing_semantic_enabled is True
+    assert settings.skill_routing_embedding_model == "custom-bge"
+    assert settings.skill_routing_ollama_base_url == "http://ollama.local:11434"
+    assert settings.skill_routing_vector_store == "qdrant"
+    assert settings.skill_routing_qdrant_url == "http://qdrant.example.test:6333"
+    assert settings.skill_routing_qdrant_api_key == "qdrant-key"
+    assert settings.skill_routing_qdrant_collection == "assistant_skill_routes"
+    assert settings.skill_routing_similarity_threshold == 0.81
+    assert settings.skill_routing_top_k == 5
+    assert settings.skill_routing_llm_retry_count == 2
+    assert settings.skill_routing_llm_model == "deepseek-v4-flash"
+
+
+def test_env_example_documents_skill_routing_services() -> None:
+    env_example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert "SKILL_ROUTING_SEMANTIC_ENABLED" in env_example
+    assert "SKILL_ROUTING_OLLAMA_BASE_URL" in env_example
+    assert "SKILL_ROUTING_EMBEDDING_MODEL" in env_example
+    assert "SKILL_ROUTING_VECTOR_STORE" in env_example
+    assert "SKILL_ROUTING_QDRANT_URL" in env_example
+    assert "SKILL_ROUTING_QDRANT_COLLECTION" in env_example
+    assert "SKILL_ROUTING_LLM_MODEL" in env_example
+
+
 def test_redis_url_accepts_redis_scheme() -> None:
     settings = Settings(
         DATABASE_URL="postgresql://localhost/test",

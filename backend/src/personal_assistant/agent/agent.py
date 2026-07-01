@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
@@ -19,7 +20,12 @@ from personal_assistant.agent.harness import (
 )
 from personal_assistant.agent.hook import AgentHookManager, HookStage, with_hooks
 from personal_assistant.agent.llm import build_llm
-from personal_assistant.agent.router import build_skill_router
+from personal_assistant.agent.router import (
+    InMemorySkillVectorIndex,
+    OllamaBgeM3EmbeddingProvider,
+    QdrantSkillVectorIndex,
+    build_skill_router,
+)
 from personal_assistant.agent.state import AgentState
 from personal_assistant.api.schemas import ExecutionLogCreate, LLMConfig
 from personal_assistant.config import Settings
@@ -28,6 +34,8 @@ from personal_assistant.memory.long_term import LongTermMemoryStore
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.tools import build_basic_tools
+
+logger = logging.getLogger(__name__)
 
 
 def compile_agent(
@@ -201,6 +209,16 @@ def compile_agent(
 
     graph = StateGraph(AgentState)
     router_kwargs = {"long_term_memory": long_term_memory}
+    if getattr(settings, "skill_routing_semantic_enabled", False):
+        router_kwargs.update(
+            {
+                "semantic_index": _build_skill_vector_index(settings),
+                "llm": _build_skill_routing_llm(settings, llm_config),
+                "semantic_threshold": settings.skill_routing_similarity_threshold,
+                "semantic_top_k": settings.skill_routing_top_k,
+                "llm_retry_count": settings.skill_routing_llm_retry_count,
+            }
+        )
     if cache is not None:
         router_kwargs.update(
             {
@@ -262,6 +280,44 @@ def compile_agent(
     )
     graph.add_edge("tools", "agent")
     return graph.compile(checkpointer=memory.checkpointer)
+
+
+def _build_skill_vector_index(settings: Settings):
+    embedding_provider = OllamaBgeM3EmbeddingProvider(
+        base_url=settings.skill_routing_ollama_base_url,
+        model=settings.skill_routing_embedding_model,
+    )
+    if settings.skill_routing_vector_store == "qdrant" and settings.skill_routing_qdrant_url:
+        return QdrantSkillVectorIndex(
+            embedding_provider,
+            url=settings.skill_routing_qdrant_url,
+            collection=settings.skill_routing_qdrant_collection,
+            api_key=settings.skill_routing_qdrant_api_key,
+        )
+    return InMemorySkillVectorIndex(embedding_provider)
+
+
+def _build_skill_routing_llm(settings: Settings, llm_config: LLMConfig | None = None):
+    routing_model = getattr(settings, "skill_routing_llm_model", None)
+    if not routing_model:
+        return build_llm(settings, llm_config)
+    base_config = llm_config or LLMConfig()
+    routing_config = LLMConfig(
+        base_url=base_config.base_url,
+        api_key=base_config.api_key,
+        model=routing_model,
+        temperature=base_config.temperature,
+    )
+    return build_llm(settings, routing_config)
+
+
+async def warmup_skill_routing(settings: Settings, registry: SkillRegistry) -> None:
+    if not getattr(settings, "skill_routing_semantic_enabled", False):
+        return
+    try:
+        await _build_skill_vector_index(settings).warmup(registry)
+    except Exception:
+        logger.exception("Skill routing vector warmup failed")
 
 
 async def build_memory_reflection_update(

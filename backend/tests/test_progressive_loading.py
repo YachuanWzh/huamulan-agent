@@ -35,10 +35,10 @@ class TestProgressiveLoadingE2E:
         system_msg = build_system_prompt(registry, selected=matched)
         content = system_msg.content
 
-        # Meta overview includes ALL skills
+        # Prompt includes only matched skill metadata and details
         assert "skill-a" in content
-        assert "skill-b" in content
-        assert "skill-c" in content
+        assert "skill-b" not in content
+        assert "skill-c" not in content
 
         # Full instructions only for selected skill
         assert "## Skill: skill-a" in content
@@ -51,11 +51,7 @@ class TestProgressiveLoadingE2E:
         assert len(tool_map) == 1
 
     def test_no_match_loads_nothing(self, multi_skill_dir: Path):
-        """Progressive loading: when no skills match, NONE are fully loaded.
-
-        The agent still sees the lightweight meta overview (so it can ask a
-        clarifying question), but full instructions/tools stay unloaded.
-        """
+        """Progressive loading: when no skills match, no skill meta/tools are exposed."""
         registry = SkillRegistry(multi_skill_dir)
 
         matched = _keyword_route(registry, "zzzzz completely unrelated")
@@ -68,6 +64,12 @@ class TestProgressiveLoadingE2E:
         # No skills loaded
         for skill in registry.skills.values():
             assert not skill.loaded
+
+        system_msg = build_system_prompt(registry, selected=matched)
+        assert "Available Skills" not in system_msg.content
+        assert "skill-a" not in system_msg.content
+        assert "skill-b" not in system_msg.content
+        assert "skill-c" not in system_msg.content
 
 
     def test_hot_plug_add_and_remove(self, multi_skill_dir: Path):

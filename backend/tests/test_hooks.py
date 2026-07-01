@@ -5,6 +5,8 @@ from langchain_core.runnables import RunnableConfig
 
 from personal_assistant.agent import agent as agent_module
 from personal_assistant.agent.hook import AgentHookManager, HookEvent, HookStage, with_hooks
+from personal_assistant.agent.router import InMemorySkillVectorIndex, QdrantSkillVectorIndex
+from personal_assistant.config import Settings
 
 
 @pytest.mark.asyncio
@@ -116,6 +118,134 @@ def test_compile_agent_wraps_necessary_graph_nodes(monkeypatch):
     assert captured_nodes["agent"]._hook_stage == HookStage.AGENT
     assert captured_nodes["approval"]._hook_stage == HookStage.APPROVAL
     assert captured_nodes["tools"]._hook_stage == HookStage.TOOLS
+
+
+def test_build_skill_vector_index_defaults_to_memory() -> None:
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        _env_file=None,
+    )
+
+    index = agent_module._build_skill_vector_index(settings)
+
+    assert isinstance(index, InMemorySkillVectorIndex)
+
+
+def test_build_skill_vector_index_uses_qdrant_when_configured() -> None:
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        SKILL_ROUTING_VECTOR_STORE="qdrant",
+        SKILL_ROUTING_QDRANT_URL="http://qdrant.example.test:6333",
+        SKILL_ROUTING_QDRANT_COLLECTION="assistant_skill_routes",
+        _env_file=None,
+    )
+
+    index = agent_module._build_skill_vector_index(settings)
+
+    assert isinstance(index, QdrantSkillVectorIndex)
+    assert index.url == "http://qdrant.example.test:6333"
+    assert index.collection == "assistant_skill_routes"
+
+
+def test_build_skill_routing_llm_uses_dedicated_model(monkeypatch) -> None:
+    captured_configs = []
+
+    def fake_build_llm(settings, llm_config=None):
+        captured_configs.append(llm_config)
+        return object()
+
+    monkeypatch.setattr(agent_module, "build_llm", fake_build_llm)
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="main-model",
+        SKILL_ROUTING_LLM_MODEL="deepseek-v4-flash",
+        _env_file=None,
+    )
+
+    agent_module._build_skill_routing_llm(settings, llm_config=None)
+
+    assert captured_configs[0].model == "deepseek-v4-flash"
+
+
+def test_build_skill_routing_llm_defaults_to_primary_model(monkeypatch) -> None:
+    captured_configs = []
+
+    def fake_build_llm(settings, llm_config=None):
+        captured_configs.append(llm_config)
+        return object()
+
+    monkeypatch.setattr(agent_module, "build_llm", fake_build_llm)
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="main-model",
+        _env_file=None,
+    )
+
+    agent_module._build_skill_routing_llm(settings, llm_config=None)
+
+    assert captured_configs == [None]
+
+
+@pytest.mark.asyncio
+async def test_warmup_skill_routing_skips_when_semantic_disabled(monkeypatch) -> None:
+    called = False
+
+    def fake_build_skill_vector_index(settings):
+        nonlocal called
+        called = True
+        return object()
+
+    monkeypatch.setattr(agent_module, "_build_skill_vector_index", fake_build_skill_vector_index)
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        _env_file=None,
+    )
+
+    await agent_module.warmup_skill_routing(settings, registry=object())
+
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_warmup_skill_routing_invokes_vector_index(monkeypatch) -> None:
+    warmed_registries = []
+
+    class FakeIndex:
+        async def warmup(self, registry):
+            warmed_registries.append(registry)
+
+    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: FakeIndex())
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        SKILL_ROUTING_SEMANTIC_ENABLED=True,
+        _env_file=None,
+    )
+    registry = object()
+
+    await agent_module.warmup_skill_routing(settings, registry)
+
+    assert warmed_registries == [registry]
+
+
+@pytest.mark.asyncio
+async def test_warmup_skill_routing_swallows_index_errors(monkeypatch) -> None:
+    class FailingIndex:
+        async def warmup(self, registry):
+            raise RuntimeError("qdrant unavailable")
+
+    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: FailingIndex())
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        SKILL_ROUTING_SEMANTIC_ENABLED=True,
+        _env_file=None,
+    )
+
+    await agent_module.warmup_skill_routing(settings, registry=object())
 
 
 @pytest.mark.asyncio

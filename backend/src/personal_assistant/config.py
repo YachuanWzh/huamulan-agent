@@ -51,6 +51,47 @@ class Settings(BaseSettings):
     cache_default_ttl_seconds: int = Field(default=10, alias="CACHE_DEFAULT_TTL_SECONDS")
     cache_log_ttl_seconds: int = Field(default=5, alias="CACHE_LOG_TTL_SECONDS")
     cache_memory_ttl_seconds: int = Field(default=60, alias="CACHE_MEMORY_TTL_SECONDS")
+    skill_routing_semantic_enabled: bool = Field(
+        default=False,
+        alias="SKILL_ROUTING_SEMANTIC_ENABLED",
+    )
+    skill_routing_embedding_model: str = Field(
+        default="bge-m3",
+        alias="SKILL_ROUTING_EMBEDDING_MODEL",
+    )
+    skill_routing_ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        alias="SKILL_ROUTING_OLLAMA_BASE_URL",
+    )
+    skill_routing_vector_store: str = Field(
+        default="memory",
+        alias="SKILL_ROUTING_VECTOR_STORE",
+    )
+    skill_routing_qdrant_url: str | None = Field(
+        default=None,
+        alias="SKILL_ROUTING_QDRANT_URL",
+    )
+    skill_routing_qdrant_api_key: str | None = Field(
+        default=None,
+        alias="SKILL_ROUTING_QDRANT_API_KEY",
+    )
+    skill_routing_qdrant_collection: str = Field(
+        default="skill_routes",
+        alias="SKILL_ROUTING_QDRANT_COLLECTION",
+    )
+    skill_routing_similarity_threshold: float = Field(
+        default=0.72,
+        alias="SKILL_ROUTING_SIMILARITY_THRESHOLD",
+    )
+    skill_routing_top_k: int = Field(default=3, alias="SKILL_ROUTING_TOP_K")
+    skill_routing_llm_retry_count: int = Field(
+        default=1,
+        alias="SKILL_ROUTING_LLM_RETRY_COUNT",
+    )
+    skill_routing_llm_model: str | None = Field(
+        default=None,
+        alias="SKILL_ROUTING_LLM_MODEL",
+    )
 
     @field_validator("redis_url")
     @classmethod
@@ -60,6 +101,14 @@ class Settings(BaseSettings):
         if not value.startswith(("redis://", "rediss://")):
             raise ValueError("REDIS_URL must use redis:// or rediss://")
         return value
+
+    @field_validator("skill_routing_vector_store")
+    @classmethod
+    def validate_skill_routing_vector_store(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"memory", "qdrant"}:
+            raise ValueError("SKILL_ROUTING_VECTOR_STORE must be memory or qdrant")
+        return normalized
 
     @computed_field
     @property

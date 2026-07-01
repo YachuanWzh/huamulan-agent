@@ -26,13 +26,41 @@ class _CacheFormatter(logging.Formatter):
         return "  ".join(parts)
 
 
-_cache_handler = logging.StreamHandler(sys.stderr)
-_cache_handler.setFormatter(_CacheFormatter())
-_cache_logger = logging.getLogger("personal_assistant.cache")
-_cache_logger.addHandler(_cache_handler)
-_cache_logger.setLevel(logging.DEBUG)
-_cache_logger.propagate = False
+def _ensure_stream_logger(
+    logger_name: str,
+    *,
+    level: int,
+    formatter: logging.Formatter,
+) -> None:
+    logger = logging.getLogger(logger_name)
+    if not any(
+        isinstance(handler, logging.StreamHandler)
+        and getattr(handler, "_personal_assistant_handler", False)
+        for handler in logger.handlers
+    ):
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(formatter)
+        handler._personal_assistant_handler = True  # type: ignore[attr-defined]
+        logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
 
+
+_ensure_stream_logger(
+    "personal_assistant.cache",
+    level=logging.DEBUG,
+    formatter=_CacheFormatter(),
+)
+_ensure_stream_logger(
+    "personal_assistant.agent.router",
+    level=logging.INFO,
+    formatter=logging.Formatter(
+        "%(asctime)s  %(levelname)-8s  [%(name)s]  %(message)s",
+        datefmt="%H:%M:%S",
+    ),
+)
+
+from personal_assistant.agent.agent import warmup_skill_routing
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.api.schemas import (
     ApprovalBatchDecision,
@@ -82,6 +110,7 @@ harness = AgentHarness(
 async def lifespan(_: FastAPI):
     await postgres_memory.start()
     registry.start_watching()
+    await warmup_skill_routing(settings, registry)
     try:
         yield
     finally:

@@ -1,10 +1,20 @@
 from pathlib import Path
 from textwrap import dedent
+from urllib.error import HTTPError
+import io
+import logging
 
 import pytest
 
 from personal_assistant.skills.loader import SkillRegistry
-from personal_assistant.agent.router import build_skill_router, build_system_prompt, _keyword_route
+from personal_assistant.agent.router import (
+    QdrantSkillVectorIndex,
+    SkillSemanticCandidate,
+    build_skill_router,
+    build_system_prompt,
+    route_skill_names,
+    _keyword_route,
+)
 from personal_assistant.memory.long_term import LongTermMemoryStore
 
 
@@ -31,6 +41,15 @@ def _make_triggered_skill(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return tmp_path
+
+
+def _make_named_skill(tmp_path: Path, name: str, description: str = "Test skill") -> None:
+    d = tmp_path / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n",
+        encoding="utf-8",
+    )
 
 
 class TestKeywordRoute:
@@ -84,6 +103,445 @@ class TestTriggerRouting:
         assert "skill-a" in result
 
 
+class TestChineseRegexRouting:
+    @pytest.mark.parametrize(
+        ("skill_name", "query"),
+        [
+            ("weather", "北京明天会下雨吗"),
+            ("resolve-time", "今天是几号"),
+            ("find-skills", "帮我找一个股票分析技能"),
+            ("audit-sop", "审计一下这个线程的执行日志"),
+            ("akshare-stock", "看一下600519的K线和资金流"),
+        ],
+    )
+    def test_current_skill_regexes_match_chinese_queries(
+        self,
+        tmp_path: Path,
+        skill_name: str,
+        query: str,
+    ):
+        _make_named_skill(tmp_path, skill_name)
+        registry = SkillRegistry(tmp_path)
+
+        assert _keyword_route(registry, query) == [skill_name]
+
+
+class FakeSemanticIndex:
+    def __init__(self, candidates: list[SkillSemanticCandidate]):
+        self.candidates = candidates
+        self.calls: list[str] = []
+
+    async def search(self, registry: SkillRegistry, query: str, top_k: int):
+        self.calls.append(query)
+        return self.candidates[:top_k]
+
+
+class FailingSemanticIndex:
+    async def search(self, registry: SkillRegistry, query: str, top_k: int):
+        raise RuntimeError("embedding service unavailable")
+
+
+class CountingEmbeddingProvider:
+    def __init__(self):
+        self.texts: list[str] = []
+
+    async def embed(self, text: str) -> list[float]:
+        self.texts.append(text)
+        return [1.0, 0.0, 0.0]
+
+
+class FakeQdrantSkillVectorIndex(QdrantSkillVectorIndex):
+    def __init__(
+        self,
+        embedding_provider,
+        existing_points: list[dict] | None = None,
+        search_results: list[dict] | None = None,
+    ):
+        super().__init__(
+            embedding_provider,
+            url="http://qdrant.example.test:6333",
+            collection="skill_routes",
+        )
+        self.existing_points = existing_points or []
+        self.search_results = search_results or []
+        self.upserted_points: list[dict] = []
+
+    def _scroll_sync(self) -> dict:
+        return {"result": {"points": self.existing_points}}
+
+    def _upsert_sync(self, points: list[dict]) -> dict:
+        self.upserted_points.extend(points)
+        return {"result": {"operation_id": 1}}
+
+    def _search_sync(self, vector: list[float], top_k: int) -> dict:
+        return {"result": self.search_results[:top_k]}
+
+
+class FakeStructuredLLM:
+    def __init__(self, outputs: list[object]):
+        self.outputs = outputs
+        self.payloads: list[dict] = []
+        self.structured_output_calls = 0
+
+    def with_structured_output(self, schema):
+        self.structured_output_calls += 1
+        self.schema = schema
+        return self
+
+    async def ainvoke(self, payload: dict):
+        self.payloads.append(payload)
+        output = self.outputs.pop(0)
+        if isinstance(output, Exception):
+            raise output
+        return output
+
+
+class FakeMessage:
+    def __init__(self, content: str):
+        self.content = content
+
+
+class TestSkillRoutingFunnel:
+    @pytest.mark.asyncio
+    async def test_regex_match_short_circuits_semantic_and_llm(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="other", description="Other", score=0.99)]
+        )
+        llm = FakeStructuredLLM([{"selectedSkill": "other", "confidence": 1.0, "reason": "x"}])
+
+        result = await route_skill_names(
+            registry,
+            "what about tomorrow",
+            semantic_index=semantic,
+            llm=llm,
+        )
+
+        assert result == ["cal"]
+        assert semantic.calls == []
+        assert llm.payloads == []
+
+    @pytest.mark.asyncio
+    async def test_semantic_match_selects_top_candidate_above_threshold(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "SKILL.md").write_text(
+            "---\nname: other\ndescription: Other stuff.\n---\n# Other\n",
+            encoding="utf-8",
+        )
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="other", description="Other stuff.", score=0.91)]
+        )
+        llm = FakeStructuredLLM([{"selectedSkill": "cal", "confidence": 1.0, "reason": "x"}])
+
+        result = await route_skill_names(
+            registry,
+            "semantically related but no regex hit",
+            semantic_index=semantic,
+            llm=llm,
+            semantic_threshold=0.8,
+        )
+
+        assert result == ["other"]
+        assert semantic.calls == ["semantically related but no regex hit"]
+        assert llm.payloads == []
+
+    @pytest.mark.asyncio
+    async def test_low_semantic_score_falls_back_to_llm_judge(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [{"selectedSkill": "cal", "confidence": 0.75, "reason": "calendar intent"}]
+        )
+
+        result = await route_skill_names(
+            registry,
+            "ambiguous date wording",
+            semantic_index=semantic,
+            llm=llm,
+            semantic_threshold=0.8,
+        )
+
+        assert result == ["cal"]
+        assert len(llm.payloads) == 1
+        assert llm.structured_output_calls == 0
+        assert isinstance(llm.payloads[0], str)
+        assert '"userInput": "ambiguous date wording"' in llm.payloads[0]
+        assert '"relatedFind": [' in llm.payloads[0]
+        assert "cal: Calendar arithmetic." in llm.payloads[0]
+
+    @pytest.mark.asyncio
+    async def test_llm_judge_accepts_chat_message_json_content(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [FakeMessage('{"selectedSkill":"cal","confidence":0.75,"reason":"calendar intent"}')]
+        )
+
+        result = await route_skill_names(
+            registry,
+            "ambiguous date wording",
+            semantic_index=semantic,
+            llm=llm,
+            semantic_threshold=0.8,
+        )
+
+        assert result == ["cal"]
+        assert llm.structured_output_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_llm_api_error_degrades_to_no_match(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM([RuntimeError("Thinking mode does not support this tool_choice")])
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            result = await route_skill_names(
+                registry,
+                "ambiguous date wording",
+                semantic_index=semantic,
+                llm=llm,
+                semantic_threshold=0.8,
+            )
+
+        assert result == []
+        assert llm.structured_output_calls == 0
+        assert "Skill routing LLM judge request failed" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_invalid_llm_output_is_retried_with_error_context(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [
+                {"skill": "cal"},
+                {"selectedSkill": "cal", "confidence": 0.83, "reason": "fixed json"},
+            ]
+        )
+
+        result = await route_skill_names(
+            registry,
+            "ambiguous date wording",
+            semantic_index=semantic,
+            llm=llm,
+            semantic_threshold=0.8,
+            llm_retry_count=1,
+        )
+
+        assert result == ["cal"]
+        assert len(llm.payloads) == 2
+        assert "previousError" in llm.payloads[1]
+        assert "previousOutput" in llm.payloads[1]
+        assert '\\"skill\\": \\"cal\\"' in llm.payloads[1]
+
+    @pytest.mark.asyncio
+    async def test_semantic_failure_degrades_to_no_match(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+
+        result = await route_skill_names(
+            registry,
+            "no deterministic match",
+            semantic_index=FailingSemanticIndex(),
+            llm=FakeStructuredLLM(
+                [{"selectedSkill": "cal", "confidence": 0.9, "reason": "would match"}]
+            ),
+        )
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_logs_semantic_threshold_and_llm_no_match(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [{"selectedSkill": None, "confidence": 0.22, "reason": "not enough evidence"}]
+        )
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            result = await route_skill_names(
+                registry,
+                "ambiguous date wording",
+                semantic_index=semantic,
+                llm=llm,
+                semantic_threshold=0.8,
+            )
+
+        assert result == []
+        assert "Skill routing regex stage missed" in caplog.text
+        assert "Skill routing semantic stage candidates=cal:0.3100 threshold=0.8000" in caplog.text
+        assert "Skill routing semantic top candidate below threshold" in caplog.text
+        assert "Skill routing LLM judge rejected candidates" in caplog.text
+        assert "selected=None" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_logs_llm_validation_error_before_retry(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM([{"skill": "cal"}])
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            result = await route_skill_names(
+                registry,
+                "ambiguous date wording",
+                semantic_index=semantic,
+                llm=llm,
+                semantic_threshold=0.8,
+                llm_retry_count=0,
+            )
+
+        assert result == []
+        assert "Skill routing LLM judge validation failed" in caplog.text
+        assert "attempt=1" in caplog.text
+
+
+class TestQdrantSkillVectorIndexWarmup:
+    @pytest.mark.asyncio
+    async def test_warmup_skips_embedding_when_qdrant_has_same_source_hash(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        skill = registry.skills["cal"]
+        embedding_provider = CountingEmbeddingProvider()
+        index = FakeQdrantSkillVectorIndex(
+            embedding_provider,
+            existing_points=[
+                {
+                    "payload": {
+                        "skill_name": "cal",
+                        "source_hash": skill.source_hash,
+                    }
+                }
+            ],
+        )
+
+        await index.warmup(registry)
+
+        assert embedding_provider.texts == []
+        assert index.upserted_points == []
+
+    @pytest.mark.asyncio
+    async def test_warmup_embeds_and_upserts_changed_skill(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        embedding_provider = CountingEmbeddingProvider()
+        index = FakeQdrantSkillVectorIndex(
+            embedding_provider,
+            existing_points=[
+                {
+                    "payload": {
+                        "skill_name": "cal",
+                        "source_hash": "old-hash",
+                    }
+                }
+            ],
+        )
+
+        await index.warmup(registry)
+
+        assert embedding_provider.texts == ["cal\nPerforms calendar arithmetic.\n今天, tomorrow, 星期几"]
+        assert len(index.upserted_points) == 1
+        assert index.upserted_points[0]["payload"]["skill_name"] == "cal"
+
+    @pytest.mark.asyncio
+    async def test_warmup_logs_qdrant_sync_summary(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        embedding_provider = CountingEmbeddingProvider()
+        index = FakeQdrantSkillVectorIndex(embedding_provider, existing_points=[])
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            await index.warmup(registry)
+
+        assert "Qdrant skill vector sync started" in caplog.text
+        assert "Qdrant skill vector sync completed" in caplog.text
+        assert "upserted=1" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_search_logs_qdrant_recall_results(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        skill = registry.skills["cal"]
+        embedding_provider = CountingEmbeddingProvider()
+        index = FakeQdrantSkillVectorIndex(
+            embedding_provider,
+            existing_points=[
+                {
+                    "payload": {
+                        "skill_name": "cal",
+                        "source_hash": skill.source_hash,
+                    }
+                }
+            ],
+            search_results=[
+                {
+                    "score": 0.91,
+                    "payload": {
+                        "skill_name": "cal",
+                        "description": "Performs calendar arithmetic.",
+                    },
+                }
+            ],
+        )
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            candidates = await index.search(registry, "明天是星期几", top_k=3)
+
+        assert [candidate.name for candidate in candidates] == ["cal"]
+        assert "Qdrant skill vector search started" in caplog.text
+        assert "Qdrant skill vector search completed" in caplog.text
+        assert "candidates=cal:0.9100" in caplog.text
+
+    def test_qdrant_http_error_includes_collection_and_endpoint(self, monkeypatch):
+        embedding_provider = CountingEmbeddingProvider()
+        index = QdrantSkillVectorIndex(
+            embedding_provider,
+            url="http://qdrant.example.test:6333",
+            collection="skill_routes",
+        )
+
+        def raise_404(request, timeout):
+            raise HTTPError(
+                request.full_url,
+                404,
+                "Not Found",
+                {},
+                io.BytesIO(b'{"status":{"error":"Not found: Collection skill_routes"}}'),
+            )
+
+        monkeypatch.setattr("urllib.request.urlopen", raise_404)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            index._scroll_sync()
+
+        message = str(exc_info.value)
+        assert "Qdrant request failed" in message
+        assert "collection=skill_routes" in message
+        assert "POST /collections/skill_routes/points/scroll" in message
+        assert "HTTP 404" in message
+        assert "Collection skill_routes" in message
+
+
 class TestRouteSkillsNoFallback:
     """route_skills must not force-load all skills when nothing matches."""
 
@@ -119,49 +577,56 @@ class TestRouteSkillsNoFallback:
         assert not registry.skills["other"].loaded
 
     @pytest.mark.asyncio
-    async def test_system_prompt_has_meta_overview_even_when_unmatched(self, tmp_path: Path):
+    async def test_system_prompt_omits_skill_meta_when_unmatched(self, tmp_path: Path):
         _make_triggered_skill(tmp_path)
         registry = SkillRegistry(tmp_path)
         router = build_skill_router(registry)
 
         state = await router({"messages": [], "selected_skills": []})
         system = state["messages"][0]
-        # Meta overview lists the skill even though it wasn't loaded
-        assert "cal" in system.content
+        assert "Available Skills" not in system.content
+        assert "- **cal**" not in system.content
+        assert "Performs calendar arithmetic." not in system.content
 
 
 class TestBuildSystemPrompt:
-    def test_includes_meta_for_all_skills(self, multi_skill_dir: Path):
+    def test_omits_skill_meta_when_none_selected(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
         msg = build_system_prompt(registry, selected=[])
         content = msg.content
-        # All skill meta should be present
-        assert "skill-a" in content
-        assert "Skill Alpha" in content
-        assert "skill-b" in content
-        assert "Skill Beta" in content
+        assert "Available Skills" not in content
+        assert "skill-a" not in content
+        assert "Skill Alpha" not in content
+        assert "skill-b" not in content
+        assert "Skill Beta" not in content
 
     def test_includes_full_instructions_for_selected(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
         registry.load_skill("skill-a")
         msg = build_system_prompt(registry, selected=["skill-a"])
         content = msg.content
+        assert "## Available Skills" in content
+        assert "- **skill-a**: Skill Alpha" in content
         assert "Available tools:" in content  # from SKILL.md full content
         assert "## Skill: skill-a" in content
+        assert "skill-b" not in content
+        assert "skill-c" not in content
 
     def test_base_preamble_present(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
         msg = build_system_prompt(registry, selected=[])
         assert "personal assistant" in msg.content.lower()
 
-    def test_unselected_skills_meta_only(self, multi_skill_dir: Path):
+    def test_unselected_skills_are_not_in_prompt(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
         registry.load_skill("skill-a")
         msg = build_system_prompt(registry, selected=["skill-a"])
         content = msg.content
         # skill-a should have full instructions section
         assert "## Skill: skill-a" in content
-        # skill-b should only appear in meta header, not in detailed section
+        assert "- **skill-a**: Skill Alpha" in content
+        assert "skill-b" not in content
+        assert "Skill Beta" not in content
         assert "## Skill: skill-b" not in content
 
 
@@ -194,7 +659,5 @@ class TestMemoryInjection:
 
         msg = build_system_prompt(registry, selected=[], long_term_memory=memory_store)
         content = msg.content
-        # Memory should appear near the beginning, before Available Skills
-        mem_pos = content.index("Test Memory")
-        skills_pos = content.index("Available Skills")
-        assert mem_pos < skills_pos, "Memory should appear before skills in system prompt"
+        assert "Test Memory" in content
+        assert "Available Skills" not in content

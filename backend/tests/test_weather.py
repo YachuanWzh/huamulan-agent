@@ -150,18 +150,16 @@ class TestWeatherScriptFetch:
     def setup_class(cls):
         cls.module = _load_script_module()
 
-    @patch.object(
-        __import__("httpx", fromlist=["Client"]).Client,
-        "get",
-        return_value=_mock_fetch(""),
-    )
-    def test_fetch_returns_parsed_json(self, mock_get):
+    def test_fetch_returns_parsed_json(self):
         """fetch_weather should call wttr.in and return parsed JSON."""
         if self.module is None:
             return
-        # Override the mock to return proper data
-        mock_get.return_value = _mock_fetch("wttr.in/Beijing?format=j1")
-        result = self.module.fetch_weather("Beijing")
+        with patch.object(
+            self.module.httpx,
+            "get",
+            return_value=_mock_fetch("wttr.in/Beijing?format=j1"),
+        ):
+            result = self.module.fetch_weather("Beijing")
         assert "current_condition" in result
         assert "weather" in result
 
