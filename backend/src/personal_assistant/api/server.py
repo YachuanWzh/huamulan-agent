@@ -6,6 +6,32 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from personal_assistant.agent.agent import warmup_skill_routing
+from personal_assistant.agent.harness import AgentHarness
+from personal_assistant.api.schemas import (
+    ApprovalBatchDecision,
+    ApprovalDecision,
+    AuditEvent,
+    ChatRequest,
+    ChatResponse,
+    ClearThreadsResponse,
+    DeleteThreadResponse,
+    ExecutionLog,
+    ExecutionSummary,
+    ReplayResponse,
+    SkillInfo,
+    ThreadSummary,
+    ToolCallApproval,
+    ToolError,
+)
+from personal_assistant.cache import build_cache
+from personal_assistant.config import get_settings
+from personal_assistant.memory.cached import CachedPostgresMemory
+from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.skills import SkillRegistry
+from personal_assistant.tracing import build_langfuse_callback
+
+
 # Make cache hit/miss events visible regardless of how the server is started.
 class _CacheFormatter(logging.Formatter):
     """Render extra fields (event, namespace, duration_ms) when present."""
@@ -23,6 +49,23 @@ class _CacheFormatter(logging.Formatter):
             parts.append(f"{namespace:<25}")
         if duration_ms:
             parts.append(f"{duration_ms}ms")
+        return "  ".join(parts)
+
+
+class _CheckpointFormatter(logging.Formatter):
+    """Render checkpoint IDs from logger extra fields when present."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        parts = [
+            self.formatTime(record, "%H:%M:%S"),
+            f"{record.levelname:<8}",
+            f"[{record.name}]",
+            record.getMessage(),
+        ]
+        for field in ("thread_id", "checkpoint_id", "source", "write_node", "task_id", "ttl_seconds"):
+            value = getattr(record, field, "")
+            if value not in ("", None):
+                parts.append(f"{field}={value}")
         return "  ".join(parts)
 
 
@@ -59,37 +102,25 @@ _ensure_stream_logger(
         datefmt="%H:%M:%S",
     ),
 )
-
-from personal_assistant.agent.agent import warmup_skill_routing
-from personal_assistant.agent.harness import AgentHarness
-from personal_assistant.api.schemas import (
-    ApprovalBatchDecision,
-    ApprovalDecision,
-    AuditEvent,
-    ChatRequest,
-    ChatResponse,
-    ClearThreadsResponse,
-    DeleteThreadResponse,
-    ExecutionLog,
-    ExecutionSummary,
-    ReplayResponse,
-    SkillInfo,
-    ThreadSummary,
-    ToolError,
-    ToolCallApproval,
+_ensure_stream_logger(
+    "personal_assistant.checkpoint",
+    level=logging.INFO,
+    formatter=_CheckpointFormatter(),
 )
-from personal_assistant.config import get_settings
-from personal_assistant.cache import build_cache
-from personal_assistant.memory.cached import CachedPostgresMemory
-from personal_assistant.memory.postgres import PostgresMemory
-from personal_assistant.skills import SkillRegistry
-from personal_assistant.tracing import build_langfuse_callback
 
 
 settings = get_settings()
 registry = SkillRegistry(settings.skills_dir)
 cache = build_cache(settings)
-postgres_memory = PostgresMemory(settings.database_url)
+postgres_memory = PostgresMemory(
+    settings.database_url,
+    redis_url=settings.redis_url,
+    checkpoint_ttl_seconds=settings.checkpoint_ttl_seconds,
+    checkpoint_pg_cleanup_enabled=settings.checkpoint_pg_cleanup_enabled,
+    checkpoint_redis_lru_enabled=settings.checkpoint_redis_lru_enabled,
+    checkpoint_redis_maxmemory_policy=settings.checkpoint_redis_maxmemory_policy,
+    checkpoint_skip_nodes=settings.checkpoint_skip_nodes,
+)
 memory = CachedPostgresMemory(
     postgres_memory,
     cache,

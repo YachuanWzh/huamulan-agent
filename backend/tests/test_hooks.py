@@ -6,7 +6,9 @@ from langchain_core.runnables import RunnableConfig
 from personal_assistant.agent import agent as agent_module
 from personal_assistant.agent.hook import AgentHookManager, HookEvent, HookStage, with_hooks
 from personal_assistant.agent.router import InMemorySkillVectorIndex, QdrantSkillVectorIndex
+from personal_assistant.checkpoint.redis_first import RedisFirstCheckpointSaver
 from personal_assistant.config import Settings
+from tests.test_redis_first_checkpoint import FakePostgresSaver, FakeRedis
 
 
 @pytest.mark.asyncio
@@ -130,6 +132,43 @@ def test_build_skill_vector_index_defaults_to_memory() -> None:
     index = agent_module._build_skill_vector_index(settings)
 
     assert isinstance(index, InMemorySkillVectorIndex)
+
+
+def test_compile_agent_accepts_redis_first_checkpointer(monkeypatch) -> None:
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            return "ai-response"
+
+    class FakeRegistry:
+        def tool_map_for_skills(self, selected_skills):
+            return {}
+
+    monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
+    monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
+    monkeypatch.setattr(
+        agent_module,
+        "build_skill_router",
+        lambda registry, **_kwargs: (lambda state: state),
+    )
+
+    checkpointer = RedisFirstCheckpointSaver(FakePostgresSaver(), FakeRedis(), ttl_seconds=60)
+
+    compiled = agent_module.compile_agent(
+        settings=Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        ),
+        registry=FakeRegistry(),
+        memory=type("Memory", (), {"checkpointer": checkpointer})(),
+        decisions={},
+        enable_memory_reflection=False,
+    )
+
+    assert compiled is not None
 
 
 def test_build_skill_vector_index_uses_qdrant_when_configured() -> None:

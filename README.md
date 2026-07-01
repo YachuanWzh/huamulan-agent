@@ -411,3 +411,17 @@ frontend/src/
 ---
 
 🤖 技术方案详见 [技术方案报告.md](./技术方案报告.md)
+## Redis-first Checkpoint 存储补充
+
+配置 `REDIS_URL` 后，LangGraph checkpoint 的热路径改为先同步写入 Redis，再异步归档到 PostgreSQL。Redis 作为近期 checkpoint 的优先读源；如果 Redis miss、过期或被 LRU 淘汰，回放会回退到 PostgreSQL。Redis 写入失败时会同步写 PostgreSQL，避免丢失线程状态。
+
+checkpoint payload 使用 MessagePack-oriented `JsonPlusSerializer` 并对较大字节流做 zlib 压缩。`CHECKPOINT_TTL_SECONDS` 同时作用于 Redis key TTL 和 PostgreSQL checkpoint 清理；启动时会 best-effort 配置 Redis `maxmemory-policy`，默认 `allkeys-lru`。默认跳过确定性写入节点 `route_skills,compact_context`，保留 `agent`、`tools`、`approval`、`memory_reflection` 等会产生外部交互或关键状态变化的节点；日志中的 `source=input/loop` 是 LangGraph checkpoint 来源，不参与 `CHECKPOINT_SKIP_NODES` 判断，真实图写入节点会以 `write_node` 打印。
+
+```ini
+CHECKPOINT_TTL_SECONDS=604800
+CHECKPOINT_PG_CLEANUP_ENABLED=true
+CHECKPOINT_PG_CLEANUP_INTERVAL_SECONDS=3600
+CHECKPOINT_REDIS_LRU_ENABLED=true
+CHECKPOINT_REDIS_MAXMEMORY_POLICY=allkeys-lru
+CHECKPOINT_SKIP_NODES=route_skills,compact_context
+```

@@ -1,5 +1,6 @@
 import ast
 import json
+import logging
 from typing import Any
 
 from fastapi.encoders import jsonable_encoder
@@ -7,6 +8,9 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from personal_assistant.cache.redis_cache import configure_redis_lru
+from personal_assistant.checkpoint.redis_first import RedisFirstCheckpointSaver
+from personal_assistant.checkpoint.serde import CompressedJsonPlusSerializer
 from personal_assistant.api.schemas import (
     AuditEvent,
     AuditEventCreate,
@@ -16,12 +20,34 @@ from personal_assistant.api.schemas import (
     ToolError,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class PostgresMemory:
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        redis_url: str | None = None,
+        checkpoint_ttl_seconds: int = 604800,
+        checkpoint_pg_cleanup_enabled: bool = True,
+        checkpoint_redis_lru_enabled: bool = True,
+        checkpoint_redis_maxmemory_policy: str = "allkeys-lru",
+        checkpoint_skip_nodes: list[str] | None = None,
+    ):
         self.database_url = database_url
+        self.redis_url = redis_url
+        self.checkpoint_ttl_seconds = checkpoint_ttl_seconds
+        self.checkpoint_pg_cleanup_enabled = checkpoint_pg_cleanup_enabled
+        self.checkpoint_redis_lru_enabled = checkpoint_redis_lru_enabled
+        self.checkpoint_redis_maxmemory_policy = checkpoint_redis_maxmemory_policy
+        self.checkpoint_skip_nodes = checkpoint_skip_nodes or [
+            "route_skills",
+            "compact_context",
+        ]
         self.pool: AsyncConnectionPool | None = None
-        self.checkpointer: AsyncPostgresSaver | None = None
+        self.checkpointer: Any | None = None
+        self._checkpoint_redis = None
 
     async def start(self) -> None:
         self.pool = AsyncConnectionPool(
@@ -30,8 +56,14 @@ class PostgresMemory:
             kwargs={"autocommit": True},
         )
         await self.pool.open()
-        self.checkpointer = AsyncPostgresSaver(self.pool)
+        postgres_saver = AsyncPostgresSaver(
+            self.pool,
+            serde=CompressedJsonPlusSerializer(),
+        )
+        self.checkpointer = await self._build_checkpointer(postgres_saver)
         await self.checkpointer.setup()
+        if self.checkpoint_pg_cleanup_enabled:
+            await self.cleanup_expired_checkpoints()
         await self._setup_audit_events()
         await self._setup_execution_logs()
         await self._setup_long_term_memories()
@@ -39,8 +71,80 @@ class PostgresMemory:
         await self._setup_tool_errors()
 
     async def stop(self) -> None:
+        drain = getattr(self.checkpointer, "drain", None)
+        if callable(drain):
+            await drain()
+        if self._checkpoint_redis is not None:
+            await self._checkpoint_redis.aclose()
         if self.pool is not None:
             await self.pool.close()
+
+    async def _build_checkpointer(self, postgres_saver: AsyncPostgresSaver):
+        if not self.redis_url:
+            return postgres_saver
+        from redis.asyncio import Redis
+
+        redis_client = Redis.from_url(self.redis_url, decode_responses=False)
+        self._checkpoint_redis = redis_client
+        if self.checkpoint_redis_lru_enabled:
+            await configure_redis_lru(
+                redis_client,
+                self.checkpoint_redis_maxmemory_policy,
+            )
+        return RedisFirstCheckpointSaver(
+            postgres_saver,
+            redis_client,
+            ttl_seconds=self.checkpoint_ttl_seconds,
+            skip_nodes=set(self.checkpoint_skip_nodes),
+        )
+
+    async def cleanup_expired_checkpoints(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                WITH expired AS (
+                    SELECT thread_id, checkpoint_ns, checkpoint_id
+                    FROM checkpoints
+                    WHERE (checkpoint->>'ts')::timestamptz
+                        < now() - (%s * interval '1 second')
+                )
+                DELETE FROM checkpoint_writes w
+                USING expired e
+                WHERE w.thread_id = e.thread_id
+                  AND w.checkpoint_ns = e.checkpoint_ns
+                  AND w.checkpoint_id = e.checkpoint_id
+                """,
+                (self.checkpoint_ttl_seconds,),
+            )
+            await conn.execute(
+                """
+                WITH expired AS (
+                    SELECT thread_id, checkpoint_ns, checkpoint_id
+                    FROM checkpoints
+                    WHERE (checkpoint->>'ts')::timestamptz
+                        < now() - (%s * interval '1 second')
+                )
+                DELETE FROM checkpoints c
+                USING expired e
+                WHERE c.thread_id = e.thread_id
+                  AND c.checkpoint_ns = e.checkpoint_ns
+                  AND c.checkpoint_id = e.checkpoint_id
+                """,
+                (self.checkpoint_ttl_seconds,),
+            )
+            await conn.execute(
+                """
+                DELETE FROM checkpoint_blobs b
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM checkpoints c
+                    WHERE c.thread_id = b.thread_id
+                      AND c.checkpoint_ns = b.checkpoint_ns
+                )
+                """,
+            )
 
     async def replay(self, thread_id: str) -> list[dict[str, Any]]:
         if self.checkpointer is None:

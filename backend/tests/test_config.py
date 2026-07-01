@@ -99,6 +99,53 @@ def test_cache_defaults_to_enabled_without_redis_url() -> None:
     assert settings.cache_memory_ttl_seconds == 60
 
 
+def test_checkpoint_storage_defaults() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.checkpoint_ttl_seconds == 604800
+    assert settings.checkpoint_pg_cleanup_enabled is True
+    assert settings.checkpoint_pg_cleanup_interval_seconds == 3600
+    assert settings.checkpoint_redis_lru_enabled is True
+    assert settings.checkpoint_redis_maxmemory_policy == "allkeys-lru"
+    assert settings.checkpoint_skip_nodes == ["route_skills", "compact_context"]
+
+
+def test_checkpoint_storage_overrides_from_env() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "CHECKPOINT_TTL_SECONDS": "3600",
+            "CHECKPOINT_PG_CLEANUP_ENABLED": "false",
+            "CHECKPOINT_PG_CLEANUP_INTERVAL_SECONDS": "120",
+            "CHECKPOINT_REDIS_LRU_ENABLED": "false",
+            "CHECKPOINT_REDIS_MAXMEMORY_POLICY": "volatile-lru",
+            "CHECKPOINT_SKIP_NODES": "route_skills, compact_context ,custom_node",
+        },
+        clear=True,
+    ):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.checkpoint_ttl_seconds == 3600
+    assert settings.checkpoint_pg_cleanup_enabled is False
+    assert settings.checkpoint_pg_cleanup_interval_seconds == 120
+    assert settings.checkpoint_redis_lru_enabled is False
+    assert settings.checkpoint_redis_maxmemory_policy == "volatile-lru"
+    assert settings.checkpoint_skip_nodes == [
+        "route_skills",
+        "compact_context",
+        "custom_node",
+    ]
+
+
 def test_skill_routing_semantic_defaults_to_disabled() -> None:
     with patch.dict("os.environ", {}, clear=True):
         settings = Settings(

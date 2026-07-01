@@ -1,7 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, computed_field, field_validator
+from pydantic_settings import NoDecode
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +53,27 @@ class Settings(BaseSettings):
     cache_default_ttl_seconds: int = Field(default=10, alias="CACHE_DEFAULT_TTL_SECONDS")
     cache_log_ttl_seconds: int = Field(default=5, alias="CACHE_LOG_TTL_SECONDS")
     cache_memory_ttl_seconds: int = Field(default=60, alias="CACHE_MEMORY_TTL_SECONDS")
+    checkpoint_ttl_seconds: int = Field(default=604800, alias="CHECKPOINT_TTL_SECONDS")
+    checkpoint_pg_cleanup_enabled: bool = Field(
+        default=True,
+        alias="CHECKPOINT_PG_CLEANUP_ENABLED",
+    )
+    checkpoint_pg_cleanup_interval_seconds: int = Field(
+        default=3600,
+        alias="CHECKPOINT_PG_CLEANUP_INTERVAL_SECONDS",
+    )
+    checkpoint_redis_lru_enabled: bool = Field(
+        default=True,
+        alias="CHECKPOINT_REDIS_LRU_ENABLED",
+    )
+    checkpoint_redis_maxmemory_policy: str = Field(
+        default="allkeys-lru",
+        alias="CHECKPOINT_REDIS_MAXMEMORY_POLICY",
+    )
+    checkpoint_skip_nodes: Annotated[list[str], NoDecode] = Field(
+        default=["route_skills", "compact_context"],
+        alias="CHECKPOINT_SKIP_NODES",
+    )
     skill_routing_semantic_enabled: bool = Field(
         default=False,
         alias="SKILL_ROUTING_SEMANTIC_ENABLED",
@@ -100,6 +123,15 @@ class Settings(BaseSettings):
             return None
         if not value.startswith(("redis://", "rediss://")):
             raise ValueError("REDIS_URL must use redis:// or rediss://")
+        return value
+
+    @field_validator("checkpoint_skip_nodes", mode="before")
+    @classmethod
+    def parse_checkpoint_skip_nodes(cls, value) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
     @field_validator("skill_routing_vector_store")

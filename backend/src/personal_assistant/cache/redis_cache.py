@@ -79,6 +79,13 @@ def build_cache(settings) -> RedisCache | NoopCache:
         return NoopCache()
 
 
+async def configure_redis_lru(client: Any, policy: str) -> None:
+    try:
+        await client.config_set("maxmemory-policy", policy)
+    except Exception as exc:
+        logger.warning("Redis LRU configuration skipped: %s", exc)
+
+
 def _log(event: str, key: str, started: float, exc: Exception | None = None) -> None:
     duration_ms = int((time.perf_counter() - started) * 1000)
     extra = {

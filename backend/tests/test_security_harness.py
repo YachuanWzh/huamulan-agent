@@ -28,6 +28,44 @@ def test_skill_routing_logger_is_visible_at_info_level() -> None:
     assert logger.propagate is False
 
 
+def test_checkpoint_logger_is_visible_at_info_level() -> None:
+    logger = logging.getLogger("personal_assistant.checkpoint")
+
+    assert logger.level <= logging.INFO
+    assert any(isinstance(handler, logging.StreamHandler) for handler in logger.handlers)
+    assert logger.propagate is False
+
+
+def test_checkpoint_logger_renders_checkpoint_context() -> None:
+    logger = logging.getLogger("personal_assistant.checkpoint")
+    handler = next(handler for handler in logger.handlers if isinstance(handler, logging.StreamHandler))
+    record = logging.LogRecord(
+        name="personal_assistant.checkpoint.redis_first",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Redis checkpoint write completed",
+        args=(),
+        exc_info=None,
+    )
+    record.thread_id = "thread-1"
+    record.checkpoint_id = "checkpoint-1"
+    record.source = "loop"
+    record.write_node = "agent"
+    record.task_id = "task-1"
+    record.ttl_seconds = 60
+
+    rendered = handler.format(record)
+
+    assert "Redis checkpoint write completed" in rendered
+    assert "thread_id=thread-1" in rendered
+    assert "checkpoint_id=checkpoint-1" in rendered
+    assert "source=loop" in rendered
+    assert "write_node=agent" in rendered
+    assert "task_id=task-1" in rendered
+    assert "ttl_seconds=60" in rendered
+
+
 class FakeMemory:
     def __init__(self) -> None:
         self.audit_events = []
