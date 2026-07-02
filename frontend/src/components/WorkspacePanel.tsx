@@ -12,6 +12,7 @@ import {
   type SkillEvaluationStreamEvent,
   type SkillInfo,
 } from '../lib/api'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
   panel: 'skills' | 'checkpoint' | 'audit'
@@ -671,7 +672,7 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
               {detail.final_answer && (
                 <div className="evaluation-answer">
                   <strong>Final answer</strong>
-                  <p>{detail.final_answer}</p>
+                  <MarkdownRenderer content={detail.final_answer} />
                 </div>
               )}
               <div className="evaluation-checks">
