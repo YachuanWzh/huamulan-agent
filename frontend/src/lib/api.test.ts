@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
-import { api, setBaseUrl, type StreamEvent } from './api'
+import {
+  api,
+  setBaseUrl,
+  type SkillEvaluationStreamEvent,
+  type StreamEvent,
+} from './api'
 
 const BASE = 'http://localhost'
 const server = setupServer()
@@ -16,6 +21,16 @@ afterAll(() => server.close())
 /** Build an SSE response body matching the real backend format.
  *  The `type` goes in the `event:` line; the remaining fields go in `data:`. */
 function sseBody(events: StreamEvent[]): string {
+  let body = ''
+  for (const e of events) {
+    const { type, ...payload } = e
+    body += `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`
+  }
+  body += 'data: [DONE]\n\n'
+  return body
+}
+
+function skillEvaluationSseBody(events: SkillEvaluationStreamEvent[]): string {
   let body = ''
   for (const e of events) {
     const { type, ...payload } = e
@@ -516,6 +531,73 @@ describe('api', () => {
       const result = await api.runSkillEvaluation({ golden_path: 'golden.jsonl' })
 
       expect(result.source).toBe('golden:golden.jsonl')
+    })
+
+    it('streams golden dataset evaluation progress', async () => {
+      const events: SkillEvaluationStreamEvent[] = [
+        {
+          type: 'started',
+          mode: 'quick',
+          source: 'golden:golden.jsonl',
+          total: 2,
+          completed: 0,
+        },
+        {
+          type: 'case_progress',
+          mode: 'quick',
+          source: 'golden:golden.jsonl',
+          total: 2,
+          completed: 1,
+          percent: 50,
+          case_id: 'rt-001',
+          expected_skills: ['resolve-time'],
+          selected_skills: ['resolve-time'],
+          tool_completed: false,
+          tool_failed: false,
+        },
+        {
+          type: 'done',
+          mode: 'quick',
+          source: 'golden:golden.jsonl',
+          total: 2,
+          completed: 2,
+          percent: 100,
+          results: [],
+        },
+      ]
+      server.use(
+        http.post(`${BASE}/api/skills/evaluation/run/stream`, async ({ request }) => {
+          expect(await request.json()).toEqual({
+            golden_path: 'golden.jsonl',
+            evaluation_mode: 'e2e',
+          })
+          return new HttpResponse(skillEvaluationSseBody(events), {
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }),
+      )
+
+      const results: SkillEvaluationStreamEvent[] = []
+      for await (const e of api.runSkillEvaluationStream({
+        golden_path: 'golden.jsonl',
+        evaluation_mode: 'e2e',
+      })) {
+        results.push(e)
+      }
+
+      expect(results).toEqual(events)
+    })
+
+    it('resets persisted skill evaluations', async () => {
+      server.use(
+        http.delete(`${BASE}/api/skills/evaluation`, () =>
+          HttpResponse.json({ deleted: 3, results: [] }),
+        ),
+      )
+
+      const result = await api.resetSkillEvaluations()
+
+      expect(result).toEqual({ deleted: 3, results: [] })
     })
   })
 

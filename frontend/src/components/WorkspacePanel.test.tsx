@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkspacePanel } from './WorkspacePanel'
@@ -14,6 +14,8 @@ vi.mock('../lib/api', () => ({
     getExecutionSummary: vi.fn(),
     listSkills: vi.fn(),
     runSkillEvaluation: vi.fn(),
+    runSkillEvaluationStream: vi.fn(),
+    resetSkillEvaluations: vi.fn(),
   },
 }))
 
@@ -22,6 +24,10 @@ const mockApi = vi.mocked(apiModule.api)
 describe('WorkspacePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('renders audit summary, token usage, and grouped retry chain', async () => {
@@ -282,19 +288,242 @@ describe('WorkspacePanel', () => {
           },
         },
       ])
-    mockApi.runSkillEvaluation.mockResolvedValue({
-      source: 'golden:new.jsonl',
-      results: [],
+    mockApi.runSkillEvaluationStream.mockImplementation(async function* () {
+      yield {
+        type: 'done',
+        mode: 'quick',
+        source: 'golden:new.jsonl',
+        total: 1,
+        completed: 1,
+        percent: 100,
+        results: [
+          {
+            id: 4,
+            created_at: '2026-07-02T01:10:00Z',
+            skill_name: 'resolve-time',
+            overall_score: 0.88,
+            routing_score: 1,
+            runtime_score: null,
+            usage_score: null,
+            static_score: 0.7,
+            source: 'golden:new.jsonl',
+            report: {},
+          },
+        ],
+      }
     })
     const user = userEvent.setup()
 
     render(<WorkspacePanel panel="skills" threadId="t1" />)
 
     await user.type(await screen.findByLabelText('Golden dataset path'), 'new.jsonl')
-    await user.click(screen.getByRole('button', { name: '运行评测' }))
+    await user.click(screen.getByRole('button', { name: '快速巡检' }))
 
-    expect(mockApi.runSkillEvaluation).toHaveBeenCalledWith({ golden_path: 'new.jsonl' })
+    expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
+      golden_path: 'new.jsonl',
+      evaluation_mode: 'quick',
+    })
     expect(await screen.findByText('88%')).toBeInTheDocument()
-    expect(screen.getByText('golden:new.jsonl')).toBeInTheDocument()
+    expect(screen.getAllByText('golden:new.jsonl').length).toBeGreaterThan(0)
+  })
+
+  it('shows case progress and starts end-to-end evaluation from the second button', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'resolve-time',
+        description: 'Resolve current time',
+        tool_names: ['resolve_current_time'],
+        path: '/skills/resolve-time',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+      },
+      {
+        name: 'weather',
+        description: 'Weather lookup',
+        tool_names: ['weather'],
+        path: '/skills/weather',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.76,
+          description_tokens: 18,
+          skill_md_lines: 45,
+          python_lines: 100,
+          max_cyclomatic_complexity: 5,
+          tool_count: 1,
+        },
+      },
+    ])
+    mockApi.runSkillEvaluationStream.mockImplementation(async function* () {
+      yield {
+        type: 'started',
+        mode: 'e2e',
+        source: 'golden:new.jsonl',
+        total: 2,
+        completed: 0,
+      }
+      yield {
+        type: 'case_progress',
+        mode: 'e2e',
+        source: 'golden:new.jsonl',
+        total: 2,
+        completed: 1,
+        percent: 50,
+        case_id: 'rt-001',
+        expected_skills: ['resolve-time'],
+        selected_skills: ['resolve-time'],
+        tool_completed: true,
+        tool_failed: false,
+      }
+      yield {
+        type: 'done',
+        mode: 'e2e',
+        source: 'golden:new.jsonl',
+        total: 2,
+        completed: 2,
+        percent: 100,
+        results: [
+          {
+            id: 4,
+            created_at: '2026-07-02T01:10:00Z',
+            skill_name: 'resolve-time',
+            overall_score: 0.88,
+            routing_score: 1,
+            runtime_score: 1,
+            usage_score: null,
+            static_score: 0.7,
+            source: 'golden:new.jsonl',
+            report: {},
+          },
+        ],
+      }
+    })
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.type(await screen.findByLabelText('Golden dataset path'), 'new.jsonl')
+    await user.click(screen.getByRole('button', { name: '实战测评' }))
+
+    expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
+      golden_path: 'new.jsonl',
+      evaluation_mode: 'e2e',
+    })
+    expect(await screen.findByRole('progressbar', { name: /Skill evaluation progress/i }))
+      .toHaveAttribute('aria-valuenow', '100')
+    expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument()
+    expect(screen.getAllByText(/实战测评/).length).toBeGreaterThan(0)
+    expect(screen.getByText('88%')).toBeInTheDocument()
+    expect(screen.getAllByText('golden:new.jsonl').length).toBeGreaterThan(0)
+  })
+
+  it('does not reset skill scores when confirmation is cancelled', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'resolve-time',
+        description: 'Resolve current time',
+        tool_names: ['resolve_current_time'],
+        path: '/skills/resolve-time',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 3,
+          created_at: '2026-07-02T01:00:00Z',
+          skill_name: 'resolve-time',
+          overall_score: 0.72,
+          routing_score: 0.8,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.6,
+          source: 'golden:golden.jsonl',
+          report: {},
+        },
+      },
+    ])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.click(await screen.findByRole('button', { name: '重置' }))
+
+    expect(window.confirm).toHaveBeenCalled()
+    expect(mockApi.resetSkillEvaluations).not.toHaveBeenCalled()
+  })
+
+  it('resets skill scores after confirmation and reloads the static scorecards', async () => {
+    mockApi.listSkills
+      .mockResolvedValueOnce([
+        {
+          name: 'resolve-time',
+          description: 'Resolve current time',
+          tool_names: ['resolve_current_time'],
+          path: '/skills/resolve-time',
+          loaded: false,
+          evaluation: {
+            overall_score: 0.91,
+            description_tokens: 12,
+            skill_md_lines: 35,
+            python_lines: 80,
+            max_cyclomatic_complexity: 4,
+            tool_count: 1,
+          },
+          latest_evaluation: {
+            id: 3,
+            created_at: '2026-07-02T01:00:00Z',
+            skill_name: 'resolve-time',
+            overall_score: 0.72,
+            routing_score: 0.8,
+            runtime_score: null,
+            usage_score: null,
+            static_score: 0.6,
+            source: 'golden:golden.jsonl',
+            report: {},
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          name: 'resolve-time',
+          description: 'Resolve current time',
+          tool_names: ['resolve_current_time'],
+          path: '/skills/resolve-time',
+          loaded: false,
+          evaluation: {
+            overall_score: 0.91,
+            description_tokens: 12,
+            skill_md_lines: 35,
+            python_lines: 80,
+            max_cyclomatic_complexity: 4,
+            tool_count: 1,
+          },
+          latest_evaluation: null,
+        },
+      ])
+    mockApi.resetSkillEvaluations.mockResolvedValue({ deleted: 3, results: [] })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText('72%')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重置' }))
+
+    expect(mockApi.resetSkillEvaluations).toHaveBeenCalledOnce()
+    expect(await screen.findByText('91%')).toBeInTheDocument()
+    expect(screen.queryByText('golden:golden.jsonl')).not.toBeInTheDocument()
   })
 })

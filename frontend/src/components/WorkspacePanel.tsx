@@ -5,6 +5,8 @@ import {
   type ExecutionSummary,
   type ReplayResponse,
   type ReplayState,
+  type SkillEvaluationSnapshot,
+  type SkillEvaluationStreamEvent,
   type SkillInfo,
 } from '../lib/api'
 
@@ -53,6 +55,14 @@ export function WorkspacePanel({
   const [skillsLoading, setSkillsLoading] = useState(false)
   const [goldenPath, setGoldenPath] = useState('')
   const [evaluationRunning, setEvaluationRunning] = useState(false)
+  const [evaluationResetting, setEvaluationResetting] = useState(false)
+  const [evaluationProgress, setEvaluationProgress] = useState<{
+    mode: 'quick' | 'e2e'
+    source: string
+    total: number
+    completed: number
+    percent: number
+  } | null>(null)
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -99,18 +109,50 @@ export function WorkspacePanel({
     setSkillsLoading(false)
   }, [])
 
-  const runSkillEvaluation = async () => {
+  const runSkillEvaluation = async (mode: 'quick' | 'e2e') => {
     const trimmedPath = goldenPath.trim()
     if (!trimmedPath) return
 
     setEvaluationRunning(true)
+    setEvaluationProgress(null)
     try {
-      await api.runSkillEvaluation({ golden_path: trimmedPath })
-      await loadSkills()
+      for await (const event of api.runSkillEvaluationStream({
+        golden_path: trimmedPath,
+        evaluation_mode: mode,
+      })) {
+        applyEvaluationEvent(event)
+      }
     } catch {
       // silently handle
     }
     setEvaluationRunning(false)
+  }
+
+  const applyEvaluationEvent = (event: SkillEvaluationStreamEvent) => {
+    setEvaluationProgress({
+      mode: event.mode,
+      source: event.source,
+      total: event.total,
+      completed: event.completed,
+      percent: event.percent ?? 0,
+    })
+    if (event.type === 'done' && event.results.length > 0) {
+      setSkills((prev) => mergeLatestSkillEvaluations(prev, event.results))
+    }
+  }
+
+  const resetSkillEvaluations = async () => {
+    const confirmed = window.confirm('确认重置所有 Skill 评分？这会清空当前已保存的测评结果。')
+    if (!confirmed) return
+    setEvaluationResetting(true)
+    try {
+      await api.resetSkillEvaluations()
+      setEvaluationProgress(null)
+      await loadSkills()
+    } catch {
+      // silently handle
+    }
+    setEvaluationResetting(false)
   }
 
   useEffect(() => {
@@ -172,30 +214,73 @@ export function WorkspacePanel({
               <h2>Skill Evaluation</h2>
               <p>盘点当前 Skill 的描述清晰度、代码规模、复杂度和器具配置。</p>
             </div>
-            <div className="workspace-actions">
-              <label className="skill-evaluation-runner">
-                <span>Golden dataset path</span>
-                <input
-                  aria-label="Golden dataset path"
-                  value={goldenPath}
-                  onChange={(event) => setGoldenPath(event.target.value)}
-                  placeholder="golden.jsonl"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={runSkillEvaluation}
-                disabled={evaluationRunning || goldenPath.trim().length === 0}
-              >
-                运行评测
-              </button>
-              <button onClick={loadSkills} disabled={skillsLoading}>
-                刷新
-              </button>
+            <div>
+              <div className="workspace-actions">
+                <label className="skill-evaluation-runner">
+                  <span>Golden dataset path</span>
+                  <input
+                    aria-label="Golden dataset path"
+                    value={goldenPath}
+                    onChange={(event) => setGoldenPath(event.target.value)}
+                    placeholder="golden.jsonl"
+                  />
+                </label>
+              </div>
+              <div className="workspace-actions">
+                <button
+                  type="button"
+                  onClick={() => runSkillEvaluation('quick')}
+                  disabled={evaluationRunning || goldenPath.trim().length === 0}
+                >
+                  快速巡检
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runSkillEvaluation('e2e')}
+                  disabled={evaluationRunning || goldenPath.trim().length === 0}
+                >
+                  实战测评
+                </button>
+                <button onClick={loadSkills} disabled={skillsLoading}>
+                  刷新
+                </button>
+                <button
+                  type="button"
+                  onClick={resetSkillEvaluations}
+                  disabled={evaluationRunning || evaluationResetting}
+                >
+                  重置
+                </button>
+              </div>
             </div>
           </div>
 
           {skillsLoading && <div className="loading">加载中...</div>}
+          {evaluationProgress && (
+            <div className="skill-evaluation-progress">
+              <div className="skill-evaluation-progress-label">
+                <span>
+                  {evaluationProgress.mode === 'e2e' ? '实战测评' : '快速巡检'}
+                  {evaluationRunning ? '运行中' : '已完成'}
+                </span>
+                <strong>
+                  {evaluationProgress.completed} / {evaluationProgress.total}
+                </strong>
+              </div>
+              <div
+                className="skill-evaluation-progress-bar"
+                role="progressbar"
+                aria-label="Skill evaluation progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={evaluationProgress.percent}
+              >
+                <span style={{ width: `${evaluationProgress.percent}%` }} />
+              </div>
+              <small>{evaluationProgress.source}</small>
+            </div>
+          )}
+
           {!skillsLoading && skills.length === 0 && (
             <div className="workspace-empty">当前没有可评测的 Skill。</div>
           )}
@@ -449,4 +534,17 @@ function formatPercent(value: number | undefined | null) {
 
 function getSkillScore(skill: SkillInfo) {
   return skill.latest_evaluation?.overall_score ?? skill.evaluation?.overall_score
+}
+
+function mergeLatestSkillEvaluations(
+  skills: SkillInfo[],
+  snapshots: SkillEvaluationSnapshot[],
+) {
+  const latestBySkill = new Map(
+    snapshots.map((snapshot) => [snapshot.skill_name, snapshot]),
+  )
+  return skills.map((skill) => ({
+    ...skill,
+    latest_evaluation: latestBySkill.get(skill.name) ?? skill.latest_evaluation,
+  }))
 }

@@ -159,11 +159,17 @@ class SkillEvaluationSnapshot(BaseModel):
 
 class SkillEvaluationRunRequest(BaseModel):
     golden_path: str | None = None
+    evaluation_mode: Literal["quick", "e2e"] = "quick"
 
 
 class SkillEvaluationRunResponse(BaseModel):
     source: str
     results: list[SkillEvaluationSnapshot]
+
+
+class SkillEvaluationResetResponse(BaseModel):
+    deleted: int
+    results: list[SkillEvaluationSnapshot] = Field(default_factory=list)
 
 
 class ReplayResponse(BaseModel):

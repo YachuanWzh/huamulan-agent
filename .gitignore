@@ -28,5 +28,8 @@ frontend/dist/
 
 # Local Memory
 .memory
-
 .transcripts
+
+# Golden Dataset
+golden_dataset.jsonl
+e2e_dateset.jsonl

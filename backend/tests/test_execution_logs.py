@@ -227,6 +227,20 @@ async def test_list_latest_skill_evaluations_maps_rows_to_schema() -> None:
     assert params == (100,)
 
 
+async def test_reset_skill_evaluation_results_deletes_all_rows() -> None:
+    conn = FakeConnection(rows=[(7,)])
+    memory = PostgresMemory("postgresql://example")
+    memory.pool = FakePool(conn)
+
+    deleted = await memory.reset_skill_evaluation_results()
+
+    assert deleted == 1
+    sql, params = conn.calls[0]
+    assert "DELETE FROM skill_evaluation_results" in sql
+    assert "RETURNING id" in sql
+    assert params is None
+
+
 class RetryMemory:
     def __init__(self):
         self.execution_logs = []

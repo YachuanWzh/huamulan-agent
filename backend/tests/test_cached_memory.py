@@ -44,6 +44,7 @@ class FakeMemory:
         self.recorded_logs = []
         self.deleted_threads = []
         self.cleared = False
+        self.reset_skill_evaluations = False
 
     async def execution_log_summary(self, thread_id):
         self.summary_calls += 1
@@ -92,6 +93,10 @@ class FakeMemory:
     async def clear_threads(self):
         self.cleared = True
         return ["thread-1"]
+
+    async def reset_skill_evaluation_results(self):
+        self.reset_skill_evaluations = True
+        return 4
 
 
 async def test_execution_log_summary_uses_cached_value_after_first_read() -> None:
@@ -155,3 +160,15 @@ async def test_cache_get_error_falls_back_to_underlying_memory() -> None:
 
     assert summary.total_events == 1
     assert memory.summary_calls == 1
+
+
+async def test_reset_skill_evaluation_results_delegates_and_clears_skill_cache() -> None:
+    cache = FakeCache()
+    memory = FakeMemory()
+    cached = CachedPostgresMemory(memory, cache)
+
+    deleted = await cached.reset_skill_evaluation_results()
+
+    assert deleted == 4
+    assert memory.reset_skill_evaluations is True
+    assert "pa:v1:skills:*" in cache.deleted_patterns

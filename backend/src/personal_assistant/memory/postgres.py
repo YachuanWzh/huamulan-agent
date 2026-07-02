@@ -427,6 +427,19 @@ class PostgresMemory:
             for row in rows
         ]
 
+    async def reset_skill_evaluation_results(self) -> int:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                DELETE FROM skill_evaluation_results
+                RETURNING id
+                """
+            )
+            rows = await cursor.fetchall()
+        return len(rows)
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,

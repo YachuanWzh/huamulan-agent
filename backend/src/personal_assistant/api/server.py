@@ -3,6 +3,7 @@ import sys
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.agent import warmup_skill_routing
 from personal_assistant.agent.harness import AgentHarness
+from personal_assistant.agent.router import route_skill_names
 from personal_assistant.api.schemas import (
     ApprovalBatchDecision,
     ApprovalDecision,
@@ -23,6 +25,7 @@ from personal_assistant.api.schemas import (
     ReplayResponse,
     SkillInfo,
     SkillEvaluationSummary,
+    SkillEvaluationResetResponse,
     SkillEvaluationRunRequest,
     SkillEvaluationRunResponse,
     SkillEvaluationSnapshot,
@@ -35,8 +38,19 @@ from personal_assistant.config import get_settings
 from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
-from personal_assistant.skills.evaluation.report import score_static_metrics
+from personal_assistant.skills.evaluation.models import (
+    RoutingMetrics,
+    RuntimeSkillMetrics,
+    SkillEvaluationReport,
+    SkillEvaluationResult,
+)
+from personal_assistant.skills.evaluation.report import (
+    _score_components,
+    _weighted_score,
+    score_static_metrics,
+)
 from personal_assistant.skills.evaluation.models import GoldenSkillCase
+from personal_assistant.skills.evaluation.offline import evaluate_routing_cases
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
 from personal_assistant.tracing import build_langfuse_callback
@@ -302,6 +316,11 @@ async def latest_skill_evaluations() -> list[SkillEvaluationSnapshot]:
     return await memory.list_latest_skill_evaluations()
 
 
+@app.delete("/api/skills/evaluation", response_model=SkillEvaluationResetResponse)
+async def reset_skill_evaluations() -> SkillEvaluationResetResponse:
+    return await _reset_skill_evaluations(memory)
+
+
 @app.post("/api/skills/evaluation/run", response_model=SkillEvaluationRunResponse)
 async def run_skill_evaluation(
     request: SkillEvaluationRunRequest,
@@ -313,16 +332,40 @@ async def run_skill_evaluation(
     )
 
 
+@app.post("/api/skills/evaluation/run/stream")
+async def run_skill_evaluation_stream(
+    request: SkillEvaluationRunRequest,
+) -> StreamingResponse:
+    path = _resolve_golden_path(request.golden_path)
+
+    async def event_stream():
+        async for event in _iter_skill_evaluation_events(
+            registry,
+            memory,
+            path,
+            mode=request.evaluation_mode,
+            harness=harness,
+        ):
+            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+async def _reset_skill_evaluations(memory) -> SkillEvaluationResetResponse:
+    deleted = await memory.reset_skill_evaluation_results()
+    return SkillEvaluationResetResponse(deleted=deleted, results=[])
+
+
 async def _run_skill_evaluation_and_persist(
     registry: SkillRegistry,
     memory,
     golden_path: str | None,
 ) -> SkillEvaluationRunResponse:
-    if not golden_path:
-        raise HTTPException(status_code=400, detail="golden_path is required")
-    path = Path(golden_path)
-    if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail=f"Golden dataset not found: {golden_path}")
+    path = _resolve_golden_path(golden_path)
     cases = _load_golden_cases(path)
     report = await evaluate_skill_registry(registry, cases=cases)
     source = f"golden:{path}"
@@ -331,6 +374,225 @@ async def _run_skill_evaluation_and_persist(
         source=source,
         results=await memory.list_latest_skill_evaluations(),
     )
+
+
+async def _iter_skill_evaluation_events(
+    registry: SkillRegistry,
+    memory,
+    golden_path: str | Path | None,
+    *,
+    mode: str = "quick",
+    harness: AgentHarness | None = None,
+):
+    path = _resolve_golden_path(golden_path)
+    cases = _load_golden_cases(path)
+    skills = list(registry.skills.values())
+    total = len(cases)
+    source = f"golden:{path}"
+    yield {"type": "started", "mode": mode, "total": total, "completed": 0, "source": source}
+
+    case_results = []
+    run_id = f"skill-eval-{mode}-{uuid4().hex[:8]}"
+    for index, case in enumerate(cases, start=1):
+        if mode == "e2e":
+            if harness is None:
+                raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
+            outcome = await _run_e2e_case(harness, case, run_id)
+        else:
+            outcome = await _run_quick_case(registry, case)
+        case_results.append(outcome)
+        yield {
+            "type": "case_progress",
+            "mode": mode,
+            "source": source,
+            "total": total,
+            "completed": index,
+            "percent": round((index / total) * 100) if total else 100,
+            "case_id": case.id,
+            "expected_skills": case.expected_skills,
+            "selected_skills": outcome["selected_skills"],
+            "tool_failed": outcome["tool_failed"],
+            "tool_completed": outcome["tool_completed"],
+        }
+
+    results: list[SkillEvaluationResult] = []
+    for skill in skills:
+        static_metrics = evaluate_static_skill(skill)
+        components = _case_score_components(skill.name, case_results, static_metrics, mode)
+        runtime_metrics = (
+            _runtime_metrics_from_cases(skill.name, case_results, static_metrics)
+            if mode == "e2e"
+            else None
+        )
+        result = SkillEvaluationResult(
+            skill_name=skill.name,
+            overall_score=_weighted_score(components),
+            static=static_metrics,
+            runtime=runtime_metrics,
+            score_components=components,
+        )
+        results.append(result)
+
+    report = SkillEvaluationReport(
+        skills=results,
+        routing=RoutingMetrics(total_cases=len(cases)),
+    )
+    await memory.record_skill_evaluation_results(report, source=source)
+    latest = await memory.list_latest_skill_evaluations()
+    yield {
+        "type": "done",
+        "mode": mode,
+        "source": source,
+        "total": total,
+        "completed": total,
+        "percent": 100,
+        "results": [item.model_dump(mode="json") for item in latest],
+    }
+
+
+async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dict:
+    selected = await route_skill_names(registry, case.query)
+    return {
+        "case": case,
+        "selected_skills": selected,
+        "tool_completed": False,
+        "tool_failed": False,
+    }
+
+
+async def _run_e2e_case(harness: AgentHarness, case: GoldenSkillCase, run_id: str) -> dict:
+    thread_id = f"{run_id}-{case.id}"
+    await harness.run_user_turn(thread_id, case.query)
+    logs = await harness.list_execution_logs(thread_id, limit=500)
+    selected = _selected_skills_from_logs(logs)
+    return {
+        "case": case,
+        "selected_skills": selected,
+        "tool_completed": any(
+            _log_value(log, "event_type") == "tool" and _log_value(log, "status") == "completed"
+            for log in logs
+        ),
+        "tool_failed": any(
+            _log_value(log, "event_type") in {"tool", "tool_retry"}
+            and _log_value(log, "status") in {"failed", "retrying"}
+            for log in logs
+        ),
+    }
+
+
+def _selected_skills_from_logs(logs) -> list[str]:
+    for log in reversed(list(logs)):
+        metadata = _log_value(log, "metadata") or {}
+        selected = metadata.get("selected_skills") if isinstance(metadata, dict) else None
+        if isinstance(selected, list):
+            return [str(item) for item in selected]
+    return []
+
+
+def _case_score_components(
+    skill_name: str,
+    case_results: list[dict],
+    static_metrics,
+    mode: str,
+) -> dict[str, float]:
+    expected_cases = [
+        item for item in case_results if skill_name in item["case"].expected_skills
+    ]
+    negative_cases = [
+        item for item in case_results if not item["case"].expected_skills
+    ]
+    routing_score = None
+    if expected_cases:
+        exact_matches = sum(
+            set(item["selected_skills"]) == set(item["case"].expected_skills)
+            for item in expected_cases
+        )
+        routing_score = exact_matches / len(expected_cases)
+        if negative_cases:
+            false_positives = sum(skill_name in item["selected_skills"] for item in negative_cases)
+            routing_score *= 1.0 - (false_positives / len(negative_cases))
+
+    components = {"static": score_static_metrics(static_metrics)}
+    if routing_score is not None:
+        components["routing"] = max(0.0, min(1.0, routing_score))
+    if mode == "e2e" and expected_cases:
+        runtime_passes = sum(
+            skill_name in item["selected_skills"]
+            and _runtime_case_passed(item, static_metrics)
+            for item in expected_cases
+        )
+        components["runtime"] = runtime_passes / len(expected_cases)
+    return components
+
+
+def _runtime_metrics_from_cases(
+    skill_name: str,
+    case_results: list[dict],
+    static_metrics,
+) -> RuntimeSkillMetrics | None:
+    expected_cases = [
+        item for item in case_results if skill_name in item["case"].expected_skills
+    ]
+    if not expected_cases:
+        return None
+    successful = sum(
+        skill_name in item["selected_skills"]
+        and _runtime_case_passed(item, static_metrics)
+        for item in expected_cases
+    )
+    failed = len(expected_cases) - successful
+    return RuntimeSkillMetrics(
+        skill_name=skill_name,
+        tool_calls=sum(item["tool_completed"] or item["tool_failed"] for item in expected_cases),
+        successful_calls=successful,
+        failed_calls=failed,
+        execution_success_rate=successful / len(expected_cases),
+    )
+
+
+def _runtime_case_passed(case_result: dict, static_metrics) -> bool:
+    if case_result["tool_failed"]:
+        return False
+    if getattr(static_metrics, "tool_count", 0) > 0:
+        return bool(case_result["tool_completed"])
+    return True
+
+
+def _log_value(log, name: str):
+    if isinstance(log, dict):
+        return log.get(name)
+    return getattr(log, name, None)
+
+
+def _resolve_golden_path(
+    golden_path: str | Path | None,
+    *,
+    search_roots: list[Path] | None = None,
+) -> Path:
+    if not golden_path:
+        raise HTTPException(status_code=400, detail="golden_path is required")
+
+    raw_path = Path(golden_path).expanduser()
+    backend_root = Path(__file__).resolve().parents[3]
+    roots = search_roots or [Path.cwd(), backend_root]
+    candidates = []
+    if raw_path.is_absolute():
+        candidates.append(raw_path)
+        if raw_path.suffix == "":
+            candidates.append(raw_path.with_suffix(".jsonl"))
+
+    for root in roots:
+        if raw_path.is_absolute():
+            break
+        rooted = root / raw_path
+        candidates.append(rooted)
+        if rooted.suffix == "":
+            candidates.append(rooted.with_suffix(".jsonl"))
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    raise HTTPException(status_code=404, detail=f"Golden dataset not found: {golden_path}")
 
 
 def _load_golden_cases(path: Path) -> list[GoldenSkillCase]:

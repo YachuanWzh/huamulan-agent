@@ -77,12 +77,67 @@ export interface SkillEvaluationSnapshot {
 
 export interface SkillEvaluationRunRequest {
   golden_path?: string | null
+  evaluation_mode?: 'quick' | 'e2e'
 }
 
 export interface SkillEvaluationRunResponse {
   source: string
   results: SkillEvaluationSnapshot[]
 }
+
+export interface SkillEvaluationResetResponse {
+  deleted: number
+  results: SkillEvaluationSnapshot[]
+}
+
+export interface SkillEvaluationStaticMetrics {
+  skill_name: string
+  description_tokens: number
+  skill_md_lines: number
+  python_lines: number
+  max_cyclomatic_complexity: number
+  tool_count: number
+}
+
+export interface SkillEvaluationResult {
+  skill_name: string
+  overall_score: number
+  static: SkillEvaluationStaticMetrics
+  runtime?: Record<string, unknown> | null
+  score_components: Record<string, number>
+}
+
+export type SkillEvaluationStreamEvent =
+  | {
+      type: 'started'
+      mode: 'quick' | 'e2e'
+      source: string
+      total: number
+      completed: number
+      percent?: number
+    }
+  | {
+      type: 'case_progress'
+      mode: 'quick' | 'e2e'
+      source: string
+      total: number
+      completed: number
+      percent: number
+      case_id: string
+      expected_skills: string[]
+      selected_skills: string[]
+      tool_completed: boolean
+      tool_failed: boolean
+    }
+  | {
+      type: 'done'
+      mode: 'quick' | 'e2e'
+      source: string
+      total: number
+      completed: number
+      percent: number
+      results: SkillEvaluationSnapshot[]
+    }
 
 export interface ReplayMessage {
   role: 'user' | 'assistant' | 'tool_call'
@@ -258,10 +313,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
  *
  * Merges the event type into the data payload so consumers see { type, ...data }.
  */
-async function* streamRequest(
+async function* streamRequest<T extends { type: string }>(
   url: string,
   body: unknown,
-): AsyncGenerator<StreamEvent> {
+): AsyncGenerator<T> {
   const res = await fetch(`${_baseUrl}${url}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -296,7 +351,7 @@ async function* streamRequest(
           if (raw === '[DONE]') return
           try {
             const payload = JSON.parse(raw) as Record<string, unknown>
-            yield { type: eventType, ...payload } as StreamEvent
+            yield { type: eventType, ...payload } as T
           } catch {
             // Skip malformed JSON lines
           }
@@ -322,7 +377,7 @@ export const api = {
     }),
 
   chatStream: (body: ChatRequest) =>
-    streamRequest('/api/chat/stream', body),
+    streamRequest<StreamEvent>('/api/chat/stream', body),
 
   approve: (body: ApprovalDecision) =>
     request<ChatResponse>('/api/approve', {
@@ -331,10 +386,10 @@ export const api = {
     }),
 
   approveStream: (body: ApprovalDecision) =>
-    streamRequest('/api/approve/stream', body),
+    streamRequest<StreamEvent>('/api/approve/stream', body),
 
   approveBatchStream: (body: ApprovalBatchDecision) =>
-    streamRequest('/api/approvals/stream', body),
+    streamRequest<StreamEvent>('/api/approvals/stream', body),
 
   listPendingApprovals: (threadId: string) =>
     request<ToolCallApproval[]>(`/api/threads/${threadId}/pending-approvals`),
@@ -385,5 +440,13 @@ export const api = {
     request<SkillEvaluationRunResponse>('/api/skills/evaluation/run', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  runSkillEvaluationStream: (body: SkillEvaluationRunRequest) =>
+    streamRequest<SkillEvaluationStreamEvent>('/api/skills/evaluation/run/stream', body),
+
+  resetSkillEvaluations: () =>
+    request<SkillEvaluationResetResponse>('/api/skills/evaluation', {
+      method: 'DELETE',
     }),
 }

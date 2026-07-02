@@ -102,6 +102,11 @@ class CachedPostgresMemory:
         await self._delete_pattern(f"{PREFIX}:tool_errors:all:*")
         await self._delete_pattern(f"{PREFIX}:tool_errors:{thread_id}:*")
 
+    async def reset_skill_evaluation_results(self) -> int:
+        deleted = await self.inner.reset_skill_evaluation_results()
+        await self._delete_pattern(f"{PREFIX}:skills:*")
+        return deleted
+
     async def delete_thread(self, thread_id: str) -> None:
         await self.inner.delete_thread(thread_id)
         safe_thread = _key_part(thread_id)

@@ -14,7 +14,13 @@ from personal_assistant.skills.evaluation import (
     render_markdown_report,
 )
 from personal_assistant.skills.evaluation.__main__ import main as skill_eval_main
-from personal_assistant.api.server import _run_skill_evaluation_and_persist, _skill_info
+from personal_assistant.api.server import (
+    _iter_skill_evaluation_events,
+    _resolve_golden_path,
+    _reset_skill_evaluations,
+    _run_skill_evaluation_and_persist,
+    _skill_info,
+)
 
 
 def _write_skill(skills_dir: Path, name: str, description: str, triggers: list[str]) -> None:
@@ -300,6 +306,11 @@ class _EvaluationMemory:
             for source in [self.source]
         ]
 
+    async def reset_skill_evaluation_results(self):
+        self.recorded = None
+        self.source = None
+        return 3
+
 
 @pytest.mark.asyncio
 async def test_run_skill_evaluation_from_golden_file_persists_latest_results(
@@ -321,3 +332,154 @@ async def test_run_skill_evaluation_from_golden_file_persists_latest_results(
     assert memory.source == f"golden:{golden}"
     assert response.source == f"golden:{golden}"
     assert response.results[0].skill_name == "weather"
+
+
+@pytest.mark.asyncio
+async def test_reset_skill_evaluations_clears_persisted_results() -> None:
+    memory = _EvaluationMemory()
+    memory.source = "golden:old.jsonl"
+
+    response = await _reset_skill_evaluations(memory)
+
+    assert response.deleted == 3
+    assert response.results == []
+
+
+def test_resolve_golden_path_accepts_dataset_stem_from_search_roots(tmp_path: Path) -> None:
+    golden = tmp_path / "golden_dataset.jsonl"
+    golden.write_text(
+        '{"id":"hit","query":"weather today","expected_skills":["weather"]}\n',
+        encoding="utf-8",
+    )
+
+    assert _resolve_golden_path("golden_dataset", search_roots=[tmp_path]) == golden
+
+
+@pytest.mark.asyncio
+async def test_quick_skill_evaluation_stream_emits_case_progress_and_per_skill_scores(
+    tmp_path: Path,
+) -> None:
+    _write_skill(tmp_path, "weather", "Weather forecast lookup.", ["weather"])
+    _write_skill(tmp_path, "stock", "Stock market lookup.", ["stock"])
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text(
+        "\n".join(
+            [
+                '{"id":"weather-hit","query":"weather today","expected_skills":["weather"]}',
+                '{"id":"stock-miss","query":"weather price","expected_skills":["stock"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = SkillRegistry(tmp_path)
+    memory = _EvaluationMemory()
+
+    events = [
+        event
+        async for event in _iter_skill_evaluation_events(
+            registry,
+            memory,
+            str(golden),
+            mode="quick",
+        )
+    ]
+
+    assert events[0]["type"] == "started"
+    assert events[0]["total"] == 2
+    progress_events = [event for event in events if event["type"] == "case_progress"]
+    assert [event["completed"] for event in progress_events] == [1, 2]
+    assert [event["case_id"] for event in progress_events] == ["weather-hit", "stock-miss"]
+    assert progress_events[-1]["percent"] == 100
+    assert events[-1]["type"] == "done"
+    assert events[-1]["source"] == f"golden:{golden}"
+    assert memory.recorded is not None
+    results = {item.skill_name: item for item in memory.recorded.skills}
+    assert results["weather"].score_components["routing"] == 1.0
+    assert results["stock"].score_components["routing"] == 0.0
+
+
+class _FakeE2EHarness:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def run_user_turn(self, thread_id, message, llm_config=None):
+        self.calls.append((thread_id, message, llm_config))
+
+    async def list_execution_logs(self, thread_id, limit=500):
+        query = {call[0]: call[1] for call in self.calls}[thread_id]
+        if "weather" in query:
+            return [
+                {
+                    "event_type": "llm",
+                    "status": "completed",
+                    "name": "agent",
+                    "metadata": {"selected_skills": ["weather"]},
+                },
+                {
+                    "event_type": "tool",
+                    "status": "completed",
+                    "name": "weather_lookup",
+                    "metadata": {"tool_call_id": "weather-call"},
+                },
+            ]
+        return [
+            {
+                "event_type": "llm",
+                "status": "completed",
+                "name": "agent",
+                "metadata": {"selected_skills": ["stock"]},
+            },
+            {
+                "event_type": "tool",
+                "status": "failed",
+                "name": "stock_lookup",
+                "metadata": {"tool_call_id": "stock-call"},
+            },
+        ]
+
+
+@pytest.mark.asyncio
+async def test_e2e_skill_evaluation_runs_agent_turns_and_scores_runtime_per_skill(
+    tmp_path: Path,
+) -> None:
+    _write_skill(tmp_path, "weather", "Weather forecast lookup.", ["weather"])
+    _write_skill(tmp_path, "stock", "Stock market lookup.", ["stock"])
+    golden = tmp_path / "golden.jsonl"
+    golden.write_text(
+        "\n".join(
+            [
+                '{"id":"weather-e2e","query":"weather today","expected_skills":["weather"]}',
+                '{"id":"stock-e2e","query":"stock price","expected_skills":["stock"]}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = SkillRegistry(tmp_path)
+    memory = _EvaluationMemory()
+    harness = _FakeE2EHarness()
+
+    events = [
+        event
+        async for event in _iter_skill_evaluation_events(
+            registry,
+            memory,
+            str(golden),
+            mode="e2e",
+            harness=harness,
+        )
+    ]
+
+    assert len(harness.calls) == 2
+    assert events[0]["mode"] == "e2e"
+    progress_events = [event for event in events if event["type"] == "case_progress"]
+    assert [event["case_id"] for event in progress_events] == ["weather-e2e", "stock-e2e"]
+    assert progress_events[0]["selected_skills"] == ["weather"]
+    assert progress_events[1]["tool_failed"] is True
+    results = {item.skill_name: item for item in memory.recorded.skills}
+    assert results["weather"].score_components["routing"] == 1.0
+    assert results["weather"].score_components["runtime"] == 1.0
+    assert results["stock"].score_components["routing"] == 1.0
+    assert results["stock"].score_components["runtime"] == 0.0
+    assert results["weather"].overall_score > results["stock"].overall_score
