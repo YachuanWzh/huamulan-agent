@@ -23,6 +23,7 @@ from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import (
     InMemorySkillVectorIndex,
     OllamaBgeM3EmbeddingProvider,
+    OllamaBgeM3Reranker,
     QdrantSkillVectorIndex,
     build_skill_router,
 )
@@ -213,9 +214,12 @@ def compile_agent(
         router_kwargs.update(
             {
                 "semantic_index": _build_skill_vector_index(settings),
+                "reranker": _build_skill_reranker(settings),
                 "llm": _build_skill_routing_llm(settings, llm_config),
                 "semantic_threshold": settings.skill_routing_similarity_threshold,
                 "semantic_top_k": settings.skill_routing_top_k,
+                "rerank_threshold": settings.skill_routing_rerank_threshold,
+                "rerank_top_k": settings.skill_routing_rerank_top_k,
                 "llm_retry_count": settings.skill_routing_llm_retry_count,
             }
         )
@@ -295,6 +299,15 @@ def _build_skill_vector_index(settings: Settings):
             api_key=settings.skill_routing_qdrant_api_key,
         )
     return InMemorySkillVectorIndex(embedding_provider)
+
+
+def _build_skill_reranker(settings: Settings):
+    if not getattr(settings, "skill_routing_rerank_enabled", False):
+        return None
+    return OllamaBgeM3Reranker(
+        base_url=settings.skill_routing_ollama_base_url,
+        model=settings.skill_routing_rerank_model,
+    )
 
 
 def _build_skill_routing_llm(settings: Settings, llm_config: LLMConfig | None = None):

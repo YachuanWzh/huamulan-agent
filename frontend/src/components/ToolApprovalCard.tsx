@@ -26,7 +26,7 @@ export function ToolApprovalCard({
       <div className="approval-header">
         <span className="approval-icon">{variant === 'memory' ? 'M' : '!'}</span>
         <span className="approval-title">
-          {variant === 'memory' ? 'Save to Memory?' : 'Tool Approval Required'}
+          {variant === 'memory' ? '保存到记忆？' : '需要工具审批'}
         </span>
       </div>
       <div className="approval-body">
@@ -38,13 +38,13 @@ export function ToolApprovalCard({
           className="btn-approve"
           onClick={() => onApprove(approval.approval_id)}
         >
-          Approve
+          批准
         </button>
         <button
           className="btn-deny"
           onClick={() => onDeny(approval.approval_id)}
         >
-          Deny
+          拒绝
         </button>
       </div>
     </div>

@@ -43,15 +43,23 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header" aria-label="Assistant console">
-        <h1>LangGraph Assistant</h1>
+      <header className="app-header" aria-label="木兰控制台">
+        <div className="brand-lockup">
+          <h1>huamulan-agent</h1>
+          <div className="kit-rail" aria-label="四市备装栏">
+            <span>东市 骏马</span>
+            <span>西市 鞍鞯</span>
+            <span>南市 辔头</span>
+            <span>北市 长鞭</span>
+          </div>
+        </div>
         <div className="header-actions">
           <div className="thread-info" title={threadId ?? ''}>
-            Thread: {threadId ? `${threadId.slice(0, 8)}...` : 'not started'}
+            军令: {threadId ? `${threadId.slice(0, 8)}...` : '未出征'}
           </div>
         </div>
       </header>
-      <main className="app-body" aria-label="Conversation workspace">
+      <main className="app-body" aria-label="对话案台">
         {activePanel === 'chat' ? (
           <ChatPanel
             key={conversationKey}

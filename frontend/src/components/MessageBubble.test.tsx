@@ -19,17 +19,17 @@ describe('MessageBubble', () => {
   it('renders tool call with pending badge', () => {
     render(<MessageBubble role="tool_call" content="get_time" approvalStatus="pending" />)
     expect(screen.getByText('get_time')).toBeInTheDocument()
-    expect(screen.getByText('Pending')).toBeInTheDocument()
+    expect(screen.getByText('待审批')).toBeInTheDocument()
   })
 
   it('renders tool call with approved badge', () => {
     render(<MessageBubble role="tool_call" content="get_time" approvalStatus="approved" />)
-    expect(screen.getByText('Approved')).toBeInTheDocument()
+    expect(screen.getByText('已批准')).toBeInTheDocument()
   })
 
   it('renders tool call with denied badge', () => {
     render(<MessageBubble role="tool_call" content="get_time" approvalStatus="denied" />)
-    expect(screen.getByText('Denied')).toBeInTheDocument()
+    expect(screen.getByText('已拒绝')).toBeInTheDocument()
   })
 
   it('collapses tool results by default and expands them into a scrollable panel', async () => {
@@ -55,12 +55,12 @@ describe('MessageBubble', () => {
 
   it('renders role label', () => {
     render(<MessageBubble role="user" content="test" />)
-    expect(screen.getByText('You')).toBeInTheDocument()
+    expect(screen.getByText('你')).toBeInTheDocument()
   })
 
   it('renders assistant role label', () => {
     render(<MessageBubble role="assistant" content="test" />)
-    expect(screen.getByText('Assistant')).toBeInTheDocument()
+    expect(screen.getByText('木兰')).toBeInTheDocument()
   })
 
   it('shows typewriter cursor when streaming', () => {
@@ -95,10 +95,10 @@ describe('MessageBubble', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /completed/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /已完成/i })).toBeInTheDocument()
     expect(screen.queryByText('Hidden thought')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /completed/i }))
+    await user.click(screen.getByRole('button', { name: /已完成/i }))
 
     expect(toggled).toBe(true)
   })
@@ -117,7 +117,7 @@ describe('MessageBubble', () => {
     )
 
     expect(screen.getByText('Working it out')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /思考中/i })).toBeInTheDocument()
   })
 
   it('renders streaming compacting expanded', () => {
@@ -134,7 +134,7 @@ describe('MessageBubble', () => {
     )
 
     expect(screen.getByText('Compacting context')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /compacting/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /压缩上下文中/i })).toBeInTheDocument()
   })
 
   it('renders assistant message as markdown with bold and italic', () => {

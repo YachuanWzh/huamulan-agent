@@ -163,6 +163,10 @@ def test_skill_routing_semantic_defaults_to_disabled() -> None:
     assert settings.skill_routing_qdrant_collection == "skill_routes"
     assert settings.skill_routing_similarity_threshold == 0.72
     assert settings.skill_routing_top_k == 3
+    assert settings.skill_routing_rerank_enabled is False
+    assert settings.skill_routing_rerank_model == "qllama/bge-reranker-v2-m3"
+    assert settings.skill_routing_rerank_threshold == 0.72
+    assert settings.skill_routing_rerank_top_k == 3
     assert settings.skill_routing_llm_retry_count == 1
     assert settings.skill_routing_llm_model is None
 
@@ -180,6 +184,10 @@ def test_skill_routing_semantic_can_be_enabled_from_env() -> None:
             "SKILL_ROUTING_QDRANT_COLLECTION": "assistant_skill_routes",
             "SKILL_ROUTING_SIMILARITY_THRESHOLD": "0.81",
             "SKILL_ROUTING_TOP_K": "5",
+            "SKILL_ROUTING_RERANK_ENABLED": "true",
+            "SKILL_ROUTING_RERANK_MODEL": "custom-reranker",
+            "SKILL_ROUTING_RERANK_THRESHOLD": "0.88",
+            "SKILL_ROUTING_RERANK_TOP_K": "4",
             "SKILL_ROUTING_LLM_RETRY_COUNT": "2",
             "SKILL_ROUTING_LLM_MODEL": "deepseek-v4-flash",
         },
@@ -200,6 +208,10 @@ def test_skill_routing_semantic_can_be_enabled_from_env() -> None:
     assert settings.skill_routing_qdrant_collection == "assistant_skill_routes"
     assert settings.skill_routing_similarity_threshold == 0.81
     assert settings.skill_routing_top_k == 5
+    assert settings.skill_routing_rerank_enabled is True
+    assert settings.skill_routing_rerank_model == "custom-reranker"
+    assert settings.skill_routing_rerank_threshold == 0.88
+    assert settings.skill_routing_rerank_top_k == 4
     assert settings.skill_routing_llm_retry_count == 2
     assert settings.skill_routing_llm_model == "deepseek-v4-flash"
 
@@ -215,6 +227,10 @@ def test_env_example_documents_skill_routing_services() -> None:
     assert "SKILL_ROUTING_VECTOR_STORE" in env_example
     assert "SKILL_ROUTING_QDRANT_URL" in env_example
     assert "SKILL_ROUTING_QDRANT_COLLECTION" in env_example
+    assert "SKILL_ROUTING_RERANK_ENABLED" in env_example
+    assert "SKILL_ROUTING_RERANK_MODEL" in env_example
+    assert "SKILL_ROUTING_RERANK_THRESHOLD" in env_example
+    assert "SKILL_ROUTING_RERANK_TOP_K" in env_example
     assert "SKILL_ROUTING_LLM_MODEL" in env_example
 
 

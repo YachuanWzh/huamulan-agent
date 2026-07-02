@@ -95,7 +95,7 @@ describe('App thread id', () => {
 
     expect(screen.getByTestId('chat-thread')).toBeEmptyDOMElement()
     expect(screen.getByTestId('sidebar-thread')).toBeEmptyDOMElement()
-    expect(screen.getByText(/thread: not started/i)).toBeInTheDocument()
+    expect(screen.getByText(/军令:\s*未出征/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /mock new thread/i }))
 
@@ -172,14 +172,23 @@ describe('App thread id', () => {
     render(<App />)
 
     expect(
-      screen.getByRole('banner', { name: /assistant console/i }),
+      screen.getByRole('banner', { name: /木兰控制台/i }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('main', { name: /conversation workspace/i }),
+      screen.getByRole('main', { name: /对话案台/i }),
     ).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-shell')).toBeInTheDocument()
     expect(
-      screen.getByRole('heading', { name: /langgraph assistant/i }),
+      screen.getByRole('heading', { name: /huamulan-agent/i }),
     ).toBeInTheDocument()
+  })
+
+  it('presents the four-market kit rail in the header', () => {
+    render(<App />)
+
+    expect(screen.getByText(/东市\s*骏马/)).toBeInTheDocument()
+    expect(screen.getByText(/西市\s*鞍鞯/)).toBeInTheDocument()
+    expect(screen.getByText(/南市\s*辔头/)).toBeInTheDocument()
+    expect(screen.getByText(/北市\s*长鞭/)).toBeInTheDocument()
   })
 })

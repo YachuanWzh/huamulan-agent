@@ -2,13 +2,16 @@ from pathlib import Path
 from textwrap import dedent
 from urllib.error import HTTPError
 import io
+import json
 import logging
 
 import pytest
 
 from personal_assistant.skills.loader import SkillRegistry
 from personal_assistant.agent.router import (
+    OllamaBgeM3Reranker,
     QdrantSkillVectorIndex,
+    RerankUnavailableError,
     SkillSemanticCandidate,
     build_skill_router,
     build_system_prompt,
@@ -141,6 +144,34 @@ class FailingSemanticIndex:
         raise RuntimeError("embedding service unavailable")
 
 
+class FakeReranker:
+    def __init__(self, scores: dict[str, float]):
+        self.scores = scores
+        self.calls: list[tuple[str, list[str]]] = []
+
+    async def rerank(self, query: str, candidates: list[SkillSemanticCandidate]):
+        self.calls.append((query, [candidate.name for candidate in candidates]))
+        reranked = [
+            SkillSemanticCandidate(
+                name=candidate.name,
+                description=candidate.description,
+                score=self.scores.get(candidate.name, candidate.score),
+            )
+            for candidate in candidates
+        ]
+        return sorted(reranked, key=lambda candidate: candidate.score, reverse=True)
+
+
+class FailingReranker:
+    async def rerank(self, query: str, candidates: list[SkillSemanticCandidate]):
+        raise RuntimeError("rerank service unavailable")
+
+
+class UnavailableReranker:
+    async def rerank(self, query: str, candidates: list[SkillSemanticCandidate]):
+        raise RerankUnavailableError("model lacks embedding capability")
+
+
 class CountingEmbeddingProvider:
     def __init__(self):
         self.texts: list[str] = []
@@ -248,6 +279,123 @@ class TestSkillRoutingFunnel:
         assert result == ["other"]
         assert semantic.calls == ["semantically related but no regex hit"]
         assert llm.payloads == []
+
+    @pytest.mark.asyncio
+    async def test_rerank_reorders_semantic_candidates_before_threshold_selection(
+        self,
+        tmp_path: Path,
+    ):
+        _make_triggered_skill(tmp_path)
+        _make_named_skill(tmp_path, "other", "Other stuff.")
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [
+                SkillSemanticCandidate(name="other", description="Other stuff.", score=0.77),
+                SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.74),
+            ]
+        )
+        reranker = FakeReranker({"cal": 0.94, "other": 0.12})
+        llm = FakeStructuredLLM(
+            [{"selectedSkill": "other", "confidence": 1.0, "reason": "not needed"}]
+        )
+
+        result = await route_skill_names(
+            registry,
+            "semantically related but no regex hit",
+            semantic_index=semantic,
+            reranker=reranker,
+            semantic_threshold=0.8,
+            rerank_threshold=0.9,
+            llm=llm,
+        )
+
+        assert result == ["cal"]
+        assert reranker.calls == [
+            ("semantically related but no regex hit", ["other", "cal"])
+        ]
+        assert llm.payloads == []
+
+    @pytest.mark.asyncio
+    async def test_rerank_failure_keeps_semantic_candidates_for_llm_fallback(
+        self,
+        tmp_path: Path,
+    ):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [{"selectedSkill": "cal", "confidence": 0.75, "reason": "calendar intent"}]
+        )
+
+        result = await route_skill_names(
+            registry,
+            "ambiguous date wording",
+            semantic_index=semantic,
+            reranker=FailingReranker(),
+            semantic_threshold=0.8,
+            rerank_threshold=0.8,
+            llm=llm,
+        )
+
+        assert result == ["cal"]
+        assert len(llm.payloads) == 1
+        assert "cal: Calendar arithmetic." in llm.payloads[0]
+
+    @pytest.mark.asyncio
+    async def test_rerank_unavailable_logs_without_traceback(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            result = await route_skill_names(
+                registry,
+                "ambiguous date wording",
+                semantic_index=semantic,
+                reranker=UnavailableReranker(),
+                semantic_threshold=0.8,
+                rerank_threshold=0.8,
+            )
+
+        assert result == []
+        assert "Skill routing rerank stage unavailable" in caplog.text
+        assert "model lacks embedding capability" in caplog.text
+        assert "Traceback" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_logs_rerank_stage_when_enabled(self, tmp_path: Path, caplog):
+        _make_triggered_skill(tmp_path)
+        _make_named_skill(tmp_path, "other", "Other stuff.")
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [
+                SkillSemanticCandidate(name="other", description="Other stuff.", score=0.77),
+                SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.74),
+            ]
+        )
+        reranker = FakeReranker({"cal": 0.94, "other": 0.12})
+
+        with caplog.at_level(logging.INFO, logger="personal_assistant.agent.router"):
+            result = await route_skill_names(
+                registry,
+                "semantically related but no regex hit",
+                semantic_index=semantic,
+                reranker=reranker,
+                semantic_threshold=0.8,
+                rerank_threshold=0.9,
+                rerank_top_k=2,
+            )
+
+        assert result == ["cal"]
+        assert "Skill routing rerank stage started" in caplog.text
+        assert "input_candidates=other:0.7700, cal:0.7400" in caplog.text
+        assert "top_k=2" in caplog.text
+        assert "Skill routing rerank stage completed" in caplog.text
+        assert "output_candidates=cal:0.9400, other:0.1200" in caplog.text
 
     @pytest.mark.asyncio
     async def test_low_semantic_score_falls_back_to_llm_judge(self, tmp_path: Path):
@@ -540,6 +688,146 @@ class TestQdrantSkillVectorIndexWarmup:
         assert "POST /collections/skill_routes/points/scroll" in message
         assert "HTTP 404" in message
         assert "Collection skill_routes" in message
+
+
+class TestOllamaBgeM3Reranker:
+    def test_reranker_scores_candidates_with_ollama_embed_response(self, monkeypatch):
+        requests: list[dict] = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                return json.dumps({"embeddings": [[0.91]]}).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            requests.append(
+                {
+                    "url": request.full_url,
+                    "body": json.loads(request.data.decode("utf-8")),
+                    "timeout": timeout,
+                }
+            )
+            return FakeResponse()
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        reranker = OllamaBgeM3Reranker(
+            base_url="http://ollama.example.test:11434",
+            model="custom-reranker",
+            timeout_seconds=3,
+        )
+
+        result = reranker._rerank_sync(
+            "date question",
+            [SkillSemanticCandidate(name="cal", description="Calendar math.", score=0.12)],
+        )
+
+        assert result == [
+            SkillSemanticCandidate(name="cal", description="Calendar math.", score=0.91)
+        ]
+        assert requests == [
+            {
+                "url": "http://ollama.example.test:11434/api/embed",
+                "body": {
+                    "model": "custom-reranker",
+                    "input": "query: date question\npassage: cal\nCalendar math.",
+                },
+                "timeout": 3,
+            }
+        ]
+
+    def test_reranker_rejects_model_without_embedding_capability(self, monkeypatch):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "models": [
+                            {
+                                "name": "qllama/bge-reranker-v2-m3:latest",
+                                "model": "qllama/bge-reranker-v2-m3:latest",
+                                "capabilities": ["completion"],
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
+        reranker = OllamaBgeM3Reranker(
+            base_url="http://ollama.example.test:11434",
+            model="qllama/bge-reranker-v2-m3",
+            timeout_seconds=3,
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            reranker._rerank_sync(
+                "date question",
+                [SkillSemanticCandidate(name="cal", description="Calendar math.", score=0.12)],
+            )
+
+        message = str(exc_info.value)
+        assert "does not advertise embedding capability" in message
+        assert "capabilities=completion" in message
+
+    def test_reranker_http_error_includes_response_body(self, monkeypatch):
+        def raise_500(request, timeout):
+            raise HTTPError(
+                request.full_url,
+                500,
+                "Internal Server Error",
+                {},
+                io.BytesIO(b'{"error":"llama-server process has terminated"}'),
+            )
+
+        def fake_urlopen(request, timeout):
+            if request.full_url.endswith("/api/tags"):
+                class FakeTagsResponse:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, exc_type, exc, traceback):
+                        return False
+
+                    def read(self):
+                        return json.dumps(
+                            {
+                                "models": [
+                                    {
+                                        "name": "custom-reranker:latest",
+                                        "model": "custom-reranker:latest",
+                                        "capabilities": ["embedding"],
+                                    }
+                                ]
+                            }
+                        ).encode("utf-8")
+
+                return FakeTagsResponse()
+            raise_500(request, timeout)
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        reranker = OllamaBgeM3Reranker(
+            base_url="http://ollama.example.test:11434",
+            model="custom-reranker",
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            reranker._rerank_sync(
+                "date question",
+                [SkillSemanticCandidate(name="cal", description="Calendar math.", score=0.12)],
+            )
+
+        message = str(exc_info.value)
+        assert "HTTP 500 Internal Server Error" in message
+        assert "llama-server process has terminated" in message
 
 
 class TestRouteSkillsNoFallback:

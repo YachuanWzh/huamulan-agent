@@ -23,7 +23,7 @@ describe('ToolApprovalBatchCard', () => {
   it('renders a single batch summary for multiple approvals', () => {
     render(<ToolApprovalBatchCard approvals={approvals} onSubmit={vi.fn()} />)
 
-    expect(screen.getByText(/2 tool approvals required/i)).toBeInTheDocument()
+    expect(screen.getByText(/需要审批 2 个工具调用/i)).toBeInTheDocument()
     expect(screen.getByText('resolve_current_time')).toBeInTheDocument()
     expect(screen.getByText('get_weather')).toBeInTheDocument()
   })
@@ -33,7 +33,7 @@ describe('ToolApprovalBatchCard', () => {
     const user = userEvent.setup()
     render(<ToolApprovalBatchCard approvals={approvals} onSubmit={onSubmit} />)
 
-    await user.click(screen.getByRole('button', { name: /submit approvals/i }))
+    await user.click(screen.getByRole('button', { name: /提交审批/i }))
 
     expect(onSubmit).toHaveBeenCalledWith([
       { approval_id: 'a1', approved: true },
@@ -46,8 +46,8 @@ describe('ToolApprovalBatchCard', () => {
     const user = userEvent.setup()
     render(<ToolApprovalBatchCard approvals={approvals} onSubmit={onSubmit} />)
 
-    await user.click(screen.getByRole('button', { name: /deny get_weather/i }))
-    await user.click(screen.getByRole('button', { name: /submit approvals/i }))
+    await user.click(screen.getByRole('button', { name: /拒绝 get_weather/i }))
+    await user.click(screen.getByRole('button', { name: /提交审批/i }))
 
     expect(onSubmit).toHaveBeenCalledWith([
       { approval_id: 'a1', approved: true },

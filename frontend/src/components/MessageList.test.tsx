@@ -21,7 +21,7 @@ describe('MessageList', () => {
 
   it('shows empty state when no messages', () => {
     render(<MessageList messages={[]} />)
-    expect(screen.getByText(/send a message to start/i)).toBeInTheDocument()
+    expect(screen.getByText(/整备任务，准备出征/)).toBeInTheDocument()
   })
 
   it('shows loading indicator when loading', () => {
@@ -46,7 +46,7 @@ describe('MessageList', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /思考中/i })).toBeInTheDocument()
     expect(screen.queryByTestId('loading-indicator')).not.toBeInTheDocument()
   })
 
@@ -67,7 +67,7 @@ describe('MessageList', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: /completed/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /已完成/i })).toBeInTheDocument()
     expect(screen.queryByTestId('loading-indicator')).not.toBeInTheDocument()
   })
 

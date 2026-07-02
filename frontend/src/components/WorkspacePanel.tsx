@@ -16,6 +16,25 @@ interface Props {
 
 type AuditFilter = 'all' | 'llm' | 'tool' | 'tool_retry' | 'security' | 'approval'
 
+const auditFilterLabels: Record<AuditFilter, string> = {
+  all: '全部',
+  llm: 'llm',
+  tool: 'tool',
+  tool_retry: 'tool_retry',
+  security: 'security',
+  approval: 'approval',
+}
+
+const statusLabels: Record<string, string> = {
+  started: '已开始',
+  completed: '已完成',
+  failed: '失败',
+  blocked: '已拦截',
+  retrying: '重试中',
+  approved: '已批准',
+  denied: '已拒绝',
+}
+
 export function WorkspacePanel({
   panel,
   threadId,
@@ -110,26 +129,26 @@ export function WorkspacePanel({
   const retryChains = buildRetryChains(executionLogs)
 
   return (
-    <section className="workspace-panel" aria-label="Operations workspace">
+    <section className="workspace-panel" aria-label="行军案台">
       {panel === 'checkpoint' && (
         <div className="workspace-section">
           <div className="workspace-header">
             <div>
-              <h2>Thread Replay</h2>
-              <p>Inspect checkpoints and replay a saved state in the conversation.</p>
+              <h2>驿站回放</h2>
+              <p>查看检查点，并把已保存状态回放到对话中。</p>
             </div>
             <div className="workspace-actions">
               <button onClick={deleteCurrentHistory} disabled={historyDeleting}>
-                Delete Checkpoints
+                删除检查点
               </button>
               <button onClick={clearAndStartNewThread} disabled={historyDeleting}>
-                Clear and New Thread
+                清空并新建军令
               </button>
             </div>
           </div>
-          {replayLoading && <div className="loading">Loading...</div>}
+          {replayLoading && <div className="loading">加载中...</div>}
           {!replayLoading && (!replay || replay.states.length === 0) && (
-            <div className="workspace-empty">No checkpoints for this thread.</div>
+            <div className="workspace-empty">当前军令暂无检查点。</div>
           )}
           {replay && replay.states.length > 0 && (
             <div className="workspace-state-list">
@@ -137,7 +156,7 @@ export function WorkspacePanel({
                 <details key={i} className="workspace-state">
                   <summary>
                     <span>
-                      Checkpoint {i + 1}
+                      检查点 {i + 1}
                       {state.node ? ` / ${state.node}` : ''}
                     </span>
                     <button
@@ -147,13 +166,13 @@ export function WorkspacePanel({
                         onReplayState?.(state)
                       }}
                     >
-                      Replay checkpoint {i + 1}
+                      回放检查点 {i + 1}
                     </button>
                   </summary>
                   <div className="workspace-meta">
                     {state.created_at && <span>{state.created_at}</span>}
                     {state.values.selected_skills?.length ? (
-                      <span>Skills: {state.values.selected_skills.join(', ')}</span>
+                      <span>Skill: {state.values.selected_skills.join(', ')}</span>
                     ) : null}
                   </div>
                   <pre>{JSON.stringify(state, null, 2)}</pre>
@@ -168,19 +187,19 @@ export function WorkspacePanel({
         <div className="workspace-section">
           <div className="workspace-header">
             <div>
-              <h2>Operational Audit</h2>
-              <p>Inspect the thread trace, token usage, tool results, and retry chains.</p>
+              <h2>行军校阅</h2>
+              <p>查看线程轨迹、Token 用量、工具结果和重试链。</p>
             </div>
             <div className="workspace-actions">
               <button onClick={loadExecutionAudit} disabled={executionLoading}>
-                Refresh
+                刷新
               </button>
             </div>
           </div>
 
           <div className="audit-summary-grid">
             <div className="audit-metric">
-              <span>Total Tokens</span>
+              <span>Token 总量</span>
               <strong>{executionSummary?.total_tokens ?? 0}</strong>
               <small>
                 Prompt {executionSummary?.prompt_tokens ?? 0} / Completion{' '}
@@ -188,24 +207,24 @@ export function WorkspacePanel({
               </small>
             </div>
             <div className="audit-metric">
-              <span>Tool Calls</span>
+              <span>工具调用</span>
               <strong>{executionSummary?.tool_calls ?? 0}</strong>
             </div>
             <div className="audit-metric">
-              <span>Errors</span>
+              <span>错误</span>
               <strong>{executionSummary?.tool_errors ?? 0}</strong>
             </div>
             <div className="audit-metric">
-              <span>Retries</span>
+              <span>重试</span>
               <strong>{executionSummary?.tool_retries ?? 0}</strong>
             </div>
             <div className="audit-metric">
-              <span>Duration</span>
+              <span>耗时</span>
               <strong>{executionSummary?.total_duration_ms ?? 0}ms</strong>
             </div>
           </div>
 
-          <div className="workspace-tabs" role="tablist" aria-label="Audit filters">
+          <div className="workspace-tabs" role="tablist" aria-label="校阅筛选">
             {(['all', 'llm', 'tool', 'tool_retry', 'security', 'approval'] as const).map(
               (filter) => (
                 <button
@@ -215,26 +234,26 @@ export function WorkspacePanel({
                   className={auditFilter === filter ? 'active' : ''}
                   onClick={() => setAuditFilter(filter)}
                 >
-                  {filter === 'all' ? 'All' : filter}
+                  {auditFilterLabels[filter]}
                 </button>
               ),
             )}
           </div>
 
-          {executionLoading && <div className="loading">Loading...</div>}
+          {executionLoading && <div className="loading">加载中...</div>}
           {!executionLoading && executionLogs.length === 0 && (
-            <div className="workspace-empty">No execution logs for this thread.</div>
+            <div className="workspace-empty">当前军令暂无执行日志。</div>
           )}
           {!executionLoading && retryChains.length > 0 && (
             <div className="retry-chain-list">
               {retryChains.map((chain) => (
                 <section key={chain.toolCallId} className="retry-chain">
-                  <h3>{chain.name} retry chain</h3>
+                  <h3>{chain.name} 重试链</h3>
                   <div className="retry-chain-steps">
                     {chain.attempts.map((attempt) => (
                       <span key={attempt.id}>
-                        Attempt {String(attempt.metadata.attempt ?? '?')}{' '}
-                        {attempt.status === 'completed' ? 'completed' : 'failed'}
+                        第 {String(attempt.metadata.attempt ?? '?')} 次
+                        {attempt.status === 'completed' ? '完成' : '失败'}
                       </span>
                     ))}
                   </div>
@@ -255,10 +274,10 @@ export function WorkspacePanel({
                         {new Date(log.created_at).toLocaleString()}
                       </span>
                       <strong>{log.name ?? log.event_type}</strong>
-                      <span>{log.status}</span>
+                      <span>{statusLabels[log.status] ?? log.status}</span>
                       {log.duration_ms != null && <span>{log.duration_ms}ms</span>}
                       {Number(log.token_usage.total_tokens ?? 0) > 0 && (
-                        <span>{String(log.token_usage.total_tokens)} tokens</span>
+                        <span>{String(log.token_usage.total_tokens)} Token</span>
                       )}
                     </summary>
                     <pre>

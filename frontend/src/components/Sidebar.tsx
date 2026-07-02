@@ -127,7 +127,7 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar" data-testid="sidebar-shell" aria-label="Workspace panels">
+    <aside className="sidebar" data-testid="sidebar-shell" aria-label="案台面板">
       <div className="sidebar-tabs">
         <button
           role="tab"
@@ -135,7 +135,7 @@ export function Sidebar({
           className={`tab ${tab === 'skills' ? 'active' : ''}`}
           onClick={() => selectTab('skills', 'chat')}
         >
-          Skills
+          军械
         </button>
         <button
           role="tab"
@@ -143,7 +143,7 @@ export function Sidebar({
           className={`tab ${tab === 'history' ? 'active' : ''}`}
           onClick={() => selectTab('history', 'chat')}
         >
-          History
+          军报
         </button>
         <button
           role="tab"
@@ -151,7 +151,7 @@ export function Sidebar({
           className={`tab ${tab === 'checkpoint' ? 'active' : ''}`}
           onClick={() => selectTab('checkpoint', 'checkpoint')}
         >
-          Checkpoint
+          驿站
         </button>
         <button
           role="tab"
@@ -159,7 +159,7 @@ export function Sidebar({
           className={`tab ${tab === 'audit' ? 'active' : ''}`}
           onClick={() => selectTab('audit', 'audit')}
         >
-          Audit
+          校阅
         </button>
       </div>
 
@@ -167,14 +167,14 @@ export function Sidebar({
         {tab === 'skills' && (
           <div className="skills-panel">
             <div className="skills-header">
-              <h3>Skills</h3>
+              <h3>军械</h3>
               <button onClick={handleReload} disabled={skillsLoading}>
-                Reload
+                整备
               </button>
             </div>
-            {skillsLoading && <div className="loading">Loading...</div>}
+            {skillsLoading && <div className="loading">加载中...</div>}
             {!skillsLoading && skills.length === 0 && (
-              <div className="empty-state">No skills loaded.</div>
+              <div className="empty-state">暂无军械。</div>
             )}
             <ul className="skills-list">
               {skills.map((skill) => (
@@ -182,7 +182,7 @@ export function Sidebar({
                   <div className="skill-name">{skill.name}</div>
                   <div className="skill-desc">{skill.description}</div>
                   <div className="skill-tools">
-                    Tools: {skill.tool_names.join(', ')}
+                    器具: {skill.tool_names.join(', ')}
                   </div>
                 </li>
               ))}
@@ -193,18 +193,18 @@ export function Sidebar({
         {tab === 'history' && (
           <div className="history-panel">
             <div className="history-header">
-              <h3>Conversation History</h3>
+              <h3>军报</h3>
               <button
                 type="button"
                 onClick={clearHistory}
                 disabled={clearingHistory || threads.length === 0}
               >
-                Clear History
+                清空军报
               </button>
             </div>
-            {threadsLoading && <div className="loading">Loading...</div>}
+            {threadsLoading && <div className="loading">加载中...</div>}
             {!threadsLoading && threads.length === 0 && (
-              <div className="empty-state">No conversation history.</div>
+              <div className="empty-state">暂无军报。</div>
             )}
             {!threadsLoading && threads.length > 0 && (
               <ol className="history-list">
@@ -218,10 +218,10 @@ export function Sidebar({
                         disabled={openingThreadId === thread.thread_id}
                         onClick={() => openThread(thread.thread_id)}
                       >
-                        <span className="history-role">Thread</span>
+                        <span className="history-role">军令</span>
                         <span className="history-preview">
                           <span className="history-summary">
-                            {thread.summary || 'Untitled conversation'}
+                            {thread.summary || '未命名军报'}
                           </span>
                           <span className="history-thread-id">{thread.thread_id}</span>
                           {thread.updated_at && (
@@ -238,7 +238,7 @@ export function Sidebar({
                         disabled={deletingThreadId === thread.thread_id}
                         onClick={() => deleteHistoryThread(thread.thread_id)}
                       >
-                        Delete
+                        删除
                       </button>
                     </div>
                   </li>
@@ -251,18 +251,18 @@ export function Sidebar({
         {tab === 'checkpoint' && (
           <div className="sidebar-panel-note">
             <div className="sidebar-panel-note-header">
-              <h3>Thread Replay</h3>
+              <h3>驿站回放</h3>
             </div>
-            <div className="sidebar-panel-note-body">Open in workspace</div>
+            <div className="sidebar-panel-note-body">在主案台查看</div>
           </div>
         )}
 
         {tab === 'audit' && (
           <div className="sidebar-panel-note">
             <div className="sidebar-panel-note-header">
-              <h3>Operational Audit</h3>
+              <h3>行军校阅</h3>
             </div>
-            <div className="sidebar-panel-note-body">Open in workspace</div>
+            <div className="sidebar-panel-note-body">在主案台查看</div>
           </div>
         )}
       </div>

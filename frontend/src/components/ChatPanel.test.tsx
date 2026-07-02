@@ -45,8 +45,8 @@ describe('ChatPanel', () => {
 
   it('renders message input and empty state', () => {
     renderChatPanel()
-    expect(screen.getByPlaceholderText(/type your message/i)).toBeInTheDocument()
-    expect(screen.getByText(/send a message to start/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/列阵输入任务/i)).toBeInTheDocument()
+    expect(screen.getByText(/整备任务，准备出征/i)).toBeInTheDocument()
   })
 
   it('sends message and displays assistant response', async () => {
@@ -61,9 +61,9 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel()
 
-    const input = screen.getByPlaceholderText(/type your message/i)
+    const input = screen.getByPlaceholderText(/列阵输入任务/i)
     await user.type(input, 'Hi there')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.click(screen.getByRole('button', { name: /出发/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Hi there')).toBeInTheDocument()
@@ -80,8 +80,8 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel({ threadId: null, onThreadCreated })
 
-    await user.type(screen.getByPlaceholderText(/type your message/i), 'Hi')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.type(screen.getByPlaceholderText(/列阵输入任务/i), 'Hi')
+    await user.click(screen.getByRole('button', { name: /出发/i }))
 
     await waitFor(() => {
       expect(onThreadCreated).toHaveBeenCalledOnce()
@@ -97,7 +97,7 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel({ onNewConversation })
 
-    await user.click(screen.getByRole('button', { name: /new conversation/i }))
+    await user.click(screen.getByRole('button', { name: /重整行装/i }))
 
     expect(onNewConversation).toHaveBeenCalledOnce()
   })
@@ -119,13 +119,13 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel()
 
-    await user.type(screen.getByPlaceholderText(/type your message/i), 'What time?')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.type(screen.getByPlaceholderText(/列阵输入任务/i), 'What time?')
+    await user.click(screen.getByRole('button', { name: /出发/i }))
 
     await waitFor(() => {
       expect(screen.getAllByText('resolve_current_time').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getAllByRole('button', { name: /approve/i }).length).toBeGreaterThan(0)
-      expect(screen.getAllByRole('button', { name: /deny/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByRole('button', { name: /批准/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByRole('button', { name: /拒绝/i }).length).toBeGreaterThan(0)
     })
   })
 
@@ -155,14 +155,14 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel()
 
-    await user.type(screen.getByPlaceholderText(/type your message/i), 'Time and weather?')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.type(screen.getByPlaceholderText(/列阵输入任务/i), 'Time and weather?')
+    await user.click(screen.getByRole('button', { name: /出发/i }))
 
     await waitFor(() => {
-      expect(screen.getByText(/2 tool approvals required/i)).toBeInTheDocument()
+      expect(screen.getByText(/需要审批 2 个工具调用/i)).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: /submit approvals/i }))
+    await user.click(screen.getByRole('button', { name: /提交审批/i }))
 
     await waitFor(() => {
       expect(mockApi.approveBatchStream).toHaveBeenCalledWith({
@@ -184,8 +184,8 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     renderChatPanel()
 
-    await user.type(screen.getByPlaceholderText(/type your message/i), 'Hi')
-    await user.click(screen.getByRole('button', { name: /send/i }))
+    await user.type(screen.getByPlaceholderText(/列阵输入任务/i), 'Hi')
+    await user.click(screen.getByRole('button', { name: /出发/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Server error')).toBeInTheDocument()

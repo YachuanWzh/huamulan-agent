@@ -5,7 +5,11 @@ from langchain_core.runnables import RunnableConfig
 
 from personal_assistant.agent import agent as agent_module
 from personal_assistant.agent.hook import AgentHookManager, HookEvent, HookStage, with_hooks
-from personal_assistant.agent.router import InMemorySkillVectorIndex, QdrantSkillVectorIndex
+from personal_assistant.agent.router import (
+    InMemorySkillVectorIndex,
+    OllamaBgeM3Reranker,
+    QdrantSkillVectorIndex,
+)
 from personal_assistant.checkpoint.redis_first import RedisFirstCheckpointSaver
 from personal_assistant.config import Settings
 from tests.test_redis_first_checkpoint import FakePostgresSaver, FakeRedis
@@ -186,6 +190,81 @@ def test_build_skill_vector_index_uses_qdrant_when_configured() -> None:
     assert isinstance(index, QdrantSkillVectorIndex)
     assert index.url == "http://qdrant.example.test:6333"
     assert index.collection == "assistant_skill_routes"
+
+
+def test_build_skill_reranker_returns_none_when_disabled() -> None:
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        _env_file=None,
+    )
+
+    assert agent_module._build_skill_reranker(settings) is None
+
+
+def test_build_skill_reranker_uses_ollama_when_enabled() -> None:
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        SKILL_ROUTING_RERANK_ENABLED=True,
+        SKILL_ROUTING_OLLAMA_BASE_URL="http://ollama.example.test:11434",
+        SKILL_ROUTING_RERANK_MODEL="custom-reranker",
+        _env_file=None,
+    )
+
+    reranker = agent_module._build_skill_reranker(settings)
+
+    assert isinstance(reranker, OllamaBgeM3Reranker)
+    assert reranker.base_url == "http://ollama.example.test:11434"
+    assert reranker.model == "custom-reranker"
+
+
+def test_compile_agent_passes_reranker_when_enabled(monkeypatch) -> None:
+    captured_router_kwargs = {}
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            return "ai-response"
+
+    class FakeRegistry:
+        def tool_map_for_skills(self, selected_skills):
+            return {}
+
+    class FakeReranker:
+        pass
+
+    def fake_build_skill_router(registry, **kwargs):
+        captured_router_kwargs.update(kwargs)
+        return lambda state: state
+
+    monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
+    monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
+    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: object())
+    monkeypatch.setattr(agent_module, "_build_skill_reranker", lambda settings: FakeReranker())
+    monkeypatch.setattr(agent_module, "build_skill_router", fake_build_skill_router)
+
+    agent_module.compile_agent(
+        settings=Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            SKILL_ROUTING_SEMANTIC_ENABLED=True,
+            SKILL_ROUTING_RERANK_ENABLED=True,
+            SKILL_ROUTING_RERANK_THRESHOLD=0.87,
+            SKILL_ROUTING_RERANK_TOP_K=2,
+            _env_file=None,
+        ),
+        registry=FakeRegistry(),
+        memory=type("Memory", (), {"checkpointer": None})(),
+        decisions={},
+        enable_memory_reflection=False,
+    )
+
+    assert isinstance(captured_router_kwargs["reranker"], FakeReranker)
+    assert captured_router_kwargs["rerank_threshold"] == 0.87
+    assert captured_router_kwargs["rerank_top_k"] == 2
 
 
 def test_build_skill_routing_llm_uses_dedicated_model(monkeypatch) -> None:

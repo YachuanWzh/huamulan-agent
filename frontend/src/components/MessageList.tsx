@@ -32,7 +32,7 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
   return (
     <div className="message-list">
       {messages.length === 0 && (
-        <div className="empty-state">Send a message to start the conversation.</div>
+        <div className="empty-state">整备任务，准备出征。</div>
       )}
       {messages.map((msg) => (
         <MessageBubble
@@ -54,7 +54,7 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
       ))}
       {showLoadingIndicator && (
         <div className="loading-indicator" data-testid="loading-indicator">
-          Thinking…
+          思考中...
         </div>
       )}
       <div ref={bottomRef} />

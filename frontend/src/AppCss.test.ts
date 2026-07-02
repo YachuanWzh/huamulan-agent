@@ -7,6 +7,14 @@ import { resolve } from 'node:path'
 const appCss = readFileSync(resolve(__dirname, 'App.css'), 'utf8')
 
 describe('App stylesheet decorations', () => {
+  it('defines the huamulan-agent palette tokens', () => {
+    expect(appCss).toContain('--color-iron-armor: #171717')
+    expect(appCss).toContain('--color-jujube-red: #8f2d2d')
+    expect(appCss).toContain('--color-saddle-leather: #8a5a35')
+    expect(appCss).toContain('--color-rice-paper: #f7f1e3')
+    expect(appCss).toContain('--color-bronze-green: #34675c')
+  })
+
   it('does not render decorative markers in the header or empty state', () => {
     expect(appCss).not.toContain('.app-header h1::before')
     expect(appCss).not.toContain('.empty-state::before')

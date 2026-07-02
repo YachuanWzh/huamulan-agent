@@ -100,6 +100,19 @@ class SkillVectorIndex(Protocol):
         """Return semantic skill candidates ordered by descending similarity."""
 
 
+class SkillReranker(Protocol):
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[SkillSemanticCandidate],
+    ) -> list[SkillSemanticCandidate]:
+        """Return candidates ordered by descending rerank relevance."""
+
+
+class RerankUnavailableError(RuntimeError):
+    """Raised when rerank is configured but the local reranker cannot be used."""
+
+
 class LLMSkillRouteDecision(BaseModel):
     selectedSkill: str | None = Field(default=None)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -139,6 +152,109 @@ class OllamaBgeM3EmbeddingProvider:
         if not isinstance(embedding, list) or not embedding:
             raise RuntimeError("Ollama embedding response did not include an embedding")
         return [float(value) for value in embedding]
+
+
+class OllamaBgeM3Reranker:
+    """Rerank semantic candidates with a local Ollama bge-reranker-v2-m3 model."""
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "qllama/bge-reranker-v2-m3",
+        timeout_seconds: float = 10.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self._capabilities_checked = False
+
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[SkillSemanticCandidate],
+    ) -> list[SkillSemanticCandidate]:
+        if not candidates:
+            return []
+        return await asyncio.to_thread(self._rerank_sync, query, candidates)
+
+    def _rerank_sync(
+        self,
+        query: str,
+        candidates: list[SkillSemanticCandidate],
+    ) -> list[SkillSemanticCandidate]:
+        self._ensure_embedding_capability()
+        reranked = [
+            SkillSemanticCandidate(
+                name=candidate.name,
+                description=candidate.description,
+                score=self._score_pair(query, candidate),
+            )
+            for candidate in candidates
+        ]
+        return sorted(reranked, key=lambda candidate: candidate.score, reverse=True)
+
+    def _score_pair(self, query: str, candidate: SkillSemanticCandidate) -> float:
+        pair_text = _rerank_pair_document(query, candidate)
+        body = json.dumps({"model": self.model, "input": pair_text}).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/api/embed",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body_text = ""
+            if exc.fp:
+                body_text = exc.fp.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                "Ollama rerank request failed: "
+                f"model={self.model} endpoint=POST /api/embed "
+                f"url={self.base_url}/api/embed HTTP {exc.code} {exc.reason}; "
+                f"body={body_text}"
+            ) from exc
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Ollama rerank request failed: {exc}") from exc
+        return _extract_rerank_score(payload)
+
+    def _ensure_embedding_capability(self) -> None:
+        if self._capabilities_checked:
+            return
+        request = urllib.request.Request(f"{self.base_url}/api/tags", method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            logger.info(
+                "Ollama rerank model capability check skipped: model=%s error=%s",
+                self.model,
+                exc,
+            )
+            self._capabilities_checked = True
+            return
+        model_info = _find_ollama_model_info(payload, self.model)
+        if model_info is None:
+            logger.info(
+                "Ollama rerank model capability check did not find model=%s",
+                self.model,
+            )
+            self._capabilities_checked = True
+            return
+        capabilities = model_info.get("capabilities")
+        if not isinstance(capabilities, list):
+            capabilities = []
+        if "embedding" not in capabilities:
+            capability_text = ",".join(str(capability) for capability in capabilities) or "none"
+            self._capabilities_checked = True
+            raise RerankUnavailableError(
+                "Ollama rerank model does not advertise embedding capability: "
+                f"model={self.model} capabilities={capability_text}. "
+                "This reranker adapter uses POST /api/embed; choose an Ollama model "
+                "that advertises embedding capability or disable SKILL_ROUTING_RERANK_ENABLED."
+            )
+        self._capabilities_checked = True
 
 
 class InMemorySkillVectorIndex:
@@ -396,9 +512,12 @@ def build_skill_router(
     cache=None,
     memory_cache_ttl_seconds: int = 60,
     semantic_index: SkillVectorIndex | None = None,
+    reranker: SkillReranker | None = None,
     llm=None,
     semantic_threshold: float = 0.72,
     semantic_top_k: int = 3,
+    rerank_threshold: float | None = None,
+    rerank_top_k: int | None = None,
     llm_retry_count: int = 1,
 ):
     async def route_skills(state: AgentState) -> AgentState:
@@ -412,9 +531,12 @@ def build_skill_router(
             registry,
             user_text,
             semantic_index=semantic_index,
+            reranker=reranker,
             llm=llm,
             semantic_threshold=semantic_threshold,
             semantic_top_k=semantic_top_k,
+            rerank_threshold=rerank_threshold,
+            rerank_top_k=rerank_top_k,
             llm_retry_count=llm_retry_count,
         )
 
@@ -446,9 +568,12 @@ async def route_skill_names(
     registry: SkillRegistry,
     user_text: str,
     semantic_index: SkillVectorIndex | None = None,
+    reranker: SkillReranker | None = None,
     llm=None,
     semantic_threshold: float = 0.72,
     semantic_top_k: int = 3,
+    rerank_threshold: float | None = None,
+    rerank_top_k: int | None = None,
     llm_retry_count: int = 1,
 ) -> list[str]:
     """Route skills through regex, semantic retrieval, then optional LLM judgment."""
@@ -471,7 +596,47 @@ async def route_skill_names(
             candidate_summary,
             semantic_threshold,
         )
-        if semantic_candidates and semantic_candidates[0].score >= semantic_threshold:
+        selection_threshold = semantic_threshold
+        if reranker is not None and semantic_candidates:
+            effective_rerank_top_k = (
+                len(semantic_candidates)
+                if rerank_top_k is None or rerank_top_k <= 0
+                else min(rerank_top_k, len(semantic_candidates))
+            )
+            effective_rerank_threshold = (
+                rerank_threshold if rerank_threshold is not None else semantic_threshold
+            )
+            logger.info(
+                "Skill routing rerank stage started: top_k=%s threshold=%.4f input_candidates=%s",
+                effective_rerank_top_k,
+                effective_rerank_threshold,
+                _semantic_candidate_summary(semantic_candidates),
+            )
+            try:
+                semantic_candidates = await _rerank_semantic_candidates(
+                    reranker,
+                    user_text,
+                    semantic_candidates,
+                    rerank_top_k=rerank_top_k,
+                )
+                selection_threshold = effective_rerank_threshold
+                logger.info(
+                    "Skill routing rerank stage completed: output_candidates=%s threshold=%.4f",
+                    _semantic_candidate_summary(semantic_candidates),
+                    selection_threshold,
+                )
+            except RerankUnavailableError as exc:
+                logger.warning(
+                    "Skill routing rerank stage unavailable: reason=%s input_candidates=%s",
+                    exc,
+                    _semantic_candidate_summary(semantic_candidates),
+                )
+            except Exception:
+                logger.exception(
+                    "Skill routing rerank stage failed: input_candidates=%s",
+                    _semantic_candidate_summary(semantic_candidates),
+                )
+        if semantic_candidates and semantic_candidates[0].score >= selection_threshold:
             logger.info(
                 "Skill routing semantic stage selected=%s score=%.4f",
                 semantic_candidates[0].name,
@@ -483,7 +648,7 @@ async def route_skill_names(
                 "Skill routing semantic top candidate below threshold: top=%s score=%.4f threshold=%.4f",
                 semantic_candidates[0].name,
                 semantic_candidates[0].score,
-                semantic_threshold,
+                selection_threshold,
             )
     elif semantic_index is None:
         logger.info("Skill routing semantic stage skipped: no semantic index")
@@ -511,6 +676,23 @@ def _semantic_candidate_summary(candidates: list[SkillSemanticCandidate]) -> str
     if not candidates:
         return "none"
     return ", ".join(f"{candidate.name}:{candidate.score:.4f}" for candidate in candidates)
+
+
+async def _rerank_semantic_candidates(
+    reranker: SkillReranker,
+    query: str,
+    candidates: list[SkillSemanticCandidate],
+    *,
+    rerank_top_k: int | None,
+) -> list[SkillSemanticCandidate]:
+    if rerank_top_k is None or rerank_top_k <= 0:
+        candidates_to_rerank = candidates
+        untouched_candidates: list[SkillSemanticCandidate] = []
+    else:
+        candidates_to_rerank = candidates[:rerank_top_k]
+        untouched_candidates = candidates[rerank_top_k:]
+    reranked = await reranker.rerank(query, candidates_to_rerank)
+    return [*reranked, *untouched_candidates]
 
 
 def build_system_prompt(
@@ -704,6 +886,62 @@ def _trigger_match(trigger: str, normalized_text: str) -> bool:
 def _skill_semantic_document(skill) -> str:
     triggers = ", ".join(skill.triggers)
     return f"{skill.name}\n{skill.description}\n{triggers}".strip()
+
+
+def _rerank_pair_document(query: str, candidate: SkillSemanticCandidate) -> str:
+    return (
+        f"query: {query.strip()}\n"
+        f"passage: {candidate.name}\n{candidate.description}".strip()
+    )
+
+
+def _extract_rerank_score(payload: dict) -> float:
+    score = _find_numeric_rerank_score(payload)
+    if score is None:
+        raise RuntimeError("Ollama rerank response did not include a numeric score")
+    if 0.0 <= score <= 1.0:
+        return score
+    return 1.0 / (1.0 + math.exp(-score))
+
+
+def _find_numeric_rerank_score(value) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        for key in ("score", "relevance_score", "logit"):
+            found = _find_numeric_rerank_score(value.get(key))
+            if found is not None:
+                return found
+        for key in ("embedding", "embeddings", "data", "results", "result"):
+            found = _find_numeric_rerank_score(value.get(key))
+            if found is not None:
+                return found
+    if isinstance(value, list):
+        if not value:
+            return None
+        first = value[0]
+        if isinstance(first, list):
+            return _find_numeric_rerank_score(first)
+        return _find_numeric_rerank_score(first)
+    return None
+
+
+def _find_ollama_model_info(payload: dict, model: str) -> dict | None:
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        return None
+    expected = _normalize_ollama_model_name(model)
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        names = [item.get("name"), item.get("model")]
+        if any(_normalize_ollama_model_name(str(name)) == expected for name in names if name):
+            return item
+    return None
+
+
+def _normalize_ollama_model_name(model: str) -> str:
+    return model.removesuffix(":latest")
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:

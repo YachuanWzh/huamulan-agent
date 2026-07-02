@@ -107,6 +107,22 @@ class Settings(BaseSettings):
         alias="SKILL_ROUTING_SIMILARITY_THRESHOLD",
     )
     skill_routing_top_k: int = Field(default=3, alias="SKILL_ROUTING_TOP_K")
+    skill_routing_rerank_enabled: bool = Field(
+        default=False,
+        alias="SKILL_ROUTING_RERANK_ENABLED",
+    )
+    skill_routing_rerank_model: str = Field(
+        default="qllama/bge-reranker-v2-m3",
+        alias="SKILL_ROUTING_RERANK_MODEL",
+    )
+    skill_routing_rerank_threshold: float = Field(
+        default=0.72,
+        alias="SKILL_ROUTING_RERANK_THRESHOLD",
+    )
+    skill_routing_rerank_top_k: int = Field(
+        default=3,
+        alias="SKILL_ROUTING_RERANK_TOP_K",
+    )
     skill_routing_llm_retry_count: int = Field(
         default=1,
         alias="SKILL_ROUTING_LLM_RETRY_COUNT",

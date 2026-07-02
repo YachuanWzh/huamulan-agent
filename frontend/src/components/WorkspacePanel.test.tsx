@@ -97,12 +97,12 @@ describe('WorkspacePanel', () => {
     render(<WorkspacePanel panel="audit" threadId="t1" />)
 
     expect(await screen.findByText('120')).toBeInTheDocument()
-    expect(screen.getByText(/Total Tokens/i)).toBeInTheDocument()
+    expect(screen.getByText(/Token 总量/i)).toBeInTheDocument()
     expect(screen.getByText(/Prompt 80 \/ Completion 40/i)).toBeInTheDocument()
-    expect(screen.getByText(/lookup retry chain/i)).toBeInTheDocument()
-    expect(screen.getByText(/Attempt 1 failed/i)).toBeInTheDocument()
-    expect(screen.getByText(/Attempt 2 failed/i)).toBeInTheDocument()
-    expect(screen.getByText(/Attempt 3 completed/i)).toBeInTheDocument()
+    expect(screen.getByText(/lookup 重试链/i)).toBeInTheDocument()
+    expect(screen.getByText(/第 1 次失败/i)).toBeInTheDocument()
+    expect(screen.getByText(/第 2 次失败/i)).toBeInTheDocument()
+    expect(screen.getByText(/第 3 次完成/i)).toBeInTheDocument()
   })
 
   it('uses the main workspace for execution audit lookup', async () => {
@@ -125,8 +125,8 @@ describe('WorkspacePanel', () => {
     await waitFor(() => {
       expect(mockApi.getExecutionSummary).toHaveBeenCalledWith('t1')
       expect(mockApi.listExecutionLogs).toHaveBeenCalledWith('t1')
-      expect(screen.getByRole('region', { name: /operations workspace/i })).toBeInTheDocument()
-      expect(screen.getByText(/no execution logs for this thread/i)).toBeInTheDocument()
+      expect(screen.getByRole('region', { name: /行军案台/i })).toBeInTheDocument()
+      expect(screen.getByText(/当前军令暂无执行日志/i)).toBeInTheDocument()
     })
   })
 
@@ -155,7 +155,7 @@ describe('WorkspacePanel', () => {
       />,
     )
 
-    await userEvent.click(await screen.findByRole('button', { name: /replay checkpoint 1/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /回放检查点 1/i }))
 
     expect(mockApi.replay).toHaveBeenCalledWith('t1')
     expect(onReplayState).toHaveBeenCalledWith(

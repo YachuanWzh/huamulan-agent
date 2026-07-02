@@ -10,7 +10,7 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
   const [decisions, setDecisions] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(approvals.map((approval) => [approval.approval_id, true])),
   )
-  const title = `${approvals.length} tool approval${approvals.length === 1 ? '' : 's'} required`
+  const title = `需要审批 ${approvals.length} 个工具调用`
   const submitDecisions = useMemo(
     () =>
       approvals.map((approval) => ({
@@ -38,10 +38,10 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
       </div>
       <div className="approval-batch-toolbar">
         <button className="btn-approve" onClick={() => setAll(true)}>
-          Approve All
+          全部批准
         </button>
         <button className="btn-deny" onClick={() => setAll(false)}>
-          Deny All
+          全部拒绝
         </button>
       </div>
       <div className="approval-batch-list">
@@ -56,7 +56,7 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
               <div className="approval-batch-item-header">
                 <span className="tool-name">{approval.name}</span>
                 <span className={`approval-decision ${approved ? 'approved' : 'denied'}`}>
-                  {approved ? 'Approved' : 'Denied'}
+                  {approved ? '已批准' : '已拒绝'}
                 </span>
               </div>
               <pre className="tool-args">{argsDisplay}</pre>
@@ -64,16 +64,16 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
                 <button
                   className="btn-approve"
                   onClick={() => setOne(approval.approval_id, true)}
-                  aria-label={`Approve ${approval.name}`}
+                  aria-label={`批准 ${approval.name}`}
                 >
-                  Approve
+                  批准
                 </button>
                 <button
                   className="btn-deny"
                   onClick={() => setOne(approval.approval_id, false)}
-                  aria-label={`Deny ${approval.name}`}
+                  aria-label={`拒绝 ${approval.name}`}
                 >
-                  Deny
+                  拒绝
                 </button>
               </div>
             </div>
@@ -82,7 +82,7 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
       </div>
       <div className="approval-actions approval-batch-submit">
         <button className="btn-approve" onClick={() => onSubmit(submitDecisions)}>
-          Submit Approvals
+          提交审批
         </button>
       </div>
     </div>

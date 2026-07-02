@@ -31,18 +31,18 @@ export function MessageInput({ onSend, onNewConversation, disabled }: Props) {
         disabled={disabled}
         type="button"
       >
-        New Conversation
+        重整行装
       </button>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Type your message..."
+        placeholder="列阵输入任务..."
         disabled={disabled}
         rows={1}
       />
       <button onClick={handleSend} disabled={disabled || !text.trim()} type="button">
-        Send
+        出发
       </button>
     </div>
   )

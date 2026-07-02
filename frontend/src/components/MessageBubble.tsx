@@ -19,9 +19,9 @@ interface Props {
 }
 
 const roleLabels: Record<Message['role'], string> = {
-  user: 'You',
-  assistant: 'Assistant',
-  tool_call: 'Tool Call',
+  user: '你',
+  assistant: '木兰',
+  tool_call: '工具调用',
 }
 
 const toolResultPreview = (content: string) => {
@@ -54,12 +54,12 @@ export function MessageBubble({
         <span className="role-label">{roleLabels[role]}</span>
         {role === 'tool_call' && approvalStatus && (
           <span className={`badge badge-${approvalStatus}`}>
-            {approvalStatus === 'pending' && 'Pending'}
-            {approvalStatus === 'approved' && 'Approved'}
-            {approvalStatus === 'denied' && 'Denied'}
+            {approvalStatus === 'pending' && '待审批'}
+            {approvalStatus === 'approved' && '已批准'}
+            {approvalStatus === 'denied' && '已拒绝'}
           </span>
         )}
-        {streaming && <span className="streaming-badge">typing...</span>}
+        {streaming && <span className="streaming-badge">生成中...</span>}
       </div>
       {role === 'assistant' && reasoning && (
         <div className={`reasoning-card ${reasoningCollapsed ? 'collapsed' : ''}`}>
@@ -69,9 +69,9 @@ export function MessageBubble({
             onClick={() => onToggleReasoning?.(id)}
             aria-expanded={!reasoningCollapsed}
           >
-            <span>{reasoningStreaming ? 'Thinking' : 'Completed'}</span>
+            <span>{reasoningStreaming ? '思考中' : '已完成'}</span>
             <span className="reasoning-toggle">
-              {reasoningCollapsed ? 'Show' : 'Hide'}
+              {reasoningCollapsed ? '展开' : '收起'}
             </span>
           </button>
           {!reasoningCollapsed && (
@@ -87,9 +87,9 @@ export function MessageBubble({
             onClick={() => onToggleCompacting?.(id)}
             aria-expanded={!compactingCollapsed}
           >
-            <span>{compactingStreaming ? 'Compacting' : 'Compacted'}</span>
+            <span>{compactingStreaming ? '压缩上下文中' : '上下文已压缩'}</span>
             <span className="reasoning-toggle">
-              {compactingCollapsed ? 'Show' : 'Hide'}
+              {compactingCollapsed ? '展开' : '收起'}
             </span>
           </button>
           {!compactingCollapsed && (
@@ -109,7 +109,7 @@ export function MessageBubble({
             <span className="tool-result-title">tool_result</span>
             <span className="tool-result-preview">{toolResultPreview(content)}</span>
             <span className="tool-result-toggle">
-              {toolResultExpanded ? 'Hide' : 'Show'}
+              {toolResultExpanded ? '收起' : '展开'}
             </span>
           </button>
           {toolResultExpanded && (

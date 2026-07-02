@@ -25,8 +25,8 @@ describe('ToolApprovalCard', () => {
     render(
       <ToolApprovalCard approval={approval} onApprove={vi.fn()} onDeny={vi.fn()} />,
     )
-    expect(screen.getByRole('button', { name: /approve/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /deny/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /批准/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /拒绝/i })).toBeInTheDocument()
   })
 
   it('calls onApprove with approval_id when approve clicked', async () => {
@@ -36,7 +36,7 @@ describe('ToolApprovalCard', () => {
       <ToolApprovalCard approval={approval} onApprove={onApprove} onDeny={vi.fn()} />,
     )
 
-    await user.click(screen.getByRole('button', { name: /approve/i }))
+    await user.click(screen.getByRole('button', { name: /批准/i }))
     expect(onApprove).toHaveBeenCalledWith('a1')
   })
 
@@ -47,7 +47,7 @@ describe('ToolApprovalCard', () => {
       <ToolApprovalCard approval={approval} onApprove={vi.fn()} onDeny={onDeny} />,
     )
 
-    await user.click(screen.getByRole('button', { name: /deny/i }))
+    await user.click(screen.getByRole('button', { name: /拒绝/i }))
     expect(onDeny).toHaveBeenCalledWith('a1')
   })
 

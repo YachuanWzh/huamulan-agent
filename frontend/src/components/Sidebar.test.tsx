@@ -37,10 +37,10 @@ describe('Sidebar', () => {
     mockApi.listSkills.mockResolvedValue([])
     render(<Sidebar threadId="t1" />)
     expect(screen.getByTestId('sidebar-shell')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /skills/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /history/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /checkpoint/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /audit/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /军械/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /军报/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /驿站/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /校阅/i })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /tool errors/i })).not.toBeInTheDocument()
   })
 
@@ -53,9 +53,9 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
 
-    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
-    await user.click(screen.getByRole('tab', { name: /audit/i }))
-    await user.click(screen.getByRole('tab', { name: /skills/i }))
+    await user.click(screen.getByRole('tab', { name: /驿站/i }))
+    await user.click(screen.getByRole('tab', { name: /校阅/i }))
+    await user.click(screen.getByRole('tab', { name: /军械/i }))
 
     expect(onPanelChange).toHaveBeenNthCalledWith(1, 'checkpoint')
     expect(onPanelChange).toHaveBeenNthCalledWith(2, 'audit')
@@ -94,10 +94,10 @@ describe('Sidebar', () => {
     render(<Sidebar threadId="t1" />)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /reload/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /整备/i })).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: /reload/i }))
+    await user.click(screen.getByRole('button', { name: /整备/i }))
 
     await waitFor(() => {
       expect(mockApi.reloadSkills).toHaveBeenCalled()
@@ -111,7 +111,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
 
-    await user.click(screen.getByRole('tab', { name: /checkpoint/i }))
+    await user.click(screen.getByRole('tab', { name: /驿站/i }))
 
     expect(onPanelChange).toHaveBeenCalledWith('checkpoint')
     expect(mockApi.replay).not.toHaveBeenCalledWith('t1')
@@ -126,7 +126,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="t1" onPanelChange={onPanelChange} />)
 
-    await user.click(screen.getByRole('tab', { name: /audit/i }))
+    await user.click(screen.getByRole('tab', { name: /校阅/i }))
 
     expect(onPanelChange).toHaveBeenCalledWith('audit')
     expect(mockApi.listAuditEvents).not.toHaveBeenCalledWith('t1')
@@ -164,7 +164,7 @@ describe('Sidebar', () => {
       />,
     )
 
-    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(screen.getByRole('tab', { name: /军报/i }))
     expect(await screen.findByText('修复首次发送消息丢失')).toBeInTheDocument()
     expect(screen.getByText('thread-2')).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: /open session thread-2/i }))
@@ -210,7 +210,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-1" onReplayState={onReplayState} />)
 
-    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(screen.getByRole('tab', { name: /军报/i }))
     await user.click(await screen.findByRole('button', { name: /open session thread-2/i }))
 
     expect(onReplayState).toHaveBeenCalledWith(
@@ -240,7 +240,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-1" />)
 
-    await user.click(screen.getByRole('tab', { name: /history/i }))
+    await user.click(screen.getByRole('tab', { name: /军报/i }))
     await user.click(await screen.findByRole('button', { name: /delete session thread-2/i }))
 
     await waitFor(() => {
@@ -265,12 +265,12 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-2" onThreadCleared={onThreadCleared} />)
 
-    await user.click(screen.getByRole('tab', { name: /history/i }))
-    await user.click(await screen.findByRole('button', { name: /clear history/i }))
+    await user.click(screen.getByRole('tab', { name: /军报/i }))
+    await user.click(await screen.findByRole('button', { name: /清空军报/i }))
 
     await waitFor(() => {
       expect(mockApi.clearThreads).toHaveBeenCalled()
-      expect(screen.getByText(/no conversation history/i)).toBeInTheDocument()
+      expect(screen.getByText(/暂无军报/i)).toBeInTheDocument()
       expect(onThreadCleared).toHaveBeenCalledOnce()
     })
   })
