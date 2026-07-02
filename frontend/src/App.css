@@ -1507,25 +1507,55 @@ button {
   font-weight: 850;
 }
 
-.stage-safety {
-  border-left-color: var(--color-danger);
+/* failed stage chips – red tint */
+.stage-chip:not(.stage-passed) {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
-.stage-routing {
-  border-left-color: var(--color-info);
+.stage-chip.stage-passed {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
 }
 
-.stage-tool {
-  border-left-color: var(--color-warning);
+/* check tag colours */
+.evaluation-checks span[data-status="fail"] {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
 }
 
+.evaluation-checks span[data-status="pass"] {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+/* ---- evaluation case stage colours ---- */
+.stage-safety,
+.stage-routing,
+.stage-tool,
 .stage-answer,
-.stage-prompt_or_reasoning {
-  border-left-color: var(--color-saddle-leather);
+.stage-prompt_or_reasoning,
+.stage-judge_unavailable,
+.stage-unknown,
+.evaluation-case:not(.stage-passed) {
+  border-left-color: var(--color-danger);
 }
 
 .stage-passed {
   border-left-color: var(--color-success);
+}
+
+/* stronger visual distinction for failed cases */
+.evaluation-case:not(.stage-passed) {
+  background: #fef2f2;
+}
+
+.evaluation-case.stage-passed {
+  background: #f0fdf4;
 }
 
 .evaluation-case-list {

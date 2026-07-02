@@ -677,7 +677,10 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
               )}
               <div className="evaluation-checks">
                 {detail.checks.map((check) => (
-                  <span key={`${detail.case_id}-${check.stage}-${check.name}`}>
+                  <span
+                    key={`${detail.case_id}-${check.stage}-${check.name}`}
+                    data-status={check.passed ? 'pass' : 'fail'}
+                  >
                     {check.passed ? 'PASS' : 'FAIL'} {check.stage}.{check.name}
                     {check.reason ? `: ${check.reason}` : ''}
                   </span>
