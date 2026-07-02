@@ -554,6 +554,35 @@ describe('api', () => {
           selected_skills: ['resolve-time'],
           tool_completed: false,
           tool_failed: false,
+          detail: {
+            case_id: 'rt-001',
+            mode: 'quick',
+            query: 'what time is it',
+            turns: [],
+            expected_skills: ['resolve-time'],
+            selected_skills: ['resolve-time'],
+            expected_tool_calls: [],
+            actual_tool_calls: [],
+            final_answer: '',
+            checks: [
+              {
+                name: 'skill_routing',
+                stage: 'routing',
+                passed: true,
+                expected: ['resolve-time'],
+                actual: ['resolve-time'],
+                reason: '',
+              },
+            ],
+            diagnosis: {
+              stage: 'passed',
+              severity: 'info',
+              summary: '所有确定性检查通过',
+              signals: [],
+              recommendation: '无需处理',
+            },
+            log_summary: [],
+          },
         },
         {
           type: 'done',
@@ -563,6 +592,31 @@ describe('api', () => {
           completed: 2,
           percent: 100,
           results: [],
+          report: {
+            skills: [],
+            case_details: [
+              {
+                case_id: 'rt-001',
+                mode: 'quick',
+                query: 'what time is it',
+                turns: [],
+                expected_skills: ['resolve-time'],
+                selected_skills: ['resolve-time'],
+                expected_tool_calls: [],
+                actual_tool_calls: [],
+                final_answer: '',
+                checks: [],
+                diagnosis: {
+                  stage: 'passed',
+                  severity: 'info',
+                  summary: '所有确定性检查通过',
+                  signals: [],
+                  recommendation: '无需处理',
+                },
+                log_summary: [],
+              },
+            ],
+          },
         },
       ]
       server.use(
@@ -586,6 +640,9 @@ describe('api', () => {
       }
 
       expect(results).toEqual(events)
+      expect(results[1]!.type === 'case_progress' && results[1]!.detail.case_id).toBe(
+        'rt-001',
+      )
     })
 
     it('resets persisted skill evaluations', async () => {

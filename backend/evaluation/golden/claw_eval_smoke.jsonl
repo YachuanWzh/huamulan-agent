@@ -1,0 +1,1 @@
+{"id":"e2e-weather-006","category":"weather_lookup","difficulty":"easy","query":"我周末去上海玩，帮我看未来3天天气预报。","expected_skills":["weather"],"expected_tool_calls":[{"tool":"get_forecast","args_contains":{"city":"上海"}}],"expected_answer_contains":["上海"],"judge_rubric":"应调用未来天气预报工具，回答需要覆盖未来三天趋势。"}

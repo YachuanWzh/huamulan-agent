@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from personal_assistant.skills import SkillRegistry
-from personal_assistant.skills.evaluation.models import GoldenSkillCase
+from personal_assistant.skills.evaluation.models import AgentEvaluationCase
 from personal_assistant.skills.evaluation.report import (
     evaluate_skill_registry,
     render_markdown_report,
@@ -37,13 +37,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _load_golden(path: Path) -> list[GoldenSkillCase]:
+def _load_golden(path: Path) -> list[AgentEvaluationCase]:
     cases = []
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        cases.append(GoldenSkillCase.model_validate(json.loads(stripped)))
+        cases.append(AgentEvaluationCase.model_validate(json.loads(stripped)))
     return cases
 
 

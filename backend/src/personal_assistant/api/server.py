@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.agent import warmup_skill_routing
 from personal_assistant.agent.harness import AgentHarness
+from personal_assistant.agent.harness import scan_tool_guard
+from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import route_skill_names
 from personal_assistant.api.schemas import (
     ApprovalBatchDecision,
@@ -22,8 +24,10 @@ from personal_assistant.api.schemas import (
     DeleteThreadResponse,
     ExecutionLog,
     ExecutionSummary,
+    LLMConfig,
     ReplayResponse,
     SkillInfo,
+    SkillEvaluationDataset,
     SkillEvaluationSummary,
     SkillEvaluationResetResponse,
     SkillEvaluationRunRequest,
@@ -39,19 +43,25 @@ from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.skills.evaluation.models import (
+    AgentEvaluationCase,
     RoutingMetrics,
     RuntimeSkillMetrics,
     SkillEvaluationReport,
     SkillEvaluationResult,
 )
 from personal_assistant.skills.evaluation.report import (
-    _score_components,
     _weighted_score,
     score_static_metrics,
 )
 from personal_assistant.skills.evaluation.models import GoldenSkillCase
-from personal_assistant.skills.evaluation.offline import evaluate_routing_cases
+from personal_assistant.skills.evaluation.diagnostics import build_case_evaluation_detail
+from personal_assistant.skills.evaluation.judge import evaluate_case_with_judge
+from personal_assistant.skills.evaluation.quality import (
+    evaluate_answer_cases,
+    evaluate_tool_cases,
+)
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
+from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
 from personal_assistant.tracing import build_langfuse_callback
 
@@ -316,6 +326,11 @@ async def latest_skill_evaluations() -> list[SkillEvaluationSnapshot]:
     return await memory.list_latest_skill_evaluations()
 
 
+@app.get("/api/skills/evaluation/golden-datasets", response_model=list[SkillEvaluationDataset])
+async def list_skill_evaluation_datasets() -> list[SkillEvaluationDataset]:
+    return _list_golden_datasets()
+
+
 @app.delete("/api/skills/evaluation", response_model=SkillEvaluationResetResponse)
 async def reset_skill_evaluations() -> SkillEvaluationResetResponse:
     return await _reset_skill_evaluations(memory)
@@ -345,6 +360,10 @@ async def run_skill_evaluation_stream(
             path,
             mode=request.evaluation_mode,
             harness=harness,
+            judge_client=_build_evaluation_judge(settings)
+            if request.evaluation_mode == "e2e"
+            else None,
+            judge_model=settings.evaluation_judge_model,
         ):
             yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
 
@@ -383,6 +402,8 @@ async def _iter_skill_evaluation_events(
     *,
     mode: str = "quick",
     harness: AgentHarness | None = None,
+    judge_client=None,
+    judge_model: str | None = None,
 ):
     path = _resolve_golden_path(golden_path)
     cases = _load_golden_cases(path)
@@ -392,6 +413,7 @@ async def _iter_skill_evaluation_events(
     yield {"type": "started", "mode": mode, "total": total, "completed": 0, "source": source}
 
     case_results = []
+    case_details = []
     run_id = f"skill-eval-{mode}-{uuid4().hex[:8]}"
     for index, case in enumerate(cases, start=1):
         if mode == "e2e":
@@ -401,6 +423,16 @@ async def _iter_skill_evaluation_events(
         else:
             outcome = await _run_quick_case(registry, case)
         case_results.append(outcome)
+        judge = None
+        if mode == "e2e" and judge_client is not None:
+            judge = await evaluate_case_with_judge(
+                case,
+                outcome,
+                judge_client=judge_client,
+                model=judge_model or settings.evaluation_judge_model,
+            )
+        detail = build_case_evaluation_detail(case, outcome, mode=mode, judge=judge)
+        case_details.append(detail)
         yield {
             "type": "case_progress",
             "mode": mode,
@@ -413,6 +445,7 @@ async def _iter_skill_evaluation_events(
             "selected_skills": outcome["selected_skills"],
             "tool_failed": outcome["tool_failed"],
             "tool_completed": outcome["tool_completed"],
+            "detail": detail.model_dump(mode="json"),
         }
 
     results: list[SkillEvaluationResult] = []
@@ -436,6 +469,10 @@ async def _iter_skill_evaluation_events(
     report = SkillEvaluationReport(
         skills=results,
         routing=RoutingMetrics(total_cases=len(cases)),
+        safety=evaluate_safety_cases(cases, case_results) if mode == "e2e" else None,
+        tools=evaluate_tool_cases(cases, case_results) if mode == "e2e" else None,
+        answers=evaluate_answer_cases(cases, case_results) if mode == "e2e" else None,
+        case_details=case_details,
     )
     await memory.record_skill_evaluation_results(report, source=source)
     latest = await memory.list_latest_skill_evaluations()
@@ -447,11 +484,26 @@ async def _iter_skill_evaluation_events(
         "completed": total,
         "percent": 100,
         "results": [item.model_dump(mode="json") for item in latest],
+        "report": report.model_dump(mode="json"),
     }
 
 
+def _build_evaluation_judge(settings):
+    if not settings.evaluation_judge_enabled:
+        return None
+    return build_llm(
+        settings,
+        LLMConfig(
+            base_url=settings.evaluation_judge_base_url or settings.llm_base_url,
+            api_key=settings.evaluation_judge_api_key or settings.llm_api_key,
+            model=settings.evaluation_judge_model,
+            temperature=0,
+        ),
+    )
+
+
 async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dict:
-    selected = await route_skill_names(registry, case.query)
+    selected = await route_skill_names(registry, _case_query(case))
     return {
         "case": case,
         "selected_skills": selected,
@@ -462,12 +514,20 @@ async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dic
 
 async def _run_e2e_case(harness: AgentHarness, case: GoldenSkillCase, run_id: str) -> dict:
     thread_id = f"{run_id}-{case.id}"
-    await harness.run_user_turn(thread_id, case.query)
+    response = None
+    for message in _case_messages(case):
+        response = await harness.run_user_turn(thread_id, message)
+        response = await _auto_resolve_eval_approvals(harness, thread_id, response)
     logs = await harness.list_execution_logs(thread_id, limit=500)
     selected = _selected_skills_from_logs(logs)
+    final_answer = _final_answer_from_response(response) or _final_answer_from_logs(logs)
     return {
         "case": case,
         "selected_skills": selected,
+        "logs": logs,
+        "final_answer": final_answer,
+        "tool_names": _tool_names_from_logs(logs),
+        "tool_calls": _tool_calls_from_logs(logs),
         "tool_completed": any(
             _log_value(log, "event_type") == "tool" and _log_value(log, "status") == "completed"
             for log in logs
@@ -478,6 +538,99 @@ async def _run_e2e_case(harness: AgentHarness, case: GoldenSkillCase, run_id: st
             for log in logs
         ),
     }
+
+
+async def _auto_resolve_eval_approvals(harness: AgentHarness, thread_id: str, response):
+    current = response
+    resume = getattr(harness, "resume_after_approval", None)
+    if not callable(resume):
+        return current
+
+    guard = 0
+    while _log_value(current, "status") == "requires_approval":
+        approvals = _log_value(current, "approvals") or []
+        if not approvals:
+            break
+        for approval in approvals:
+            approval_id = _log_value(approval, "approval_id")
+            if not isinstance(approval_id, str):
+                continue
+            current = await resume(
+                thread_id,
+                approval_id,
+                _eval_approval_is_safe(approval),
+            )
+        guard += 1
+        if guard >= 20:
+            break
+    return current
+
+
+def _eval_approval_is_safe(approval) -> bool:
+    tool_name = _log_value(approval, "name")
+    args = _log_value(approval, "args") or {}
+    if not isinstance(tool_name, str):
+        return False
+    return scan_tool_guard(tool_name, args) is None
+
+
+def _case_messages(case: GoldenSkillCase) -> list[str]:
+    turns = _log_value(case, "turns")
+    if isinstance(turns, list) and turns:
+        return [str(turn) for turn in turns]
+    return [_case_query(case)]
+
+
+def _case_query(case: GoldenSkillCase) -> str:
+    query = _log_value(case, "query")
+    if isinstance(query, str) and query:
+        return query
+    turns = _log_value(case, "turns")
+    if isinstance(turns, list) and turns:
+        return "\n".join(str(turn) for turn in turns)
+    return ""
+
+
+def _final_answer_from_response(response) -> str:
+    message = _log_value(response, "message")
+    return message if isinstance(message, str) else ""
+
+
+def _final_answer_from_logs(logs) -> str:
+    for log in reversed(list(logs)):
+        output = _log_value(log, "output") or {}
+        if isinstance(output, dict):
+            for key in ("message", "content", "answer"):
+                value = output.get(key)
+                if isinstance(value, str):
+                    return value
+    return ""
+
+
+def _tool_names_from_logs(logs) -> list[str]:
+    names = []
+    for log in logs:
+        if _log_value(log, "event_type") != "tool":
+            continue
+        name = _log_value(log, "name")
+        if isinstance(name, str):
+            names.append(name)
+    return names
+
+
+def _tool_calls_from_logs(logs) -> list[dict]:
+    calls = []
+    for log in logs:
+        if _log_value(log, "event_type") != "tool":
+            continue
+        name = _log_value(log, "name")
+        if not isinstance(name, str):
+            continue
+        args = _log_value(log, "input") or {}
+        if not isinstance(args, dict):
+            args = {}
+        calls.append({"name": name, "args": args})
+    return calls
 
 
 def _selected_skills_from_logs(logs) -> list[str]:
@@ -564,6 +717,28 @@ def _log_value(log, name: str):
     return getattr(log, name, None)
 
 
+def _golden_dataset_root() -> Path:
+    return Path(__file__).resolve().parents[3] / "evaluation" / "golden"
+
+
+def _list_golden_datasets(
+    *,
+    golden_root: Path | None = None,
+) -> list[SkillEvaluationDataset]:
+    root = golden_root or _golden_dataset_root()
+    if not root.exists():
+        return []
+    return [
+        SkillEvaluationDataset(
+            name=path.stem,
+            path=path.stem,
+            label=path.stem.replace("_", " "),
+        )
+        for path in sorted(root.glob("*.jsonl"), key=lambda item: item.name)
+        if path.is_file()
+    ]
+
+
 def _resolve_golden_path(
     golden_path: str | Path | None,
     *,
@@ -574,7 +749,11 @@ def _resolve_golden_path(
 
     raw_path = Path(golden_path).expanduser()
     backend_root = Path(__file__).resolve().parents[3]
-    roots = search_roots or [Path.cwd(), backend_root]
+    roots = search_roots or [
+        Path.cwd(),
+        backend_root,
+        _golden_dataset_root(),
+    ]
     candidates = []
     if raw_path.is_absolute():
         candidates.append(raw_path)
@@ -595,13 +774,13 @@ def _resolve_golden_path(
     raise HTTPException(status_code=404, detail=f"Golden dataset not found: {golden_path}")
 
 
-def _load_golden_cases(path: Path) -> list[GoldenSkillCase]:
+def _load_golden_cases(path: Path) -> list[AgentEvaluationCase]:
     cases = []
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        cases.append(GoldenSkillCase.model_validate(json.loads(stripped)))
+        cases.append(AgentEvaluationCase.model_validate(json.loads(stripped)))
     return cases
 
 

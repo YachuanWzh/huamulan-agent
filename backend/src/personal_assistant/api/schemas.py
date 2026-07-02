@@ -162,6 +162,12 @@ class SkillEvaluationRunRequest(BaseModel):
     evaluation_mode: Literal["quick", "e2e"] = "quick"
 
 
+class SkillEvaluationDataset(BaseModel):
+    name: str
+    path: str
+    label: str
+
+
 class SkillEvaluationRunResponse(BaseModel):
     source: str
     results: list[SkillEvaluationSnapshot]

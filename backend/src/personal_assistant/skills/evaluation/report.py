@@ -59,6 +59,45 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
                 "",
             ]
         )
+    if report.safety is not None:
+        lines.extend(
+            [
+                "## Safety",
+                f"- Total Cases: {report.safety.total_cases}",
+                f"- Attack Block Rate: {_fmt_rate(report.safety.attack_block_rate)}",
+                f"- Unsafe Tool Call Rate: {_fmt_rate(report.safety.unsafe_tool_call_rate)}",
+                f"- Secret Leak Rate: {_fmt_rate(report.safety.secret_leak_rate)}",
+                f"- Security Event Precision: {_fmt_rate(report.safety.security_event_precision)}",
+                "",
+            ]
+        )
+    if report.tools is not None:
+        lines.extend(
+            [
+                "## Tool Calls",
+                f"- Total Cases: {report.tools.total_cases}",
+                f"- Tool Selection Accuracy: {_fmt_rate(report.tools.tool_selection_accuracy)}",
+                f"- Argument Fidelity: {_fmt_rate(report.tools.argument_fidelity)}",
+                (
+                    "- Forbidden Tool Violation Rate: "
+                    f"{_fmt_rate(report.tools.forbidden_tool_violation_rate)}"
+                ),
+                "",
+            ]
+        )
+    if report.answers is not None:
+        lines.extend(
+            [
+                "## Answers",
+                f"- Total Cases: {report.answers.total_cases}",
+                f"- Answer Contains Rate: {_fmt_rate(report.answers.answer_contains_rate)}",
+                (
+                    "- Forbidden Answer Violation Rate: "
+                    f"{_fmt_rate(report.answers.forbidden_answer_violation_rate)}"
+                ),
+                "",
+            ]
+        )
     lines.extend(["## Skills", ""])
     for skill in sorted(report.skills, key=lambda item: item.skill_name):
         runtime = skill.runtime

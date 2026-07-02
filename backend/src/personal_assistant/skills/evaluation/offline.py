@@ -16,7 +16,7 @@ async def evaluate_routing_cases(
     false_positives = 0
 
     for case in cases:
-        selected = await route_skill_names(registry, case.query, **router_kwargs)
+        selected = await route_skill_names(registry, _case_query(case), **router_kwargs)
         expected_set = set(case.expected_skills)
         selected_set = set(selected)
         if expected_set:
@@ -36,3 +36,13 @@ async def evaluate_routing_cases(
         false_positive_rate=false_positives / negative_total if negative_total else None,
         parameter_extraction_fidelity=None,
     )
+
+
+def _case_query(case: GoldenSkillCase) -> str:
+    query = getattr(case, "query", None)
+    if isinstance(query, str) and query:
+        return query
+    turns = getattr(case, "turns", None)
+    if isinstance(turns, list) and turns:
+        return "\n".join(str(turn) for turn in turns)
+    return ""

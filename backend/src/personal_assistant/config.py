@@ -131,6 +131,22 @@ class Settings(BaseSettings):
         default=None,
         alias="SKILL_ROUTING_LLM_MODEL",
     )
+    evaluation_judge_enabled: bool = Field(
+        default=True,
+        alias="EVALUATION_JUDGE_ENABLED",
+    )
+    evaluation_judge_model: str = Field(
+        default="deepseek-v4-pro",
+        alias="EVALUATION_JUDGE_MODEL",
+    )
+    evaluation_judge_base_url: str | None = Field(
+        default=None,
+        alias="EVALUATION_JUDGE_BASE_URL",
+    )
+    evaluation_judge_api_key: str | None = Field(
+        default=None,
+        alias="EVALUATION_JUDGE_API_KEY",
+    )
 
     @field_validator("redis_url")
     @classmethod
@@ -157,6 +173,13 @@ class Settings(BaseSettings):
         if normalized not in {"memory", "qdrant"}:
             raise ValueError("SKILL_ROUTING_VECTOR_STORE must be memory or qdrant")
         return normalized
+
+    @field_validator("evaluation_judge_model")
+    @classmethod
+    def validate_evaluation_judge_model(cls, value: str) -> str:
+        if "flash" in value.lower():
+            raise ValueError("EVALUATION_JUDGE_MODEL must use a Pro model, not Flash")
+        return value
 
     @computed_field
     @property

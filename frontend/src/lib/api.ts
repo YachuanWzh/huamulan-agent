@@ -80,6 +80,12 @@ export interface SkillEvaluationRunRequest {
   evaluation_mode?: 'quick' | 'e2e'
 }
 
+export interface SkillEvaluationDataset {
+  name: string
+  path: string
+  label: string
+}
+
 export interface SkillEvaluationRunResponse {
   source: string
   results: SkillEvaluationSnapshot[]
@@ -107,6 +113,74 @@ export interface SkillEvaluationResult {
   score_components: Record<string, number>
 }
 
+export interface EvaluationCheck {
+  name: string
+  stage: string
+  passed: boolean
+  expected?: unknown
+  actual?: unknown
+  reason: string
+}
+
+export interface CaseDiagnosis {
+  stage: string
+  severity: string
+  summary: string
+  signals: string[]
+  recommendation: string
+}
+
+export interface JudgeEvaluation {
+  score?: number | null
+  passed?: boolean | null
+  failure_stage?: string | null
+  reason: string
+  evidence: string[]
+  recommendation: string
+  model: string
+  available: boolean
+}
+
+export interface CaseEvaluationDetail {
+  case_id: string
+  mode: 'quick' | 'e2e' | string
+  query: string
+  turns: string[]
+  expected_skills: string[]
+  selected_skills: string[]
+  expected_tool_calls: { tool: string; args_contains?: Record<string, unknown> }[]
+  actual_tool_calls: { name?: string; tool?: string; args?: Record<string, unknown> }[]
+  final_answer: string
+  checks: EvaluationCheck[]
+  diagnosis: CaseDiagnosis
+  judge?: JudgeEvaluation | null
+  log_summary: Record<string, unknown>[]
+}
+
+export interface SkillEvaluationReport {
+  skills: SkillEvaluationResult[]
+  routing?: Record<string, unknown> | null
+  safety?: {
+    total_cases: number
+    attack_block_rate?: number | null
+    unsafe_tool_call_rate?: number | null
+    secret_leak_rate?: number | null
+    security_event_precision?: number | null
+  } | null
+  tools?: {
+    total_cases: number
+    tool_selection_accuracy?: number | null
+    argument_fidelity?: number | null
+    forbidden_tool_violation_rate?: number | null
+  } | null
+  answers?: {
+    total_cases: number
+    answer_contains_rate?: number | null
+    forbidden_answer_violation_rate?: number | null
+  } | null
+  case_details?: CaseEvaluationDetail[]
+}
+
 export type SkillEvaluationStreamEvent =
   | {
       type: 'started'
@@ -128,6 +202,7 @@ export type SkillEvaluationStreamEvent =
       selected_skills: string[]
       tool_completed: boolean
       tool_failed: boolean
+      detail: CaseEvaluationDetail
     }
   | {
       type: 'done'
@@ -137,6 +212,7 @@ export type SkillEvaluationStreamEvent =
       completed: number
       percent: number
       results: SkillEvaluationSnapshot[]
+      report?: SkillEvaluationReport
     }
 
 export interface ReplayMessage {
@@ -435,6 +511,9 @@ export const api = {
 
   listSkillEvaluations: () =>
     request<SkillEvaluationSnapshot[]>('/api/skills/evaluation/latest'),
+
+  listSkillEvaluationDatasets: () =>
+    request<SkillEvaluationDataset[]>('/api/skills/evaluation/golden-datasets'),
 
   runSkillEvaluation: (body: SkillEvaluationRunRequest) =>
     request<SkillEvaluationRunResponse>('/api/skills/evaluation/run', {

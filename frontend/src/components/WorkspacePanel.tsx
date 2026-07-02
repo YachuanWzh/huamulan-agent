@@ -3,8 +3,11 @@ import {
   api,
   type ExecutionLog,
   type ExecutionSummary,
+  type CaseEvaluationDetail,
   type ReplayResponse,
   type ReplayState,
+  type SkillEvaluationDataset,
+  type SkillEvaluationReport,
   type SkillEvaluationSnapshot,
   type SkillEvaluationStreamEvent,
   type SkillInfo,
@@ -18,6 +21,14 @@ interface Props {
 }
 
 type AuditFilter = 'all' | 'llm' | 'tool' | 'tool_retry' | 'security' | 'approval'
+
+const CUSTOM_GOLDEN_DATASET = '__custom__'
+
+const FALLBACK_GOLDEN_DATASETS: SkillEvaluationDataset[] = [
+  { name: 'claw_eval_smoke', path: 'claw_eval_smoke', label: 'ClawEval smoke' },
+  { name: 'golden_dataset', path: 'golden_dataset', label: 'Golden dataset' },
+  { name: 'e2e_dateset', path: 'e2e_dateset', label: 'E2E dataset' },
+]
 
 const auditFilterLabels: Record<AuditFilter, string> = {
   all: '全部',
@@ -53,9 +64,14 @@ export function WorkspacePanel({
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('all')
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
-  const [goldenPath, setGoldenPath] = useState('')
+  const [goldenDatasets, setGoldenDatasets] = useState<SkillEvaluationDataset[]>(
+    FALLBACK_GOLDEN_DATASETS,
+  )
+  const [selectedGoldenPath, setSelectedGoldenPath] = useState('claw_eval_smoke')
+  const [customGoldenPath, setCustomGoldenPath] = useState('')
   const [evaluationRunning, setEvaluationRunning] = useState(false)
   const [evaluationResetting, setEvaluationResetting] = useState(false)
+  const [evaluationError, setEvaluationError] = useState<string | null>(null)
   const [evaluationProgress, setEvaluationProgress] = useState<{
     mode: 'quick' | 'e2e'
     source: string
@@ -63,6 +79,7 @@ export function WorkspacePanel({
     completed: number
     percent: number
   } | null>(null)
+  const [evaluationReport, setEvaluationReport] = useState<SkillEvaluationReport | null>(null)
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -109,12 +126,27 @@ export function WorkspacePanel({
     setSkillsLoading(false)
   }, [])
 
+  const loadGoldenDatasets = useCallback(async () => {
+    try {
+      const datasets = await api.listSkillEvaluationDatasets()
+      if (datasets.length > 0) {
+        setGoldenDatasets(datasets)
+      }
+    } catch {
+      setGoldenDatasets(FALLBACK_GOLDEN_DATASETS)
+    }
+  }, [])
+
   const runSkillEvaluation = async (mode: 'quick' | 'e2e') => {
-    const trimmedPath = goldenPath.trim()
+    const rawPath =
+      selectedGoldenPath === CUSTOM_GOLDEN_DATASET ? customGoldenPath : selectedGoldenPath
+    const trimmedPath = rawPath.trim()
     if (!trimmedPath) return
 
     setEvaluationRunning(true)
     setEvaluationProgress(null)
+    setEvaluationReport(null)
+    setEvaluationError(null)
     try {
       for await (const event of api.runSkillEvaluationStream({
         golden_path: trimmedPath,
@@ -122,8 +154,8 @@ export function WorkspacePanel({
       })) {
         applyEvaluationEvent(event)
       }
-    } catch {
-      // silently handle
+    } catch (error) {
+      setEvaluationError(formatEvaluationError(error))
     }
     setEvaluationRunning(false)
   }
@@ -138,6 +170,9 @@ export function WorkspacePanel({
     })
     if (event.type === 'done' && event.results.length > 0) {
       setSkills((prev) => mergeLatestSkillEvaluations(prev, event.results))
+    }
+    if (event.type === 'done' && event.report) {
+      setEvaluationReport(event.report)
     }
   }
 
@@ -158,8 +193,9 @@ export function WorkspacePanel({
   useEffect(() => {
     if (panel === 'skills') {
       loadSkills()
+      loadGoldenDatasets()
     }
-  }, [loadSkills, panel])
+  }, [loadGoldenDatasets, loadSkills, panel])
 
   useEffect(() => {
     if (panel === 'checkpoint') {
@@ -204,6 +240,9 @@ export function WorkspacePanel({
       ? executionLogs
       : executionLogs.filter((log) => log.event_type === auditFilter)
   const retryChains = buildRetryChains(executionLogs)
+  const selectedEvaluationPath =
+    selectedGoldenPath === CUSTOM_GOLDEN_DATASET ? customGoldenPath : selectedGoldenPath
+  const canRunEvaluation = selectedEvaluationPath.trim().length > 0
 
   return (
     <section className="workspace-panel" aria-label="行军案台">
@@ -214,30 +253,47 @@ export function WorkspacePanel({
               <h2>Skill Evaluation</h2>
               <p>盘点当前 Skill 的描述清晰度、代码规模、复杂度和器具配置。</p>
             </div>
-            <div>
-              <div className="workspace-actions">
+            <div className="skill-evaluation-controls">
+              <div className="skill-evaluation-fields">
                 <label className="skill-evaluation-runner">
-                  <span>Golden dataset path</span>
-                  <input
-                    aria-label="Golden dataset path"
-                    value={goldenPath}
-                    onChange={(event) => setGoldenPath(event.target.value)}
-                    placeholder="golden.jsonl"
-                  />
+                  <span>Golden dataset</span>
+                  <select
+                    aria-label="Golden dataset"
+                    value={selectedGoldenPath}
+                    onChange={(event) => setSelectedGoldenPath(event.target.value)}
+                  >
+                    {goldenDatasets.map((dataset) => (
+                      <option key={dataset.path} value={dataset.path}>
+                        {dataset.label}
+                      </option>
+                    ))}
+                    <option value={CUSTOM_GOLDEN_DATASET}>Custom path</option>
+                  </select>
                 </label>
+                {selectedGoldenPath === CUSTOM_GOLDEN_DATASET && (
+                  <label className="skill-evaluation-runner">
+                    <span>Custom dataset path</span>
+                    <input
+                      aria-label="Custom dataset path"
+                      value={customGoldenPath}
+                      onChange={(event) => setCustomGoldenPath(event.target.value)}
+                      placeholder="golden.jsonl"
+                    />
+                  </label>
+                )}
               </div>
-              <div className="workspace-actions">
+              <div className="workspace-actions skill-evaluation-buttons">
                 <button
                   type="button"
                   onClick={() => runSkillEvaluation('quick')}
-                  disabled={evaluationRunning || goldenPath.trim().length === 0}
+                  disabled={evaluationRunning || !canRunEvaluation}
                 >
                   快速巡检
                 </button>
                 <button
                   type="button"
                   onClick={() => runSkillEvaluation('e2e')}
-                  disabled={evaluationRunning || goldenPath.trim().length === 0}
+                  disabled={evaluationRunning || !canRunEvaluation}
                 >
                   实战测评
                 </button>
@@ -256,6 +312,11 @@ export function WorkspacePanel({
           </div>
 
           {skillsLoading && <div className="loading">加载中...</div>}
+          {evaluationError && (
+            <div className="workspace-error" role="alert">
+              {evaluationError}
+            </div>
+          )}
           {evaluationProgress && (
             <div className="skill-evaluation-progress">
               <div className="skill-evaluation-progress-label">
@@ -280,6 +341,24 @@ export function WorkspacePanel({
               <small>{evaluationProgress.source}</small>
             </div>
           )}
+
+          {evaluationReport && (
+            <section className="claw-eval-summary" aria-label="ClawEval summary">
+              <h3>ClawEval</h3>
+              <dl className="skill-evaluation-metrics">
+                {buildEvaluationSummary(evaluationReport).map((metric) => (
+                  <div key={metric.label}>
+                    <dt>{metric.label}</dt>
+                    <dd>{metric.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+
+          {evaluationReport?.case_details?.length ? (
+            <EvaluationDetails details={evaluationReport.case_details} />
+          ) : null}
 
           {!skillsLoading && skills.length === 0 && (
             <div className="workspace-empty">当前没有可评测的 Skill。</div>
@@ -530,6 +609,145 @@ function buildRetryChains(logs: ExecutionLog[]) {
 
 function formatPercent(value: number | undefined | null) {
   return `${Math.round((value ?? 0) * 100)}%`
+}
+
+function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
+  const failedCount = details.filter((detail) => detail.diagnosis.stage !== 'passed').length
+  const stageCounts = details.reduce<Record<string, number>>((counts, detail) => {
+    const stage = detail.diagnosis.stage || 'unknown'
+    counts[stage] = (counts[stage] ?? 0) + 1
+    return counts
+  }, {})
+
+  return (
+    <section className="evaluation-details" aria-label="Evaluation details">
+      <div className="evaluation-details-header">
+        <div>
+          <h3>Evaluation Details</h3>
+          <p>
+            {failedCount} failed / {details.length} cases
+          </p>
+        </div>
+        <div className="evaluation-stage-chips" aria-label="Failure stage summary">
+          {Object.entries(stageCounts).map(([stage, count]) => (
+            <span key={stage} className={`stage-chip stage-${stage}`}>
+              {stage} {count}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="evaluation-case-list">
+        {details.map((detail) => (
+          <details
+            key={detail.case_id}
+            className={`evaluation-case stage-${detail.diagnosis.stage}`}
+            open={detail.diagnosis.stage !== 'passed'}
+          >
+            <summary>
+              <span>{detail.case_id}</span>
+              <strong>{detail.diagnosis.stage}</strong>
+              {detail.judge?.available && (
+                <em>Judge {formatPercent(detail.judge.score)}</em>
+              )}
+            </summary>
+            <div className="evaluation-case-body">
+              <p>{detail.diagnosis.summary}</p>
+              <div className="evaluation-detail-grid">
+                <EvaluationJsonBlock
+                  label="Expected"
+                  value={{
+                    skills: detail.expected_skills,
+                    tool_calls: detail.expected_tool_calls,
+                  }}
+                />
+                <EvaluationJsonBlock
+                  label="Actual"
+                  value={{
+                    skills: detail.selected_skills,
+                    tool_calls: detail.actual_tool_calls,
+                  }}
+                />
+              </div>
+              {detail.final_answer && (
+                <div className="evaluation-answer">
+                  <strong>Final answer</strong>
+                  <p>{detail.final_answer}</p>
+                </div>
+              )}
+              <div className="evaluation-checks">
+                {detail.checks.map((check) => (
+                  <span key={`${detail.case_id}-${check.stage}-${check.name}`}>
+                    {check.passed ? 'PASS' : 'FAIL'} {check.stage}.{check.name}
+                    {check.reason ? `: ${check.reason}` : ''}
+                  </span>
+                ))}
+              </div>
+              {detail.judge && (
+                <div className="evaluation-judge">
+                  <strong>
+                    {detail.judge.model}
+                    {detail.judge.failure_stage ? ` / ${detail.judge.failure_stage}` : ''}
+                  </strong>
+                  <p>{detail.judge.reason}</p>
+                  {detail.judge.evidence.length > 0 && (
+                    <small>{detail.judge.evidence.join(' | ')}</small>
+                  )}
+                  <p>{detail.judge.recommendation}</p>
+                </div>
+              )}
+              {detail.log_summary.length > 0 && (
+                <EvaluationJsonBlock label="Log summary" value={detail.log_summary} />
+              )}
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function EvaluationJsonBlock({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div className="evaluation-json-block">
+      <strong>{label}</strong>
+      <pre>{JSON.stringify(value, null, 2)}</pre>
+    </div>
+  )
+}
+
+function formatEvaluationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const detailMatch = message.match(/"detail"\s*:\s*"([^"]+)"/)
+  return detailMatch?.[1] ?? message
+}
+
+function buildEvaluationSummary(report: SkillEvaluationReport) {
+  return [
+    {
+      label: 'Attack Block',
+      value: formatPercent(report.safety?.attack_block_rate),
+    },
+    {
+      label: 'Unsafe Tools',
+      value: formatPercent(report.safety?.unsafe_tool_call_rate),
+    },
+    {
+      label: 'Tool Selection',
+      value: formatPercent(report.tools?.tool_selection_accuracy),
+    },
+    {
+      label: 'Argument Fidelity',
+      value: formatPercent(report.tools?.argument_fidelity),
+    },
+    {
+      label: 'Answer Contains',
+      value: formatPercent(report.answers?.answer_contains_rate),
+    },
+    {
+      label: 'Answer Violations',
+      value: formatPercent(report.answers?.forbidden_answer_violation_rate),
+    },
+  ]
 }
 
 function getSkillScore(skill: SkillInfo) {

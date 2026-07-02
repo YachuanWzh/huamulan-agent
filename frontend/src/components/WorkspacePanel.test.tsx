@@ -13,6 +13,7 @@ vi.mock('../lib/api', () => ({
     listExecutionLogs: vi.fn(),
     getExecutionSummary: vi.fn(),
     listSkills: vi.fn(),
+    listSkillEvaluationDatasets: vi.fn(),
     runSkillEvaluation: vi.fn(),
     runSkillEvaluationStream: vi.fn(),
     resetSkillEvaluations: vi.fn(),
@@ -24,6 +25,11 @@ const mockApi = vi.mocked(apiModule.api)
 describe('WorkspacePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockApi.listSkillEvaluationDatasets.mockResolvedValue([
+      { name: 'claw_eval_smoke', path: 'claw_eval_smoke', label: 'ClawEval smoke' },
+      { name: 'golden_dataset', path: 'golden_dataset', label: 'Golden dataset' },
+      { name: 'e2e_dateset', path: 'e2e_dateset', label: 'E2E dataset' },
+    ])
   })
 
   afterEach(() => {
@@ -205,6 +211,8 @@ describe('WorkspacePanel', () => {
     render(<WorkspacePanel panel="skills" threadId="t1" />)
 
     expect(await screen.findByText('Skill Evaluation')).toBeInTheDocument()
+    expect(screen.getByLabelText('Golden dataset')).toHaveValue('claw_eval_smoke')
+    expect(screen.getByRole('option', { name: 'E2E dataset' })).toBeInTheDocument()
     expect(screen.getByText('resolve-time')).toBeInTheDocument()
     expect(screen.getByText('72%')).toBeInTheDocument()
     expect(screen.getByText('golden:golden.jsonl')).toBeInTheDocument()
@@ -316,11 +324,11 @@ describe('WorkspacePanel', () => {
 
     render(<WorkspacePanel panel="skills" threadId="t1" />)
 
-    await user.type(await screen.findByLabelText('Golden dataset path'), 'new.jsonl')
+    await user.selectOptions(await screen.findByLabelText('Golden dataset'), 'golden_dataset')
     await user.click(screen.getByRole('button', { name: '快速巡检' }))
 
     expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
-      golden_path: 'new.jsonl',
+      golden_path: 'golden_dataset',
       evaluation_mode: 'quick',
     })
     expect(await screen.findByText('88%')).toBeInTheDocument()
@@ -380,6 +388,55 @@ describe('WorkspacePanel', () => {
         selected_skills: ['resolve-time'],
         tool_completed: true,
         tool_failed: false,
+        detail: {
+          case_id: 'rt-001',
+          mode: 'e2e',
+          query: 'resolve current time',
+          turns: [],
+          expected_skills: ['resolve-time'],
+          selected_skills: ['resolve-time'],
+          expected_tool_calls: [{ tool: 'resolve_current_time', args_contains: {} }],
+          actual_tool_calls: [{ name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } }],
+          final_answer: '现在是 2026-07-02。',
+          checks: [
+            {
+              name: 'tool_arguments',
+              stage: 'tool',
+              passed: false,
+              expected: [{ tool: 'resolve_current_time', args_contains: { timezone: 'UTC' } }],
+              actual: [{ name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } }],
+              reason: '工具参数不符合期望',
+            },
+          ],
+          diagnosis: {
+            stage: 'tool',
+            severity: 'medium',
+            summary: '工具调用或参数环节可能出错：工具参数不符合期望',
+            signals: ['tool.tool_arguments: 工具参数不符合期望'],
+            recommendation: '检查工具选择 prompt、工具 schema、参数抽取和工具执行日志。',
+          },
+          judge: {
+            score: 0.42,
+            passed: false,
+            failure_stage: 'prompt_or_reasoning',
+            reason: '回答没有解释工具参数偏差',
+            evidence: ['timezone mismatch'],
+            recommendation: '强化最终回答 prompt',
+            model: 'deepseek-v4-pro',
+            available: true,
+          },
+          log_summary: [
+            {
+              event_type: 'tool',
+              status: 'completed',
+              name: 'resolve_current_time',
+              input: { timezone: 'Asia/Shanghai' },
+              output: {},
+              error: {},
+              metadata: {},
+            },
+          ],
+        },
       }
       yield {
         type: 'done',
@@ -388,6 +445,82 @@ describe('WorkspacePanel', () => {
         total: 2,
         completed: 2,
         percent: 100,
+        report: {
+          skills: [],
+          safety: {
+            total_cases: 2,
+            attack_block_rate: 1,
+            unsafe_tool_call_rate: 0,
+            secret_leak_rate: 0,
+            security_event_precision: 1,
+          },
+          tools: {
+            total_cases: 2,
+            tool_selection_accuracy: 1,
+            argument_fidelity: 0.5,
+            forbidden_tool_violation_rate: 0,
+          },
+          answers: {
+            total_cases: 2,
+            answer_contains_rate: 1,
+            forbidden_answer_violation_rate: 0,
+          },
+          case_details: [
+            {
+              case_id: 'rt-001',
+              mode: 'e2e',
+              query: 'resolve current time',
+              turns: [],
+              expected_skills: ['resolve-time'],
+              selected_skills: ['resolve-time'],
+              expected_tool_calls: [{ tool: 'resolve_current_time', args_contains: {} }],
+              actual_tool_calls: [
+                { name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } },
+              ],
+              final_answer: '现在是 2026-07-02。',
+              checks: [
+                {
+                  name: 'tool_arguments',
+                  stage: 'tool',
+                  passed: false,
+                  expected: [{ tool: 'resolve_current_time', args_contains: { timezone: 'UTC' } }],
+                  actual: [
+                    { name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } },
+                  ],
+                  reason: '工具参数不符合期望',
+                },
+              ],
+              diagnosis: {
+                stage: 'tool',
+                severity: 'medium',
+                summary: '工具调用或参数环节可能出错：工具参数不符合期望',
+                signals: ['tool.tool_arguments: 工具参数不符合期望'],
+                recommendation: '检查工具选择 prompt、工具 schema、参数抽取和工具执行日志。',
+              },
+              judge: {
+                score: 0.42,
+                passed: false,
+                failure_stage: 'prompt_or_reasoning',
+                reason: '回答没有解释工具参数偏差',
+                evidence: ['timezone mismatch'],
+                recommendation: '强化最终回答 prompt',
+                model: 'deepseek-v4-pro',
+                available: true,
+              },
+              log_summary: [
+                {
+                  event_type: 'tool',
+                  status: 'completed',
+                  name: 'resolve_current_time',
+                  input: { timezone: 'Asia/Shanghai' },
+                  output: {},
+                  error: {},
+                  metadata: {},
+                },
+              ],
+            },
+          ],
+        },
         results: [
           {
             id: 4,
@@ -408,11 +541,11 @@ describe('WorkspacePanel', () => {
 
     render(<WorkspacePanel panel="skills" threadId="t1" />)
 
-    await user.type(await screen.findByLabelText('Golden dataset path'), 'new.jsonl')
+    await user.selectOptions(await screen.findByLabelText('Golden dataset'), 'golden_dataset')
     await user.click(screen.getByRole('button', { name: '实战测评' }))
 
     expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
-      golden_path: 'new.jsonl',
+      golden_path: 'golden_dataset',
       evaluation_mode: 'e2e',
     })
     expect(await screen.findByRole('progressbar', { name: /Skill evaluation progress/i }))
@@ -421,6 +554,55 @@ describe('WorkspacePanel', () => {
     expect(screen.getAllByText(/实战测评/).length).toBeGreaterThan(0)
     expect(screen.getByText('88%')).toBeInTheDocument()
     expect(screen.getAllByText('golden:new.jsonl').length).toBeGreaterThan(0)
+    expect(screen.getByText('ClawEval')).toBeInTheDocument()
+    expect(screen.getByText('Attack Block')).toBeInTheDocument()
+    expect(screen.getAllByText('100%').length).toBeGreaterThan(0)
+    expect(screen.getByText('Argument Fidelity')).toBeInTheDocument()
+    expect(screen.getByText('50%')).toBeInTheDocument()
+    expect(screen.getByText('Evaluation Details')).toBeInTheDocument()
+    expect(screen.getByText(/rt-001/)).toBeInTheDocument()
+    expect(screen.getAllByText('tool').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/工具参数不符合期望/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/deepseek-v4-pro/)).toBeInTheDocument()
+    expect(screen.getByText(/强化最终回答 prompt/)).toBeInTheDocument()
+  })
+
+  it('shows skill evaluation errors when the golden dataset cannot be loaded', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.runSkillEvaluationStream.mockImplementation(async function* () {
+      yield {
+        type: 'started',
+        mode: 'quick',
+        source: 'golden:missing.jsonl',
+        total: 0,
+        completed: 0,
+      }
+      throw new Error('API error 404: {"detail":"Golden dataset not found: missing"}')
+    })
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.selectOptions(await screen.findByLabelText('Golden dataset'), '__custom__')
+    await user.type(screen.getByLabelText('Custom dataset path'), 'missing')
+    await user.click(screen.getByRole('button', { name: '快速巡检' }))
+
+    expect(await screen.findByText(/Golden dataset not found: missing/)).toBeInTheDocument()
+  })
+
+  it('keeps custom dataset controls inside the aligned evaluation control group', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.selectOptions(await screen.findByLabelText('Golden dataset'), '__custom__')
+
+    const customInput = screen.getByLabelText('Custom dataset path')
+    const controls = customInput.closest('.skill-evaluation-controls')
+
+    expect(controls).not.toBeNull()
+    expect(controls?.querySelectorAll('button')).toHaveLength(4)
   })
 
   it('does not reset skill scores when confirmation is cancelled', async () => {
