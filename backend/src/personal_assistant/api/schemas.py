@@ -131,6 +131,39 @@ class SkillInfo(BaseModel):
     tool_names: list[str]
     path: str
     loaded: bool = False
+    evaluation: "SkillEvaluationSummary | None" = None
+    latest_evaluation: "SkillEvaluationSnapshot | None" = None
+
+
+class SkillEvaluationSummary(BaseModel):
+    overall_score: float
+    description_tokens: int
+    skill_md_lines: int
+    python_lines: int
+    max_cyclomatic_complexity: int
+    tool_count: int
+
+
+class SkillEvaluationSnapshot(BaseModel):
+    id: int
+    created_at: datetime
+    skill_name: str
+    overall_score: float
+    routing_score: float | None = None
+    runtime_score: float | None = None
+    usage_score: float | None = None
+    static_score: float | None = None
+    source: str | None = None
+    report: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillEvaluationRunRequest(BaseModel):
+    golden_path: str | None = None
+
+
+class SkillEvaluationRunResponse(BaseModel):
+    source: str
+    results: list[SkillEvaluationSnapshot]
 
 
 class ReplayResponse(BaseModel):

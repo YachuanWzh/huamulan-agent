@@ -1,8 +1,10 @@
 import logging
 import sys
+import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -20,6 +22,10 @@ from personal_assistant.api.schemas import (
     ExecutionSummary,
     ReplayResponse,
     SkillInfo,
+    SkillEvaluationSummary,
+    SkillEvaluationRunRequest,
+    SkillEvaluationRunResponse,
+    SkillEvaluationSnapshot,
     ThreadSummary,
     ToolCallApproval,
     ToolError,
@@ -29,6 +35,10 @@ from personal_assistant.config import get_settings
 from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills import SkillRegistry
+from personal_assistant.skills.evaluation.report import score_static_metrics
+from personal_assistant.skills.evaluation.models import GoldenSkillCase
+from personal_assistant.skills.evaluation.report import evaluate_skill_registry
+from personal_assistant.skills.evaluation.static import evaluate_static_skill
 from personal_assistant.tracing import build_langfuse_callback
 
 
@@ -265,19 +275,92 @@ async def list_tool_errors(thread_id: str | None = None, limit: int = 100) -> li
 
 @app.get("/api/skills", response_model=list[SkillInfo])
 async def list_skills() -> list[SkillInfo]:
-    return [_skill_info(skill) for skill in registry.skills.values()]
+    latest = {
+        item.skill_name: item
+        for item in await memory.list_latest_skill_evaluations()
+    }
+    return [
+        _skill_info(skill, latest_evaluation=latest.get(skill.name))
+        for skill in registry.skills.values()
+    ]
 
 
 @app.post("/api/skills/reload", response_model=list[SkillInfo])
 async def reload_skills() -> list[SkillInfo]:
-    return [_skill_info(skill) for skill in registry.reload()]
+    latest = {
+        item.skill_name: item
+        for item in await memory.list_latest_skill_evaluations()
+    }
+    return [
+        _skill_info(skill, latest_evaluation=latest.get(skill.name))
+        for skill in registry.reload()
+    ]
 
 
-def _skill_info(skill) -> SkillInfo:
+@app.get("/api/skills/evaluation/latest", response_model=list[SkillEvaluationSnapshot])
+async def latest_skill_evaluations() -> list[SkillEvaluationSnapshot]:
+    return await memory.list_latest_skill_evaluations()
+
+
+@app.post("/api/skills/evaluation/run", response_model=SkillEvaluationRunResponse)
+async def run_skill_evaluation(
+    request: SkillEvaluationRunRequest,
+) -> SkillEvaluationRunResponse:
+    return await _run_skill_evaluation_and_persist(
+        registry,
+        memory,
+        request.golden_path,
+    )
+
+
+async def _run_skill_evaluation_and_persist(
+    registry: SkillRegistry,
+    memory,
+    golden_path: str | None,
+) -> SkillEvaluationRunResponse:
+    if not golden_path:
+        raise HTTPException(status_code=400, detail="golden_path is required")
+    path = Path(golden_path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Golden dataset not found: {golden_path}")
+    cases = _load_golden_cases(path)
+    report = await evaluate_skill_registry(registry, cases=cases)
+    source = f"golden:{path}"
+    await memory.record_skill_evaluation_results(report, source=source)
+    return SkillEvaluationRunResponse(
+        source=source,
+        results=await memory.list_latest_skill_evaluations(),
+    )
+
+
+def _load_golden_cases(path: Path) -> list[GoldenSkillCase]:
+    cases = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        cases.append(GoldenSkillCase.model_validate(json.loads(stripped)))
+    return cases
+
+
+def _skill_info(
+    skill,
+    latest_evaluation: SkillEvaluationSnapshot | None = None,
+) -> SkillInfo:
+    static_metrics = evaluate_static_skill(skill)
     return SkillInfo(
         name=skill.name,
         description=skill.description,
         tool_names=skill.tool_names,
         path=str(skill.path),
         loaded=skill.loaded,
+        latest_evaluation=latest_evaluation,
+        evaluation=SkillEvaluationSummary(
+            overall_score=score_static_metrics(static_metrics),
+            description_tokens=static_metrics.description_tokens,
+            skill_md_lines=static_metrics.skill_md_lines,
+            python_lines=static_metrics.python_lines,
+            max_cyclomatic_complexity=static_metrics.max_cyclomatic_complexity,
+            tool_count=static_metrics.tool_count,
+        ),
     )

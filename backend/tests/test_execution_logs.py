@@ -3,7 +3,11 @@ from datetime import UTC, datetime
 from langchain_core.messages import AIMessage
 
 from personal_assistant.agent.agent import _execute_tool_calls_with_retry, _extract_token_usage
-from personal_assistant.api.schemas import ExecutionLogCreate, ExecutionSummary
+from personal_assistant.api.schemas import (
+    ExecutionLogCreate,
+    ExecutionSummary,
+    SkillEvaluationSnapshot,
+)
 from personal_assistant.memory.postgres import PostgresMemory
 
 
@@ -139,6 +143,88 @@ async def test_execution_log_summary_aggregates_counts_and_tokens() -> None:
     assert summary.completion_tokens == 800
     assert summary.total_tokens == 2000
     assert summary.total_duration_ms == 345
+
+
+async def test_record_skill_evaluation_results_inserts_report_rows() -> None:
+    from personal_assistant.skills.evaluation.models import (
+        SkillEvaluationReport,
+        SkillEvaluationResult,
+        StaticSkillMetrics,
+    )
+
+    conn = FakeConnection()
+    memory = PostgresMemory("postgresql://example")
+    memory.pool = FakePool(conn)
+    report = SkillEvaluationReport(
+        skills=[
+            SkillEvaluationResult(
+                skill_name="weather",
+                overall_score=0.91,
+                static=StaticSkillMetrics(
+                    skill_name="weather",
+                    description_tokens=12,
+                    skill_md_lines=30,
+                    python_lines=80,
+                    max_cyclomatic_complexity=4,
+                    tool_count=1,
+                ),
+                score_components={"routing": 1.0, "static": 0.8},
+            )
+        ]
+    )
+
+    await memory.record_skill_evaluation_results(report, source="golden:sample.jsonl")
+
+    sql, params = conn.calls[0]
+    assert "INSERT INTO skill_evaluation_results" in sql
+    assert params[0] == "weather"
+    assert params[1] == 0.91
+    assert params[2] == 1.0
+    assert params[5] == 0.8
+    assert params[6] == "golden:sample.jsonl"
+    assert params[7].obj["skill_name"] == "weather"
+
+
+async def test_list_latest_skill_evaluations_maps_rows_to_schema() -> None:
+    created_at = datetime(2026, 7, 2, 1, 2, 3, tzinfo=UTC)
+    conn = FakeConnection(
+        rows=[
+            (
+                3,
+                created_at,
+                "weather",
+                0.91,
+                1.0,
+                None,
+                None,
+                0.8,
+                "golden:sample.jsonl",
+                {"skill_name": "weather"},
+            )
+        ]
+    )
+    memory = PostgresMemory("postgresql://example")
+    memory.pool = FakePool(conn)
+
+    results = await memory.list_latest_skill_evaluations()
+
+    assert results == [
+        SkillEvaluationSnapshot(
+            id=3,
+            created_at=created_at,
+            skill_name="weather",
+            overall_score=0.91,
+            routing_score=1.0,
+            runtime_score=None,
+            usage_score=None,
+            static_score=0.8,
+            source="golden:sample.jsonl",
+            report={"skill_name": "weather"},
+        )
+    ]
+    sql, params = conn.calls[0]
+    assert "DISTINCT ON (skill_name)" in sql
+    assert params == (100,)
 
 
 class RetryMemory:

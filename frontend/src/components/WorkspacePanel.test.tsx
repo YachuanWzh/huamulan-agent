@@ -12,6 +12,8 @@ vi.mock('../lib/api', () => ({
     listToolErrors: vi.fn(),
     listExecutionLogs: vi.fn(),
     getExecutionSummary: vi.fn(),
+    listSkills: vi.fn(),
+    runSkillEvaluation: vi.fn(),
   },
 }))
 
@@ -161,5 +163,138 @@ describe('WorkspacePanel', () => {
     expect(onReplayState).toHaveBeenCalledWith(
       expect.objectContaining({ checkpoint_id: 'checkpoint-1' }),
     )
+  })
+
+  it('renders skill evaluation scorecards in the main workspace', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'resolve-time',
+        description: 'Resolve current time',
+        tool_names: ['resolve_current_time'],
+        path: '/skills/resolve-time',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 3,
+          created_at: '2026-07-02T01:00:00Z',
+          skill_name: 'resolve-time',
+          overall_score: 0.72,
+          routing_score: 0.8,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.6,
+          source: 'golden:golden.jsonl',
+          report: {},
+        },
+      },
+    ])
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText('Skill Evaluation')).toBeInTheDocument()
+    expect(screen.getByText('resolve-time')).toBeInTheDocument()
+    expect(screen.getByText('72%')).toBeInTheDocument()
+    expect(screen.getByText('golden:golden.jsonl')).toBeInTheDocument()
+    expect(screen.getByText('Complexity')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText('Python')).toBeInTheDocument()
+    expect(screen.getByText('80 lines')).toBeInTheDocument()
+  })
+
+  it('exposes the full skill description on hover while the card preview stays compact', async () => {
+    const description =
+      'A very long skill description that needs to be clamped in the scorecard preview but remain available as hover detail.'
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'long-skill',
+        description,
+        tool_names: [],
+        path: '/skills/long-skill',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.8,
+          description_tokens: 32,
+          skill_md_lines: 20,
+          python_lines: 0,
+          max_cyclomatic_complexity: 0,
+          tool_count: 0,
+        },
+      },
+    ])
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText(description)).toHaveAttribute('title', description)
+  })
+
+  it('runs a golden dataset evaluation and refreshes skill scores', async () => {
+    mockApi.listSkills
+      .mockResolvedValueOnce([
+        {
+          name: 'resolve-time',
+          description: 'Resolve current time',
+          tool_names: ['resolve_current_time'],
+          path: '/skills/resolve-time',
+          loaded: false,
+          evaluation: {
+            overall_score: 0.91,
+            description_tokens: 12,
+            skill_md_lines: 35,
+            python_lines: 80,
+            max_cyclomatic_complexity: 4,
+            tool_count: 1,
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          name: 'resolve-time',
+          description: 'Resolve current time',
+          tool_names: ['resolve_current_time'],
+          path: '/skills/resolve-time',
+          loaded: false,
+          evaluation: {
+            overall_score: 0.91,
+            description_tokens: 12,
+            skill_md_lines: 35,
+            python_lines: 80,
+            max_cyclomatic_complexity: 4,
+            tool_count: 1,
+          },
+          latest_evaluation: {
+            id: 4,
+            created_at: '2026-07-02T01:10:00Z',
+            skill_name: 'resolve-time',
+            overall_score: 0.88,
+            routing_score: 1,
+            runtime_score: null,
+            usage_score: null,
+            static_score: 0.7,
+            source: 'golden:new.jsonl',
+            report: {},
+          },
+        },
+      ])
+    mockApi.runSkillEvaluation.mockResolvedValue({
+      source: 'golden:new.jsonl',
+      results: [],
+    })
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.type(await screen.findByLabelText('Golden dataset path'), 'new.jsonl')
+    await user.click(screen.getByRole('button', { name: '运行评测' }))
+
+    expect(mockApi.runSkillEvaluation).toHaveBeenCalledWith({ golden_path: 'new.jsonl' })
+    expect(await screen.findByText('88%')).toBeInTheDocument()
+    expect(screen.getByText('golden:new.jsonl')).toBeInTheDocument()
   })
 })

@@ -5,10 +5,11 @@ import {
   type ExecutionSummary,
   type ReplayResponse,
   type ReplayState,
+  type SkillInfo,
 } from '../lib/api'
 
 interface Props {
-  panel: 'checkpoint' | 'audit'
+  panel: 'skills' | 'checkpoint' | 'audit'
   threadId: string | null
   onThreadCleared?: () => void
   onReplayState?: (state: ReplayState) => void
@@ -48,6 +49,10 @@ export function WorkspacePanel({
   const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null)
   const [executionLoading, setExecutionLoading] = useState(false)
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('all')
+  const [skills, setSkills] = useState<SkillInfo[]>([])
+  const [skillsLoading, setSkillsLoading] = useState(false)
+  const [goldenPath, setGoldenPath] = useState('')
+  const [evaluationRunning, setEvaluationRunning] = useState(false)
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -83,6 +88,36 @@ export function WorkspacePanel({
     }
     setExecutionLoading(false)
   }, [threadId])
+
+  const loadSkills = useCallback(async () => {
+    setSkillsLoading(true)
+    try {
+      setSkills(await api.listSkills())
+    } catch {
+      setSkills([])
+    }
+    setSkillsLoading(false)
+  }, [])
+
+  const runSkillEvaluation = async () => {
+    const trimmedPath = goldenPath.trim()
+    if (!trimmedPath) return
+
+    setEvaluationRunning(true)
+    try {
+      await api.runSkillEvaluation({ golden_path: trimmedPath })
+      await loadSkills()
+    } catch {
+      // silently handle
+    }
+    setEvaluationRunning(false)
+  }
+
+  useEffect(() => {
+    if (panel === 'skills') {
+      loadSkills()
+    }
+  }, [loadSkills, panel])
 
   useEffect(() => {
     if (panel === 'checkpoint') {
@@ -130,6 +165,89 @@ export function WorkspacePanel({
 
   return (
     <section className="workspace-panel" aria-label="行军案台">
+      {panel === 'skills' && (
+        <div className="workspace-section skill-evaluation-section">
+          <div className="workspace-header">
+            <div>
+              <h2>Skill Evaluation</h2>
+              <p>盘点当前 Skill 的描述清晰度、代码规模、复杂度和器具配置。</p>
+            </div>
+            <div className="workspace-actions">
+              <label className="skill-evaluation-runner">
+                <span>Golden dataset path</span>
+                <input
+                  aria-label="Golden dataset path"
+                  value={goldenPath}
+                  onChange={(event) => setGoldenPath(event.target.value)}
+                  placeholder="golden.jsonl"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={runSkillEvaluation}
+                disabled={evaluationRunning || goldenPath.trim().length === 0}
+              >
+                运行评测
+              </button>
+              <button onClick={loadSkills} disabled={skillsLoading}>
+                刷新
+              </button>
+            </div>
+          </div>
+
+          {skillsLoading && <div className="loading">加载中...</div>}
+          {!skillsLoading && skills.length === 0 && (
+            <div className="workspace-empty">当前没有可评测的 Skill。</div>
+          )}
+          {!skillsLoading && skills.length > 0 && (
+            <div className="skill-evaluation-grid">
+              {skills.map((skill) => (
+                <section key={skill.name} className="skill-evaluation-card">
+                  <div className="skill-evaluation-card-header">
+                    <div>
+                      <h3>{skill.name}</h3>
+                      <p title={skill.description}>{skill.description}</p>
+                      {skill.latest_evaluation?.source && (
+                        <small>{skill.latest_evaluation.source}</small>
+                      )}
+                    </div>
+                    <strong>{formatPercent(getSkillScore(skill))}</strong>
+                  </div>
+                  <div
+                    className="skill-score-meter"
+                    aria-label={`Skill score ${formatPercent(getSkillScore(skill))}`}
+                  >
+                    <span
+                      style={{
+                        width: `${Math.round((getSkillScore(skill) ?? 0) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <dl className="skill-evaluation-metrics">
+                    <div>
+                      <dt>Description</dt>
+                      <dd>{skill.evaluation?.description_tokens ?? 0} tokens</dd>
+                    </div>
+                    <div>
+                      <dt>Complexity</dt>
+                      <dd>{skill.evaluation?.max_cyclomatic_complexity ?? 0}</dd>
+                    </div>
+                    <div>
+                      <dt>Python</dt>
+                      <dd>{skill.evaluation?.python_lines ?? 0} lines</dd>
+                    </div>
+                    <div>
+                      <dt>Tools</dt>
+                      <dd>{skill.evaluation?.tool_count ?? skill.tool_names.length}</dd>
+                    </div>
+                  </dl>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {panel === 'checkpoint' && (
         <div className="workspace-section">
           <div className="workspace-header">
@@ -323,4 +441,12 @@ function buildRetryChains(logs: ExecutionLog[]) {
   })).filter((chain) =>
     chain.attempts.some((log) => log.event_type === 'tool_retry'),
   )
+}
+
+function formatPercent(value: number | undefined | null) {
+  return `${Math.round((value ?? 0) * 100)}%`
+}
+
+function getSkillScore(skill: SkillInfo) {
+  return skill.latest_evaluation?.overall_score ?? skill.evaluation?.overall_score
 }

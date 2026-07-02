@@ -48,6 +48,40 @@ export interface SkillInfo {
   description: string
   tool_names: string[]
   path: string
+  loaded?: boolean
+  evaluation?: SkillEvaluationSummary | null
+  latest_evaluation?: SkillEvaluationSnapshot | null
+}
+
+export interface SkillEvaluationSummary {
+  overall_score: number
+  description_tokens: number
+  skill_md_lines: number
+  python_lines: number
+  max_cyclomatic_complexity: number
+  tool_count: number
+}
+
+export interface SkillEvaluationSnapshot {
+  id: number
+  created_at: string
+  skill_name: string
+  overall_score: number
+  routing_score?: number | null
+  runtime_score?: number | null
+  usage_score?: number | null
+  static_score?: number | null
+  source?: string | null
+  report: Record<string, unknown>
+}
+
+export interface SkillEvaluationRunRequest {
+  golden_path?: string | null
+}
+
+export interface SkillEvaluationRunResponse {
+  source: string
+  results: SkillEvaluationSnapshot[]
 }
 
 export interface ReplayMessage {
@@ -343,4 +377,13 @@ export const api = {
 
   reloadSkills: () =>
     request<SkillInfo[]>('/api/skills/reload', { method: 'POST' }),
+
+  listSkillEvaluations: () =>
+    request<SkillEvaluationSnapshot[]>('/api/skills/evaluation/latest'),
+
+  runSkillEvaluation: (body: SkillEvaluationRunRequest) =>
+    request<SkillEvaluationRunResponse>('/api/skills/evaluation/run', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }
