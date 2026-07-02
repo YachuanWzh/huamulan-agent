@@ -442,6 +442,27 @@ describe('api', () => {
               description: 'Resolve current time',
               tool_names: ['resolve_current_time'],
               path: '/skills/resolve-time',
+              loaded: false,
+              evaluation: {
+                overall_score: 0.93,
+                description_tokens: 18,
+                skill_md_lines: 42,
+                python_lines: 88,
+                max_cyclomatic_complexity: 4,
+                tool_count: 1,
+              },
+              latest_evaluation: {
+                id: 3,
+                created_at: '2026-07-02T01:00:00Z',
+                skill_name: 'resolve-time',
+                overall_score: 0.88,
+                routing_score: 1,
+                runtime_score: null,
+                usage_score: null,
+                static_score: 0.7,
+                source: 'golden:golden.jsonl',
+                report: {},
+              },
             },
           ]),
         ),
@@ -449,6 +470,52 @@ describe('api', () => {
       const result = await api.listSkills()
       expect(result).toHaveLength(1)
       expect(result[0]!.name).toBe('resolve-time')
+      expect(result[0]!.evaluation?.overall_score).toBe(0.93)
+      expect(result[0]!.latest_evaluation?.overall_score).toBe(0.88)
+    })
+  })
+
+  describe('skill evaluation', () => {
+    it('returns latest persisted skill evaluations', async () => {
+      server.use(
+        http.get(`${BASE}/api/skills/evaluation/latest`, () =>
+          HttpResponse.json([
+            {
+              id: 3,
+              created_at: '2026-07-02T01:00:00Z',
+              skill_name: 'resolve-time',
+              overall_score: 0.88,
+              routing_score: 1,
+              runtime_score: null,
+              usage_score: null,
+              static_score: 0.7,
+              source: 'golden:golden.jsonl',
+              report: {},
+            },
+          ]),
+        ),
+      )
+
+      const result = await api.listSkillEvaluations()
+
+      expect(result[0]!.skill_name).toBe('resolve-time')
+      expect(result[0]!.overall_score).toBe(0.88)
+    })
+
+    it('runs a golden dataset evaluation', async () => {
+      server.use(
+        http.post(`${BASE}/api/skills/evaluation/run`, async ({ request }) => {
+          expect(await request.json()).toEqual({ golden_path: 'golden.jsonl' })
+          return HttpResponse.json({
+            source: 'golden:golden.jsonl',
+            results: [],
+          })
+        }),
+      )
+
+      const result = await api.runSkillEvaluation({ golden_path: 'golden.jsonl' })
+
+      expect(result.source).toBe('golden:golden.jsonl')
     })
   })
 

@@ -17,8 +17,10 @@ from personal_assistant.api.schemas import (
     ExecutionLog,
     ExecutionLogCreate,
     ExecutionSummary,
+    SkillEvaluationSnapshot,
     ToolError,
 )
+from personal_assistant.skills.evaluation.models import SkillEvaluationReport
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ class PostgresMemory:
         await self._setup_long_term_memories()
         await self._setup_tool_results()
         await self._setup_tool_errors()
+        await self._setup_skill_evaluation_results()
 
     async def stop(self) -> None:
         drain = getattr(self.checkpointer, "drain", None)
@@ -357,6 +360,72 @@ class PostgresMemory:
                     will_retry,
                 ),
             )
+
+    async def record_skill_evaluation_results(
+        self,
+        report: SkillEvaluationReport,
+        *,
+        source: str | None = None,
+    ) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            for result in report.skills:
+                components = result.score_components
+                await conn.execute(
+                    """
+                    INSERT INTO skill_evaluation_results
+                        (skill_name, overall_score, routing_score, runtime_score,
+                         usage_score, static_score, source, report)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        result.skill_name,
+                        result.overall_score,
+                        components.get("routing"),
+                        components.get("runtime"),
+                        components.get("usage"),
+                        components.get("static"),
+                        source,
+                        Jsonb(_jsonable(result.model_dump())),
+                    ),
+                )
+
+    async def list_latest_skill_evaluations(
+        self,
+        limit: int = 100,
+    ) -> list[SkillEvaluationSnapshot]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT DISTINCT ON (skill_name)
+                    id, created_at, skill_name, overall_score, routing_score,
+                    runtime_score, usage_score, static_score, source, report
+                FROM skill_evaluation_results
+                ORDER BY skill_name, created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            SkillEvaluationSnapshot(
+                id=row[0],
+                created_at=row[1],
+                skill_name=row[2],
+                overall_score=row[3],
+                routing_score=row[4],
+                runtime_score=row[5],
+                usage_score=row[6],
+                static_score=row[7],
+                source=row[8],
+                report=row[9] or {},
+            )
+            for row in rows
+        ]
 
     async def list_audit_events(
         self,
@@ -668,6 +737,33 @@ class PostgresMemory:
                 """
                 CREATE INDEX IF NOT EXISTS idx_tool_errors_thread_created
                 ON tool_errors (thread_id, created_at DESC)
+                """
+            )
+
+    async def _setup_skill_evaluation_results(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_evaluation_results (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    skill_name TEXT NOT NULL,
+                    overall_score DOUBLE PRECISION NOT NULL,
+                    routing_score DOUBLE PRECISION,
+                    runtime_score DOUBLE PRECISION,
+                    usage_score DOUBLE PRECISION,
+                    static_score DOUBLE PRECISION,
+                    source TEXT,
+                    report JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_skill_evaluation_results_latest
+                ON skill_evaluation_results (skill_name, created_at DESC, id DESC)
                 """
             )
 

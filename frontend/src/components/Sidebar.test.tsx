@@ -33,14 +33,18 @@ describe('Sidebar', () => {
     checkpoint: {},
   }
 
-  it('renders skills tab by default', () => {
+  it('renders history tab by default', () => {
     mockApi.listSkills.mockResolvedValue([])
     render(<Sidebar threadId="t1" />)
     expect(screen.getByTestId('sidebar-shell')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /军械/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /军报/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /出征/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /驿站/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /校阅/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /出征/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
     expect(screen.queryByRole('tab', { name: /tool errors/i })).not.toBeInTheDocument()
   })
 
@@ -59,7 +63,7 @@ describe('Sidebar', () => {
 
     expect(onPanelChange).toHaveBeenNthCalledWith(1, 'checkpoint')
     expect(onPanelChange).toHaveBeenNthCalledWith(2, 'audit')
-    expect(onPanelChange).toHaveBeenNthCalledWith(3, 'chat')
+    expect(onPanelChange).toHaveBeenNthCalledWith(3, 'skills')
   })
 
   it('displays skills after loading', async () => {
@@ -69,13 +73,38 @@ describe('Sidebar', () => {
         description: 'Resolve current time',
         tool_names: ['resolve_current_time'],
         path: '/skills/resolve-time',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 3,
+          created_at: '2026-07-02T01:00:00Z',
+          skill_name: 'resolve-time',
+          overall_score: 0.72,
+          routing_score: 0.8,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.6,
+          source: 'golden:golden.jsonl',
+          report: {},
+        },
       },
     ])
+    const user = userEvent.setup()
     render(<Sidebar threadId="t1" />)
+
+    await user.click(screen.getByRole('tab', { name: /军械/i }))
 
     await waitFor(() => {
       expect(screen.getByText('resolve-time')).toBeInTheDocument()
       expect(screen.getByText('Resolve current time')).toBeInTheDocument()
+      expect(screen.getByText('72%')).toBeInTheDocument()
     })
   })
 
@@ -92,6 +121,8 @@ describe('Sidebar', () => {
 
     const user = userEvent.setup()
     render(<Sidebar threadId="t1" />)
+
+    await user.click(screen.getByRole('tab', { name: /军械/i }))
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /整备/i })).toBeInTheDocument()
@@ -164,7 +195,7 @@ describe('Sidebar', () => {
       />,
     )
 
-    await user.click(screen.getByRole('tab', { name: /军报/i }))
+    await user.click(screen.getByRole('tab', { name: /出征/i }))
     expect(await screen.findByText('修复首次发送消息丢失')).toBeInTheDocument()
     expect(screen.getByText('thread-2')).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: /open session thread-2/i }))
@@ -210,7 +241,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-1" onReplayState={onReplayState} />)
 
-    await user.click(screen.getByRole('tab', { name: /军报/i }))
+    await user.click(screen.getByRole('tab', { name: /出征/i }))
     await user.click(await screen.findByRole('button', { name: /open session thread-2/i }))
 
     expect(onReplayState).toHaveBeenCalledWith(
@@ -240,7 +271,7 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-1" />)
 
-    await user.click(screen.getByRole('tab', { name: /军报/i }))
+    await user.click(screen.getByRole('tab', { name: /出征/i }))
     await user.click(await screen.findByRole('button', { name: /delete session thread-2/i }))
 
     await waitFor(() => {
@@ -265,15 +296,14 @@ describe('Sidebar', () => {
     const user = userEvent.setup()
     render(<Sidebar threadId="thread-2" onThreadCleared={onThreadCleared} />)
 
-    await user.click(screen.getByRole('tab', { name: /军报/i }))
-    await user.click(await screen.findByRole('button', { name: /清空军报/i }))
+    await user.click(screen.getByRole('tab', { name: /出征/i }))
+    await user.click(await screen.findByRole('button', { name: /清空出征/i }))
 
     await waitFor(() => {
       expect(mockApi.clearThreads).toHaveBeenCalled()
-      expect(screen.getByText(/暂无军报/i)).toBeInTheDocument()
+      expect(screen.getByText(/暂无出征/i)).toBeInTheDocument()
       expect(onThreadCleared).toHaveBeenCalledOnce()
     })
   })
 
 })
-

@@ -15,7 +15,7 @@ function App() {
   const [threadId, setThreadId] = useState<string | null>(null)
   const [conversationKey, setConversationKey] = useState('empty-thread')
   const [replayState, setReplayState] = useState<ReplayState | null>(null)
-  const [activePanel, setActivePanel] = useState<'chat' | 'checkpoint' | 'audit'>('chat')
+  const [activePanel, setActivePanel] = useState<'chat' | 'skills' | 'checkpoint' | 'audit'>('chat')
 
   const handleThreadCreated = () => {
     const id = createThreadId()

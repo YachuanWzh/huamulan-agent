@@ -444,3 +444,31 @@ CHECKPOINT_REDIS_LRU_ENABLED=true
 CHECKPOINT_REDIS_MAXMEMORY_POLICY=allkeys-lru
 CHECKPOINT_SKIP_NODES=route_skills,compact_context
 ```
+
+## Skill 评测
+
+Skill 的质量可以通过离线黄金用例集（Golden Dataset）和 Agent 实际使用的同一套路由器进行评测。评测器会输出统一的 JSON / Markdown 评分卡，覆盖路由准确性、静态可维护性，以及可选的运行时日志指标。
+
+黄金用例集格式：
+
+```json
+{"id":"weather-001","query":"Will it rain tomorrow?","expected_skills":["weather"]}
+{"id":"negative-001","query":"Write a poem","expected_skills":[]}
+```
+
+运行评测器：
+
+```powershell
+cd backend
+uv run python -m personal_assistant.skills.evaluation `
+  --skills-dir src/personal_assistant/skills `
+  --golden path/to/golden.jsonl `
+  --output-json skill-eval.json `
+  --output-md skill-eval.md
+```
+
+报告包含 `Selection Accuracy`、`False Positive Rate`、描述 token 估算、`SKILL.md` / Python 文件行数、近似圈复杂度，以及归一化后的 `overall_score`。运行时指标（执行成功率、重试率、P95/P99 延迟、单次调用 token 消耗）通过 `evaluate_runtime_logs(...)` 消费现有 `agent_execution_logs` 形状的数据。
+
+`GET /api/skills` 会为每个 Skill 返回静态评测摘要和最新落库评测快照。前端侧栏 Skill 列表会优先展示最新快照分数，没有快照时回退到静态分数；点击“军械”页签后，主工作区会进入 Skill Evaluation 页面，展示每个 Skill 的分数、描述 token、代码行数、复杂度、工具数量和评测来源。
+
+主工作区支持输入 Golden Dataset 路径并触发 `/api/skills/evaluation/run`。服务端会用生产同款 Skill 路由器执行评测，把每个 Skill 的评分写入 PostgreSQL `skill_evaluation_results` 表；后续刷新列表或调用 `GET /api/skills/evaluation/latest` 时，会读取每个 Skill 最新一次评分。因此 golden dataset 测评后的得分会持续落库并在前端展示，而不是只存在于一次性报告文件中。

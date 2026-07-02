@@ -11,7 +11,7 @@ interface Props {
   onThreadCleared?: () => void
   onThreadSelected?: (threadId: string) => void
   onReplayState?: (state: ReplayState) => void
-  onPanelChange?: (panel: 'chat' | 'checkpoint' | 'audit') => void
+  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit') => void
 }
 
 type Tab = 'skills' | 'history' | 'checkpoint' | 'audit'
@@ -23,9 +23,9 @@ export function Sidebar({
   onReplayState,
   onPanelChange,
 }: Props) {
-  const [tab, setTab] = useState<Tab>('skills')
+  const [tab, setTab] = useState<Tab>('history')
   const [skills, setSkills] = useState<SkillInfo[]>([])
-  const [skillsLoading, setSkillsLoading] = useState(true)
+  const [skillsLoading, setSkillsLoading] = useState(false)
   const [threads, setThreads] = useState<ThreadSummary[]>([])
   const [threadsLoading, setThreadsLoading] = useState(false)
   const [openingThreadId, setOpeningThreadId] = useState<string | null>(null)
@@ -55,7 +55,8 @@ export function Sidebar({
   const loadThreads = useCallback(async () => {
     setThreadsLoading(true)
     try {
-      setThreads(await api.listThreads())
+      const nextThreads = await api.listThreads()
+      setThreads(Array.isArray(nextThreads) ? nextThreads : [])
     } catch {
       setThreads([])
     }
@@ -63,8 +64,10 @@ export function Sidebar({
   }, [])
 
   useEffect(() => {
-    loadSkills()
-  }, [loadSkills])
+    if (tab === 'skills') {
+      loadSkills()
+    }
+  }, [loadSkills, tab])
 
   useEffect(() => {
     if (tab === 'history') {
@@ -121,7 +124,7 @@ export function Sidebar({
     setClearingHistory(false)
   }
 
-  const selectTab = (nextTab: Tab, panel: 'chat' | 'checkpoint' | 'audit') => {
+  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit') => {
     setTab(nextTab)
     onPanelChange?.(panel)
   }
@@ -133,7 +136,7 @@ export function Sidebar({
           role="tab"
           aria-selected={tab === 'skills'}
           className={`tab ${tab === 'skills' ? 'active' : ''}`}
-          onClick={() => selectTab('skills', 'chat')}
+          onClick={() => selectTab('skills', 'skills')}
         >
           军械
         </button>
@@ -143,7 +146,7 @@ export function Sidebar({
           className={`tab ${tab === 'history' ? 'active' : ''}`}
           onClick={() => selectTab('history', 'chat')}
         >
-          军报
+          出征
         </button>
         <button
           role="tab"
@@ -179,7 +182,17 @@ export function Sidebar({
             <ul className="skills-list">
               {skills.map((skill) => (
                 <li key={skill.name} className="skill-item">
-                  <div className="skill-name">{skill.name}</div>
+                  <div className="skill-item-topline">
+                    <div className="skill-name">{skill.name}</div>
+                    {getSkillScore(skill) != null && (
+                      <span
+                        className="skill-score-badge"
+                        aria-label={`Skill score ${formatPercent(getSkillScore(skill))}`}
+                      >
+                        {formatPercent(getSkillScore(skill))}
+                      </span>
+                    )}
+                  </div>
                   <div className="skill-desc">{skill.description}</div>
                   <div className="skill-tools">
                     器具: {skill.tool_names.join(', ')}
@@ -193,18 +206,18 @@ export function Sidebar({
         {tab === 'history' && (
           <div className="history-panel">
             <div className="history-header">
-              <h3>军报</h3>
+              <h3>出征</h3>
               <button
                 type="button"
                 onClick={clearHistory}
                 disabled={clearingHistory || threads.length === 0}
               >
-                清空军报
+                清空出征
               </button>
             </div>
             {threadsLoading && <div className="loading">加载中...</div>}
             {!threadsLoading && threads.length === 0 && (
-              <div className="empty-state">暂无军报。</div>
+              <div className="empty-state">暂无出征。</div>
             )}
             {!threadsLoading && threads.length > 0 && (
               <ol className="history-list">
@@ -221,7 +234,7 @@ export function Sidebar({
                         <span className="history-role">军令</span>
                         <span className="history-preview">
                           <span className="history-summary">
-                            {thread.summary || '未命名军报'}
+                            {thread.summary || '未命名出征'}
                           </span>
                           <span className="history-thread-id">{thread.thread_id}</span>
                           {thread.updated_at && (
@@ -268,4 +281,12 @@ export function Sidebar({
       </div>
     </aside>
   )
+}
+
+function getSkillScore(skill: SkillInfo) {
+  return skill.latest_evaluation?.overall_score ?? skill.evaluation?.overall_score
+}
+
+function formatPercent(value: number | undefined | null) {
+  return `${Math.round((value ?? 0) * 100)}%`
 }

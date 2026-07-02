@@ -37,4 +37,16 @@ describe('App stylesheet decorations', () => {
     expect(appCss).toMatch(/\.approval-batch-item \.tool-args\s*\{[^}]*white-space:\s*pre-wrap/s)
     expect(appCss).toMatch(/\.approval-batch-item \.tool-args\s*\{[^}]*overflow-wrap:\s*anywhere/s)
   })
+
+  it('keeps skill evaluation cards aligned with fixed description height', () => {
+    expect(appCss).toMatch(/\.skill-evaluation-grid\s*\{[^}]*grid-auto-rows:\s*1fr/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card\s*\{[^}]*height:\s*100%/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card\s*\{[^}]*display:\s*grid/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card\s*\{[^}]*grid-template-rows:\s*auto auto 1fr/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*display:\s*-webkit-box/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*-webkit-line-clamp:\s*3/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*min-height:\s*3\.54rem/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*max-height:\s*3\.54rem/s)
+    expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*overflow:\s*hidden/s)
+  })
 })
