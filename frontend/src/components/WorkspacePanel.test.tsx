@@ -793,6 +793,152 @@ describe('WorkspacePanel', () => {
     expect(screen.queryByText(/check routing prompt/)).not.toBeInTheDocument()
   })
 
+  it('collapses evaluation case details by default after evaluation completes', async () => {
+    mockApi.listSkills.mockResolvedValue([])
+    mockApi.runSkillEvaluationStream.mockImplementation(async function* () {
+      yield {
+        type: 'done',
+        mode: 'e2e',
+        source: 'golden:test.jsonl',
+        total: 1,
+        completed: 1,
+        percent: 100,
+        report: {
+          skills: [],
+          safety: {
+            total_cases: 1,
+            attack_block_rate: 1,
+            unsafe_tool_call_rate: 0,
+            secret_leak_rate: 0,
+            security_event_precision: 1,
+          },
+          tools: {
+            total_cases: 1,
+            tool_selection_accuracy: 0,
+            argument_fidelity: 0,
+            forbidden_tool_violation_rate: 0,
+          },
+          answers: {
+            total_cases: 1,
+            answer_contains_rate: 0,
+            forbidden_answer_violation_rate: 0,
+          },
+          case_details: [
+            {
+              case_id: 'fail-001',
+              mode: 'e2e',
+              query: 'test query',
+              turns: [],
+              expected_skills: ['weather'],
+              selected_skills: ['resolve-time'],
+              expected_tool_calls: [],
+              actual_tool_calls: [],
+              final_answer: 'test',
+              checks: [
+                {
+                  name: 'skill_routing',
+                  stage: 'routing',
+                  passed: false,
+                  expected: ['weather'],
+                  actual: ['resolve-time'],
+                  reason: 'wrong skill',
+                },
+              ],
+              diagnosis: null,
+              judge: null,
+              log_summary: [],
+            },
+          ],
+        },
+        results: [],
+      }
+    })
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    await user.selectOptions(await screen.findByLabelText('Golden dataset'), 'golden_dataset')
+    await user.click(screen.getByRole('button', { name: '实战测评' }))
+
+    expect(await screen.findByText('Evaluation Details')).toBeInTheDocument()
+
+    const caseListWrapper = document.querySelector('.evaluation-case-list')?.closest('details')
+    expect(caseListWrapper).not.toBeNull()
+    expect(caseListWrapper).not.toHaveAttribute('open')
+
+    const caseDetails = screen.getByText('fail-001').closest('details')
+    expect(caseDetails).not.toHaveAttribute('open')
+  })
+
+  it('opens trend chart in a modal dialog when clicking History', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'weather',
+        description: 'Weather lookup',
+        tool_names: ['weather_lookup'],
+        path: '/skills/weather',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 2,
+          created_at: '2026-07-03T01:00:00Z',
+          skill_name: 'weather',
+          overall_score: 0.9,
+          routing_score: 1,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.7,
+          source: 'golden:new.jsonl',
+          report: {},
+        },
+      },
+    ])
+    mockApi.listSkillEvaluationHistory.mockResolvedValue([
+      {
+        id: 2,
+        created_at: '2026-07-03T01:00:00Z',
+        skill_name: 'weather',
+        overall_score: 0.9,
+        routing_score: 1,
+        runtime_score: null,
+        usage_score: null,
+        static_score: 0.7,
+        source: 'golden:new.jsonl',
+        report: {},
+      },
+      {
+        id: 1,
+        created_at: '2026-07-02T01:00:00Z',
+        skill_name: 'weather',
+        overall_score: 0.7,
+        routing_score: 0.8,
+        runtime_score: null,
+        usage_score: null,
+        static_score: 0.6,
+        source: 'golden:old.jsonl',
+        report: {},
+      },
+    ])
+    const user = userEvent.setup()
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText('History')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /History/i }))
+
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByLabelText('weather metric trend chart')).toBeInTheDocument()
+  })
+
   it('shows skill evaluation errors when the golden dataset cannot be loaded', async () => {
     mockApi.listSkills.mockResolvedValue([])
     mockApi.runSkillEvaluationStream.mockImplementation(async function* () {

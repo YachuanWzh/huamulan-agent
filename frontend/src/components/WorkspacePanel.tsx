@@ -658,6 +658,8 @@ function SkillEvaluationHistoryList({
   history: SkillEvaluationSnapshot[]
   skillName: string
 }) {
+  const [showTrendDialog, setShowTrendDialog] = useState(false)
+
   if (history.length === 0) return null
   const [latest, previous] = history
   const delta =
@@ -668,17 +670,43 @@ function SkillEvaluationHistoryList({
   return (
     <div className="skill-evaluation-history">
       <SkillTrendSparkline history={history} skillName={skillName} />
-      <details>
-        <summary>
-          <strong>History</strong>
-          {delta != null && (
-            <span className={delta >= 0 ? 'trend-positive' : 'trend-negative'}>
-              {formatSignedPercent(delta)}
-            </span>
-          )}
-        </summary>
-        <MetricTrendChart history={history} skillName={skillName} />
-      </details>
+      <button
+        type="button"
+        className="skill-history-dialog-trigger"
+        onClick={() => setShowTrendDialog(true)}
+      >
+        <strong>History</strong>
+        {delta != null && (
+          <span className={delta >= 0 ? 'trend-positive' : 'trend-negative'}>
+            {formatSignedPercent(delta)}
+          </span>
+        )}
+      </button>
+      {showTrendDialog && (
+        <dialog
+          open
+          className="skill-trend-dialog"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setShowTrendDialog(false)
+          }}
+          onClose={() => setShowTrendDialog(false)}
+        >
+          <div className="skill-trend-dialog-content">
+            <div className="skill-trend-dialog-header">
+              <h3>{skillName} — Trend</h3>
+              <button
+                type="button"
+                className="skill-trend-dialog-close"
+                onClick={() => setShowTrendDialog(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <MetricTrendChart history={history} skillName={skillName} />
+          </div>
+        </dialog>
+      )}
       <ol>
         {history.slice(0, 3).map((item) => (
           <li key={item.id}>
@@ -839,12 +867,15 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
           )}
         </div>
       </div>
-      <div className="evaluation-case-list">
+      <details className="evaluation-case-list-wrapper">
+        <summary className="evaluation-case-list-toggle">
+          <span>展开详情 ({details.length} cases)</span>
+        </summary>
+        <div className="evaluation-case-list">
         {routingResults.map(({ detail, checks, passed }) => (
           <details
             key={detail.case_id}
             className={`evaluation-case stage-${passed ? 'passed' : 'routing'}`}
-            open={!passed}
           >
             <summary>
               <span>{detail.case_id}</span>
@@ -883,7 +914,8 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
             </div>
           </details>
         ))}
-      </div>
+        </div>
+      </details>
     </section>
   )
 }

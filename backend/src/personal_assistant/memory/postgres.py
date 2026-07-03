@@ -171,7 +171,7 @@ class PostgresMemory:
                         (checkpoint->>'ts')::timestamptz AS updated_at,
                         checkpoint
                     FROM checkpoints
-                    WHERE thread_id NOT LIKE 'skill-eval-%'
+                    WHERE thread_id NOT LIKE 'skill-eval-%%'
                     ORDER BY thread_id, (checkpoint->>'ts')::timestamptz DESC NULLS LAST
                 )
                 SELECT thread_id, updated_at, checkpoint
