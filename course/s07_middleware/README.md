@@ -226,6 +226,61 @@ langgraph-claw 的真实实现还在中间件之前加入了**审批管线**（s
 | `PROMPT_DETECTION_PATTERNS` | `_PROMPT_PATTERNS` (line 112) |
 | `TOOL_DETECTION_PATTERNS` | `_TOOL_PATTERNS` (line 139) |
 
+### 额外防线：Message Sanitization（消息清理）
+
+这是工程化兜底中最隐蔽但极其重要的一层。它不在中间件链上运行，而是在**每次调 LLM 之前**
+自动执行。
+
+**问题**：OpenAI/DeepSeek API 有一个严格约束——每个带 `tool_calls` 的 AIMessage 后面
+必须紧跟着对应数量的 ToolMessage。如果 LangGraph 的路由逻辑出了 bug（比如从 approval
+暂停恢复后错误地跳过了 tools 节点），就会产生一个"有 tool_calls 但没 ToolMessage"的
+脏 AIMessage。这种消息发给 API 直接报 `BadRequestError`。
+
+**解决方案**：在发送请求前自动扫描消息列表，把没被回答的 tool_calls 从消息里摘掉：
+
+```python
+def sanitize_messages_for_api(messages):
+    """清理没有对应 ToolMessage 的 tool_calls。"""
+    sanitized = []
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        if isinstance(m, AIMessage) and m.tool_calls:
+            # 收集紧跟在后面的 ToolMessages
+            answered_ids = set()
+            j = i + 1
+            while j < len(messages) and isinstance(messages[j], ToolMessage):
+                answered_ids.add(messages[j].tool_call_id)
+                j += 1
+
+            # 只保留有回答的 tool_calls
+            answered = [tc for tc in m.tool_calls if tc["id"] in answered_ids]
+            unanswered = [tc for tc in m.tool_calls if tc["id"] not in answered_ids]
+
+            if unanswered:
+                # 构造干净的消息
+                sanitized.append(AIMessage(
+                    content=m.content,
+                    tool_calls=answered if answered else [],
+                    id=getattr(m, "id", None),
+                ))
+            else:
+                sanitized.append(m)
+            i = j
+            continue
+        sanitized.append(m)
+        i += 1
+    return sanitized
+```
+
+**为什么需要它？** 与其让 LangGraph 路由 bug 导致 API 崩溃、用户看到错误，
+不如在发请求之前做一次"体检"，把不合规的消息修好。优雅降级，而不是直接报错。
+
+**兜什么底**：即使 LangGraph 路由有 bug，也不会导致 API 调用崩溃。
+
+> 这一层在真实项目中位于 `harness.py` 的 `_sanitize_messages_for_api()` 函数，
+> 在每次 `agent_node` 调用 LLM 之前执行。
+
 ## 变更内容
 
 | 组件 | 之前 | 之后 |
@@ -234,6 +289,7 @@ langgraph-claw 的真实实现还在中间件之前加入了**审批管线**（s
 | 用户输入 | 直接传给 LLM | PromptGuard 扫描注入/越狱 |
 | 工具命令 | 直接执行 | ToolGuard 扫描危险模式 |
 | 调用频率 | 无限制 | RateLimit + CallLimit + LoopDetection |
+| 脏消息 | API 直接报错崩溃 | Message Sanitization 自动清理 |
 | 阻断响应 | （无） | ToolMessage 返回 LLM，触发重新推理 |
 
 ## 试一试
