@@ -77,7 +77,13 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
                 "## Tool Calls",
                 f"- Total Cases: {report.tools.total_cases}",
                 f"- Tool Selection Accuracy: {_fmt_rate(report.tools.tool_selection_accuracy)}",
+                f"- Tool Call Precision: {_fmt_rate(report.tools.tool_call_precision)}",
+                f"- Tool Call Recall: {_fmt_rate(report.tools.tool_call_recall)}",
+                f"- Tool Call F1: {_fmt_rate(report.tools.tool_call_f1)}",
                 f"- Argument Fidelity: {_fmt_rate(report.tools.argument_fidelity)}",
+                f"- Argument Precision: {_fmt_rate(report.tools.argument_precision)}",
+                f"- Argument Recall: {_fmt_rate(report.tools.argument_recall)}",
+                f"- Argument F1: {_fmt_rate(report.tools.argument_f1)}",
                 (
                     "- Forbidden Tool Violation Rate: "
                     f"{_fmt_rate(report.tools.forbidden_tool_violation_rate)}"
@@ -94,6 +100,34 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
                 (
                     "- Forbidden Answer Violation Rate: "
                     f"{_fmt_rate(report.answers.forbidden_answer_violation_rate)}"
+                ),
+                "",
+            ]
+        )
+    if report.hallucinations is not None:
+        lines.extend(
+            [
+                "## Hallucinations",
+                f"- Total Cases: {report.hallucinations.total_cases}",
+                (
+                    "- Answer Hallucination Rate: "
+                    f"{_fmt_rate(report.hallucinations.answer_hallucination_rate)}"
+                ),
+                (
+                    "- Repeated Tool Call Rate: "
+                    f"{_fmt_rate(report.hallucinations.repeated_tool_call_rate)}"
+                ),
+                (
+                    "- Tool Argument Hallucination Rate: "
+                    f"{_fmt_rate(report.hallucinations.tool_argument_hallucination_rate)}"
+                ),
+                (
+                    "- Tool Evidence Usage Rate: "
+                    f"{_fmt_rate(report.hallucinations.tool_evidence_usage_rate)}"
+                ),
+                (
+                    "- Unsupported Answer Rate: "
+                    f"{_fmt_rate(report.hallucinations.unsupported_answer_rate)}"
                 ),
                 "",
             ]
@@ -126,7 +160,9 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
 def _score_components(routing, static, runtime: RuntimeSkillMetrics | None) -> dict[str, float]:
     components: dict[str, float] = {}
     if routing is not None:
-        accuracy = routing.selection_accuracy
+        accuracy = routing.skill_selection_f1
+        if accuracy is None:
+            accuracy = routing.selection_accuracy
         false_positive_rate = routing.false_positive_rate
         if accuracy is not None:
             fp_penalty = 1.0 - false_positive_rate if false_positive_rate is not None else 1.0

@@ -8,6 +8,8 @@ from personal_assistant.skills.loader import SkillRegistry
 from personal_assistant.skills.evaluation import (
     AgentEvaluationCase,
     GoldenSkillCase,
+    RoutingMetrics,
+    StaticSkillMetrics,
     evaluate_skill_registry,
     evaluate_routing_cases,
     evaluate_runtime_logs,
@@ -15,8 +17,11 @@ from personal_assistant.skills.evaluation import (
     render_markdown_report,
 )
 from personal_assistant.skills.evaluation.__main__ import main as skill_eval_main
+from personal_assistant.skills.evaluation.report import _score_components
 from personal_assistant.api.server import (
+    _case_score_components,
     _iter_skill_evaluation_events,
+    _list_skill_evaluation_history,
     _list_golden_datasets,
     _resolve_golden_path,
     _reset_skill_evaluations,
@@ -80,6 +85,82 @@ async def test_routing_metrics_measure_selection_accuracy_and_false_positives(
     assert metrics.selection_accuracy == 0.5
     assert metrics.false_positive_rate == 0.5
     assert metrics.parameter_extraction_fidelity is None
+
+
+@pytest.mark.asyncio
+async def test_routing_metrics_report_precision_recall_f1_for_over_selection(
+    tmp_path: Path,
+) -> None:
+    _write_skill(tmp_path, "find-skills", "Find installable skills.", ["skill"])
+    _write_skill(tmp_path, "resolve-time", "Resolve current date and time.", ["time"])
+    registry = SkillRegistry(tmp_path)
+    cases = [
+        GoldenSkillCase(
+            id="hard-010",
+            query="find a time related skill",
+            expected_skills=["find-skills"],
+        )
+    ]
+
+    metrics = await evaluate_routing_cases(registry, cases)
+
+    assert metrics.selection_accuracy == 0.0
+    assert metrics.skill_selection_precision == pytest.approx(0.5)
+    assert metrics.skill_selection_recall == pytest.approx(1.0)
+    assert metrics.skill_selection_f1 == pytest.approx(2 / 3)
+    assert metrics.skill_over_selection_rate == pytest.approx(1.0)
+    assert metrics.skill_under_selection_rate == pytest.approx(0.0)
+
+
+def test_routing_score_prefers_skill_selection_f1_over_exact_match() -> None:
+    routing = RoutingMetrics(
+        total_cases=1,
+        selection_accuracy=0.0,
+        false_positive_rate=None,
+        skill_selection_precision=0.5,
+        skill_selection_recall=1.0,
+        skill_selection_f1=2 / 3,
+    )
+    static = StaticSkillMetrics(
+        skill_name="find-skills",
+        description_tokens=2,
+        skill_md_lines=1,
+        python_lines=0,
+        max_cyclomatic_complexity=0,
+        tool_count=0,
+    )
+
+    components = _score_components(routing, static, None)
+
+    assert components["routing"] == pytest.approx(2 / 3)
+
+
+def test_case_score_counts_skill_recall_when_other_skill_is_over_selected() -> None:
+    static = StaticSkillMetrics(
+        skill_name="find-skills",
+        description_tokens=2,
+        skill_md_lines=1,
+        python_lines=0,
+        max_cyclomatic_complexity=0,
+        tool_count=0,
+    )
+    case_results = [
+        {
+            "case": GoldenSkillCase(
+                id="hard-010",
+                query="find a time related skill",
+                expected_skills=["find-skills"],
+            ),
+            "selected_skills": ["find-skills", "resolve-time"],
+            "logs": [],
+            "response": "",
+            "judge": None,
+        }
+    ]
+
+    components = _case_score_components("find-skills", case_results, static, "routing")
+
+    assert components["routing"] == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -327,6 +408,26 @@ class _EvaluationMemory:
             for source in [self.source]
         ]
 
+    async def list_skill_evaluation_history(self, skill_name=None, limit=100):
+        return [
+            SkillEvaluationSnapshot(
+                id=2,
+                created_at=datetime(2026, 7, 3, tzinfo=UTC),
+                skill_name=skill_name or "weather",
+                overall_score=0.9,
+                source="golden:new.jsonl",
+                report={},
+            ),
+            SkillEvaluationSnapshot(
+                id=1,
+                created_at=datetime(2026, 7, 2, tzinfo=UTC),
+                skill_name=skill_name or "weather",
+                overall_score=0.7,
+                source="golden:old.jsonl",
+                report={},
+            ),
+        ]
+
     async def reset_skill_evaluation_results(self):
         self.recorded = None
         self.source = None
@@ -364,6 +465,16 @@ async def test_reset_skill_evaluations_clears_persisted_results() -> None:
 
     assert response.deleted == 3
     assert response.results == []
+
+
+@pytest.mark.asyncio
+async def test_list_skill_evaluation_history_returns_persisted_trend_rows() -> None:
+    memory = _EvaluationMemory()
+
+    history = await _list_skill_evaluation_history(memory, skill_name="weather", limit=20)
+
+    assert [item.id for item in history] == [2, 1]
+    assert [item.overall_score for item in history] == [0.9, 0.7]
 
 
 def test_resolve_golden_path_accepts_dataset_stem_from_search_roots(tmp_path: Path) -> None:

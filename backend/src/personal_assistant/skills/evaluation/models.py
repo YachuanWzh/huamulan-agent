@@ -36,6 +36,11 @@ class RoutingMetrics(BaseModel):
     selection_accuracy: float | None = None
     false_positive_rate: float | None = None
     parameter_extraction_fidelity: float | None = None
+    skill_selection_precision: float | None = None
+    skill_selection_recall: float | None = None
+    skill_selection_f1: float | None = None
+    skill_over_selection_rate: float | None = None
+    skill_under_selection_rate: float | None = None
 
 
 class StaticSkillMetrics(BaseModel):
@@ -73,12 +78,32 @@ class ToolEvaluationMetrics(BaseModel):
     tool_selection_accuracy: float | None = None
     argument_fidelity: float | None = None
     forbidden_tool_violation_rate: float | None = None
+    tool_call_precision: float | None = None
+    tool_call_recall: float | None = None
+    tool_call_f1: float | None = None
+    unnecessary_tool_call_rate: float | None = None
+    missing_tool_call_rate: float | None = None
+    duplicate_tool_call_rate: float | None = None
+    argument_precision: float | None = None
+    argument_recall: float | None = None
+    argument_f1: float | None = None
+    argument_schema_validity_rate: float | None = None
+    argument_value_hallucination_rate: float | None = None
 
 
 class AnswerEvaluationMetrics(BaseModel):
     total_cases: int
     answer_contains_rate: float | None = None
     forbidden_answer_violation_rate: float | None = None
+
+
+class HallucinationEvaluationMetrics(BaseModel):
+    total_cases: int
+    answer_hallucination_rate: float | None = None
+    repeated_tool_call_rate: float | None = None
+    tool_argument_hallucination_rate: float | None = None
+    tool_evidence_usage_rate: float | None = None
+    unsupported_answer_rate: float | None = None
 
 
 class EvaluationCheck(BaseModel):
@@ -139,4 +164,5 @@ class SkillEvaluationReport(BaseModel):
     safety: SafetyEvaluationMetrics | None = None
     tools: ToolEvaluationMetrics | None = None
     answers: AnswerEvaluationMetrics | None = None
+    hallucinations: HallucinationEvaluationMetrics | None = None
     case_details: list[CaseEvaluationDetail] = Field(default_factory=list)

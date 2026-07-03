@@ -12,7 +12,6 @@ import {
   type SkillEvaluationStreamEvent,
   type SkillInfo,
 } from '../lib/api'
-import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
   panel: 'skills' | 'checkpoint' | 'audit'
@@ -81,6 +80,9 @@ export function WorkspacePanel({
     percent: number
   } | null>(null)
   const [evaluationReport, setEvaluationReport] = useState<SkillEvaluationReport | null>(null)
+  const [evaluationHistory, setEvaluationHistory] = useState<
+    Record<string, SkillEvaluationSnapshot[]>
+  >({})
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -120,12 +122,34 @@ export function WorkspacePanel({
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true)
     try {
-      setSkills(await api.listSkills())
+      const nextSkills = await api.listSkills()
+      setSkills(nextSkills)
+      await loadSkillEvaluationHistory(nextSkills)
     } catch {
       setSkills([])
+      setEvaluationHistory({})
     }
     setSkillsLoading(false)
   }, [])
+
+  const loadSkillEvaluationHistory = async (nextSkills: SkillInfo[]) => {
+    const skillsWithEvaluations = nextSkills.filter((skill) => skill.latest_evaluation)
+    if (skillsWithEvaluations.length === 0) {
+      setEvaluationHistory({})
+      return
+    }
+    try {
+      const entries = await Promise.all(
+        skillsWithEvaluations.map(async (skill) => [
+          skill.name,
+          await api.listSkillEvaluationHistory(skill.name),
+        ] as const),
+      )
+      setEvaluationHistory(Object.fromEntries(entries))
+    } catch {
+      setEvaluationHistory({})
+    }
+  }
 
   const loadGoldenDatasets = useCallback(async () => {
     try {
@@ -170,7 +194,11 @@ export function WorkspacePanel({
       percent: event.percent ?? 0,
     })
     if (event.type === 'done' && event.results.length > 0) {
-      setSkills((prev) => mergeLatestSkillEvaluations(prev, event.results))
+      setSkills((prev) => {
+        const nextSkills = mergeLatestSkillEvaluations(prev, event.results)
+        void loadSkillEvaluationHistory(nextSkills)
+        return nextSkills
+      })
     }
     if (event.type === 'done' && event.report) {
       setEvaluationReport(event.report)
@@ -366,13 +394,15 @@ export function WorkspacePanel({
           )}
           {!skillsLoading && skills.length > 0 && (
             <div className="skill-evaluation-grid">
-              {skills.map((skill) => (
+              {skills.map((skill) => {
+                const skillHistory = evaluationHistory[skill.name] ?? []
+                return (
                 <section key={skill.name} className="skill-evaluation-card">
                   <div className="skill-evaluation-card-header">
                     <div>
                       <h3>{skill.name}</h3>
                       <p title={skill.description}>{skill.description}</p>
-                      {skill.latest_evaluation?.source && (
+                      {skill.latest_evaluation?.source && skillHistory.length === 0 && (
                         <small>{skill.latest_evaluation.source}</small>
                       )}
                     </div>
@@ -384,7 +414,7 @@ export function WorkspacePanel({
                   >
                     <span
                       style={{
-                        width: `${Math.round((getSkillScore(skill) ?? 0) * 100)}%`,
+                        width: `${Math.round(normalizeScore(getSkillScore(skill)) * 100)}%`,
                       }}
                     />
                   </div>
@@ -406,8 +436,12 @@ export function WorkspacePanel({
                       <dd>{skill.evaluation?.tool_count ?? skill.tool_names.length}</dd>
                     </div>
                   </dl>
+                  <SkillEvaluationHistoryList
+                    history={skillHistory}
+                    skillName={skill.name}
+                  />
                 </section>
-              ))}
+              )})}
             </div>
           )}
         </div>
@@ -609,16 +643,185 @@ function buildRetryChains(logs: ExecutionLog[]) {
 }
 
 function formatPercent(value: number | undefined | null) {
-  return `${Math.round((value ?? 0) * 100)}%`
+  return `${Math.round(normalizeScore(value) * 100)}%`
+}
+
+function normalizeScore(value: number | undefined | null) {
+  const score = value ?? 0
+  return score > 1 ? score / 100 : score
+}
+
+function SkillEvaluationHistoryList({
+  history,
+  skillName,
+}: {
+  history: SkillEvaluationSnapshot[]
+  skillName: string
+}) {
+  if (history.length === 0) return null
+  const [latest, previous] = history
+  const delta =
+    latest && previous
+      ? normalizeScore(latest.overall_score) - normalizeScore(previous.overall_score)
+      : null
+
+  return (
+    <div className="skill-evaluation-history">
+      <SkillTrendSparkline history={history} skillName={skillName} />
+      <details>
+        <summary>
+          <strong>History</strong>
+          {delta != null && (
+            <span className={delta >= 0 ? 'trend-positive' : 'trend-negative'}>
+              {formatSignedPercent(delta)}
+            </span>
+          )}
+        </summary>
+        <MetricTrendChart history={history} skillName={skillName} />
+      </details>
+      <ol>
+        {history.slice(0, 3).map((item) => (
+          <li key={item.id}>
+            <span>{formatPercent(item.overall_score)}</span>
+            <small>{item.source ?? item.created_at}</small>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+function SkillTrendSparkline({
+  history,
+  skillName,
+}: {
+  history: SkillEvaluationSnapshot[]
+  skillName: string
+}) {
+  const points = chronological(history)
+    .slice(-10)
+    .map((item) => normalizeScore(item.overall_score))
+  if (points.length < 2) {
+    return <div className="trend-empty">Need at least 2 runs</div>
+  }
+  return (
+    <svg
+      className="skill-trend-sparkline"
+      viewBox="0 0 120 36"
+      role="img"
+      aria-label={`${skillName} overall trend`}
+      preserveAspectRatio="none"
+    >
+      <path className="trend-gridline" d="M0 18 H120" />
+      <path className="trend-line trend-overall" d={scorePath(points, 120, 36)} />
+      {points.map((score, index) => (
+        <circle
+          key={`${score}-${index}`}
+          className="trend-point"
+          cx={pointX(index, points.length, 120)}
+          cy={pointY(score, 36)}
+          r="1.8"
+        />
+      ))}
+    </svg>
+  )
+}
+
+function MetricTrendChart({
+  history,
+  skillName,
+}: {
+  history: SkillEvaluationSnapshot[]
+  skillName: string
+}) {
+  const items = chronological(history).slice(-10)
+  const metrics = [
+    metricSeries('overall', items.map((item) => item.overall_score)),
+    metricSeries('routing', items.map((item) => item.routing_score)),
+    metricSeries('runtime', items.map((item) => item.runtime_score)),
+    metricSeries('static', items.map((item) => item.static_score)),
+  ].filter((metric) => metric.values.length >= 2)
+
+  if (metrics.length === 0) {
+    return <div className="trend-empty">Need at least 2 runs</div>
+  }
+
+  return (
+    <div className="metric-trend-chart">
+      <svg
+        viewBox="0 0 240 112"
+        role="img"
+        aria-label={`${skillName} metric trend chart`}
+        preserveAspectRatio="none"
+      >
+        <path className="trend-gridline" d="M0 28 H240 M0 56 H240 M0 84 H240" />
+        {metrics.map((metric) => (
+          <path
+            key={metric.name}
+            className={`trend-line trend-${metric.name}`}
+            d={scorePath(metric.values, 240, 112)}
+          />
+        ))}
+      </svg>
+      <div className="metric-trend-legend">
+        {metrics.map((metric) => (
+          <span key={metric.name} className={`trend-${metric.name}`}>
+            {metric.name}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function metricSeries(name: string, values: Array<number | null | undefined>) {
+  return {
+    name,
+    values: values
+      .filter((value): value is number => value != null)
+      .map((value) => normalizeScore(value)),
+  }
+}
+
+function chronological(history: SkillEvaluationSnapshot[]) {
+  return [...history].reverse()
+}
+
+function scorePath(values: number[], width: number, height: number) {
+  return values
+    .map((score, index) => {
+      const command = index === 0 ? 'M' : 'L'
+      return `${command}${pointX(index, values.length, width).toFixed(2)} ${pointY(
+        score,
+        height,
+      ).toFixed(2)}`
+    })
+    .join(' ')
+}
+
+function pointX(index: number, count: number, width: number) {
+  return count <= 1 ? width / 2 : (index / (count - 1)) * width
+}
+
+function pointY(score: number, height: number) {
+  const padding = height * 0.14
+  const plotHeight = height - padding * 2
+  return padding + (1 - Math.max(0, Math.min(1, score))) * plotHeight
+}
+
+function formatSignedPercent(value: number) {
+  const rounded = Math.round(value * 100)
+  return `${rounded >= 0 ? '+' : ''}${rounded}%`
 }
 
 function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
-  const failedCount = details.filter((detail) => detail.diagnosis.stage !== 'passed').length
-  const stageCounts = details.reduce<Record<string, number>>((counts, detail) => {
-    const stage = detail.diagnosis.stage || 'unknown'
-    counts[stage] = (counts[stage] ?? 0) + 1
-    return counts
-  }, {})
+  const routingResults = details.map((detail) => {
+    const checks = detail.checks.filter((check) => check.stage === 'routing')
+    const passed = checks.length > 0 && checks.every((check) => check.passed)
+    return { detail, checks, passed }
+  })
+  const failedCount = routingResults.filter((result) => !result.passed).length
+  const passedCount = routingResults.length - failedCount
 
   return (
     <section className="evaluation-details" aria-label="Evaluation details">
@@ -626,57 +829,48 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
         <div>
           <h3>Evaluation Details</h3>
           <p>
-            {failedCount} failed / {details.length} cases
+            {failedCount} routing failed / {details.length} cases
           </p>
         </div>
         <div className="evaluation-stage-chips" aria-label="Failure stage summary">
-          {Object.entries(stageCounts).map(([stage, count]) => (
-            <span key={stage} className={`stage-chip stage-${stage}`}>
-              {stage} {count}
-            </span>
-          ))}
+          <span className="stage-chip stage-passed">routing passed {passedCount}</span>
+          {failedCount > 0 && (
+            <span className="stage-chip stage-routing">routing failed {failedCount}</span>
+          )}
         </div>
       </div>
       <div className="evaluation-case-list">
-        {details.map((detail) => (
+        {routingResults.map(({ detail, checks, passed }) => (
           <details
             key={detail.case_id}
-            className={`evaluation-case stage-${detail.diagnosis.stage}`}
-            open={detail.diagnosis.stage !== 'passed'}
+            className={`evaluation-case stage-${passed ? 'passed' : 'routing'}`}
+            open={!passed}
           >
             <summary>
               <span>{detail.case_id}</span>
-              <strong>{detail.diagnosis.stage}</strong>
-              {detail.judge?.available && (
-                <em>Judge {formatPercent(detail.judge.score)}</em>
-              )}
+              <strong>{passed ? 'PASS' : 'FAIL'}</strong>
             </summary>
             <div className="evaluation-case-body">
-              <p>{detail.diagnosis.summary}</p>
-              <div className="evaluation-detail-grid">
-                <EvaluationJsonBlock
-                  label="Expected"
-                  value={{
-                    skills: detail.expected_skills,
-                    tool_calls: detail.expected_tool_calls,
-                  }}
-                />
-                <EvaluationJsonBlock
-                  label="Actual"
-                  value={{
-                    skills: detail.selected_skills,
-                    tool_calls: detail.actual_tool_calls,
-                  }}
-                />
-              </div>
-              {detail.final_answer && (
-                <div className="evaluation-answer">
-                  <strong>Final answer</strong>
-                  <MarkdownRenderer content={detail.final_answer} />
+              {!passed && (
+                <div className="evaluation-detail-grid">
+                  <EvaluationJsonBlock
+                    label="Expected"
+                    value={{
+                      skills: detail.expected_skills,
+                      tool_calls: detail.expected_tool_calls,
+                    }}
+                  />
+                  <EvaluationJsonBlock
+                    label="Actual"
+                    value={{
+                      skills: detail.selected_skills,
+                      tool_calls: detail.actual_tool_calls,
+                    }}
+                  />
                 </div>
               )}
               <div className="evaluation-checks">
-                {detail.checks.map((check) => (
+                {checks.map((check) => (
                   <span
                     key={`${detail.case_id}-${check.stage}-${check.name}`}
                     data-status={check.passed ? 'pass' : 'fail'}
@@ -686,22 +880,6 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
                   </span>
                 ))}
               </div>
-              {detail.judge && (
-                <div className="evaluation-judge">
-                  <strong>
-                    {detail.judge.model}
-                    {detail.judge.failure_stage ? ` / ${detail.judge.failure_stage}` : ''}
-                  </strong>
-                  <p>{detail.judge.reason}</p>
-                  {detail.judge.evidence.length > 0 && (
-                    <small>{detail.judge.evidence.join(' | ')}</small>
-                  )}
-                  <p>{detail.judge.recommendation}</p>
-                </div>
-              )}
-              {detail.log_summary.length > 0 && (
-                <EvaluationJsonBlock label="Log summary" value={detail.log_summary} />
-              )}
             </div>
           </details>
         ))}
@@ -740,8 +918,16 @@ function buildEvaluationSummary(report: SkillEvaluationReport) {
       value: formatPercent(report.tools?.tool_selection_accuracy),
     },
     {
+      label: 'Tool F1',
+      value: formatPercent(report.tools?.tool_call_f1),
+    },
+    {
       label: 'Argument Fidelity',
       value: formatPercent(report.tools?.argument_fidelity),
+    },
+    {
+      label: 'Argument F1',
+      value: formatPercent(report.tools?.argument_f1),
     },
     {
       label: 'Answer Contains',
@@ -750,6 +936,26 @@ function buildEvaluationSummary(report: SkillEvaluationReport) {
     {
       label: 'Answer Violations',
       value: formatPercent(report.answers?.forbidden_answer_violation_rate),
+    },
+    {
+      label: 'Answer Hallucination',
+      value: formatPercent(report.hallucinations?.answer_hallucination_rate),
+    },
+    {
+      label: 'Repeated Tools',
+      value: formatPercent(report.hallucinations?.repeated_tool_call_rate),
+    },
+    {
+      label: 'Argument Hallucination',
+      value: formatPercent(report.hallucinations?.tool_argument_hallucination_rate),
+    },
+    {
+      label: 'Evidence Usage',
+      value: formatPercent(report.hallucinations?.tool_evidence_usage_rate),
+    },
+    {
+      label: 'Unsupported Answer',
+      value: formatPercent(report.hallucinations?.unsupported_answer_rate),
     },
   ]
 }

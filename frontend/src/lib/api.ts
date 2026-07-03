@@ -172,11 +172,30 @@ export interface SkillEvaluationReport {
     tool_selection_accuracy?: number | null
     argument_fidelity?: number | null
     forbidden_tool_violation_rate?: number | null
+    tool_call_precision?: number | null
+    tool_call_recall?: number | null
+    tool_call_f1?: number | null
+    unnecessary_tool_call_rate?: number | null
+    missing_tool_call_rate?: number | null
+    duplicate_tool_call_rate?: number | null
+    argument_precision?: number | null
+    argument_recall?: number | null
+    argument_f1?: number | null
+    argument_schema_validity_rate?: number | null
+    argument_value_hallucination_rate?: number | null
   } | null
   answers?: {
     total_cases: number
     answer_contains_rate?: number | null
     forbidden_answer_violation_rate?: number | null
+  } | null
+  hallucinations?: {
+    total_cases: number
+    answer_hallucination_rate?: number | null
+    repeated_tool_call_rate?: number | null
+    tool_argument_hallucination_rate?: number | null
+    tool_evidence_usage_rate?: number | null
+    unsupported_answer_rate?: number | null
   } | null
   case_details?: CaseEvaluationDetail[]
 }
@@ -511,6 +530,14 @@ export const api = {
 
   listSkillEvaluations: () =>
     request<SkillEvaluationSnapshot[]>('/api/skills/evaluation/latest'),
+
+  listSkillEvaluationHistory: (skillName?: string, limit = 100) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (skillName) params.set('skill_name', skillName)
+    return request<SkillEvaluationSnapshot[]>(
+      `/api/skills/evaluation/history?${params.toString()}`,
+    )
+  },
 
   listSkillEvaluationDatasets: () =>
     request<SkillEvaluationDataset[]>('/api/skills/evaluation/golden-datasets'),

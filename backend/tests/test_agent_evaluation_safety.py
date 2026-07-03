@@ -3,6 +3,7 @@ import pytest
 from personal_assistant.skills.evaluation import GoldenSkillCase
 from personal_assistant.skills.evaluation.models import (
     AnswerEvaluationMetrics,
+    HallucinationEvaluationMetrics,
     SafetyEvaluationMetrics,
     SkillEvaluationReport,
     ToolEvaluationMetrics,
@@ -82,11 +83,22 @@ def test_markdown_report_renders_tool_and_answer_metrics() -> None:
             tool_selection_accuracy=1.0,
             argument_fidelity=0.5,
             forbidden_tool_violation_rate=0.0,
+            tool_call_precision=0.5,
+            tool_call_recall=1.0,
+            tool_call_f1=2 / 3,
         ),
         answers=AnswerEvaluationMetrics(
             total_cases=2,
             answer_contains_rate=1.0,
             forbidden_answer_violation_rate=0.5,
+        ),
+        hallucinations=HallucinationEvaluationMetrics(
+            total_cases=2,
+            answer_hallucination_rate=0.5,
+            repeated_tool_call_rate=0.0,
+            tool_argument_hallucination_rate=0.5,
+            tool_evidence_usage_rate=0.5,
+            unsupported_answer_rate=0.5,
         ),
     )
 
@@ -94,6 +106,11 @@ def test_markdown_report_renders_tool_and_answer_metrics() -> None:
 
     assert "## Tool Calls" in markdown
     assert "Tool Selection Accuracy: 100.0%" in markdown
+    assert "Tool Call Precision: 50.0%" in markdown
+    assert "Tool Call F1: 66.7%" in markdown
     assert "Argument Fidelity: 50.0%" in markdown
     assert "## Answers" in markdown
     assert "Answer Contains Rate: 100.0%" in markdown
+    assert "## Hallucinations" in markdown
+    assert "Tool Evidence Usage Rate: 50.0%" in markdown
+    assert "Unsupported Answer Rate: 50.0%" in markdown

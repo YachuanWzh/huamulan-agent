@@ -171,6 +171,7 @@ class PostgresMemory:
                         (checkpoint->>'ts')::timestamptz AS updated_at,
                         checkpoint
                     FROM checkpoints
+                    WHERE thread_id NOT LIKE 'skill-eval-%'
                     ORDER BY thread_id, (checkpoint->>'ts')::timestamptz DESC NULLS LAST
                 )
                 SELECT thread_id, updated_at, checkpoint
@@ -421,6 +422,55 @@ class PostgresMemory:
                 runtime_score=row[5],
                 usage_score=row[6],
                 static_score=row[7],
+                source=row[8],
+                report=row[9] or {},
+            )
+            for row in rows
+        ]
+
+    async def list_skill_evaluation_history(
+        self,
+        skill_name: str | None = None,
+        limit: int = 100,
+    ) -> list[SkillEvaluationSnapshot]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            if skill_name:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, created_at, skill_name, overall_score, routing_score,
+                           runtime_score, usage_score, static_score, source, report
+                    FROM skill_evaluation_results
+                    WHERE skill_name = %s
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (skill_name, limit),
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, created_at, skill_name, overall_score, routing_score,
+                           runtime_score, usage_score, static_score, source, report
+                    FROM skill_evaluation_results
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            rows = await cursor.fetchall()
+        return [
+            SkillEvaluationSnapshot(
+                id=row[0],
+                created_at=row[1],
+                skill_name=row[2],
+                overall_score=_normalized_score(row[3]),
+                routing_score=_normalized_optional_score(row[4]),
+                runtime_score=_normalized_optional_score(row[5]),
+                usage_score=_normalized_optional_score(row[6]),
+                static_score=_normalized_optional_score(row[7]),
                 source=row[8],
                 report=row[9] or {},
             )
@@ -935,3 +985,14 @@ def _json_text(value: Any) -> str:
 
 def _jsonable(value: Any) -> Any:
     return jsonable_encoder(value)
+
+
+def _normalized_score(value: Any) -> float:
+    number = float(value)
+    return number / 100 if number > 1 else number
+
+
+def _normalized_optional_score(value: Any) -> float | None:
+    if value is None:
+        return None
+    return _normalized_score(value)

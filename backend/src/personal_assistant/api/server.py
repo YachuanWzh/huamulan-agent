@@ -58,6 +58,7 @@ from personal_assistant.skills.evaluation.diagnostics import build_case_evaluati
 from personal_assistant.skills.evaluation.judge import evaluate_case_with_judge
 from personal_assistant.skills.evaluation.quality import (
     evaluate_answer_cases,
+    evaluate_hallucination_cases,
     evaluate_tool_cases,
 )
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
@@ -326,6 +327,18 @@ async def latest_skill_evaluations() -> list[SkillEvaluationSnapshot]:
     return await memory.list_latest_skill_evaluations()
 
 
+@app.get("/api/skills/evaluation/history", response_model=list[SkillEvaluationSnapshot])
+async def skill_evaluation_history(
+    skill_name: str | None = None,
+    limit: int = 100,
+) -> list[SkillEvaluationSnapshot]:
+    return await _list_skill_evaluation_history(
+        memory,
+        skill_name=skill_name,
+        limit=limit,
+    )
+
+
 @app.get("/api/skills/evaluation/golden-datasets", response_model=list[SkillEvaluationDataset])
 async def list_skill_evaluation_datasets() -> list[SkillEvaluationDataset]:
     return _list_golden_datasets()
@@ -377,6 +390,17 @@ async def run_skill_evaluation_stream(
 async def _reset_skill_evaluations(memory) -> SkillEvaluationResetResponse:
     deleted = await memory.reset_skill_evaluation_results()
     return SkillEvaluationResetResponse(deleted=deleted, results=[])
+
+
+async def _list_skill_evaluation_history(
+    memory,
+    skill_name: str | None = None,
+    limit: int = 100,
+) -> list[SkillEvaluationSnapshot]:
+    return await memory.list_skill_evaluation_history(
+        skill_name=skill_name,
+        limit=limit,
+    )
 
 
 async def _run_skill_evaluation_and_persist(
@@ -468,10 +492,13 @@ async def _iter_skill_evaluation_events(
 
     report = SkillEvaluationReport(
         skills=results,
-        routing=RoutingMetrics(total_cases=len(cases)),
+        routing=_routing_metrics_from_case_results(case_results),
         safety=evaluate_safety_cases(cases, case_results) if mode == "e2e" else None,
         tools=evaluate_tool_cases(cases, case_results) if mode == "e2e" else None,
         answers=evaluate_answer_cases(cases, case_results) if mode == "e2e" else None,
+        hallucinations=(
+            evaluate_hallucination_cases(cases, case_results) if mode == "e2e" else None
+        ),
         case_details=case_details,
     )
     await memory.record_skill_evaluation_results(report, source=source)
@@ -656,11 +683,8 @@ def _case_score_components(
     ]
     routing_score = None
     if expected_cases:
-        exact_matches = sum(
-            set(item["selected_skills"]) == set(item["case"].expected_skills)
-            for item in expected_cases
-        )
-        routing_score = exact_matches / len(expected_cases)
+        selected_hits = sum(skill_name in item["selected_skills"] for item in expected_cases)
+        routing_score = selected_hits / len(expected_cases)
         if negative_cases:
             false_positives = sum(skill_name in item["selected_skills"] for item in negative_cases)
             routing_score *= 1.0 - (false_positives / len(negative_cases))
@@ -676,6 +700,71 @@ def _case_score_components(
         )
         components["runtime"] = runtime_passes / len(expected_cases)
     return components
+
+
+def _routing_metrics_from_case_results(case_results: list[dict]) -> RoutingMetrics:
+    positive_total = 0
+    positive_exact_matches = 0
+    negative_total = 0
+    false_positives = 0
+    true_positive_skills = 0
+    selected_positive_skills = 0
+    expected_positive_skills = 0
+    over_selected_cases = 0
+    under_selected_cases = 0
+    for item in case_results:
+        expected_set = set(item["case"].expected_skills)
+        selected_set = set(item["selected_skills"])
+        if expected_set:
+            positive_total += 1
+            true_positive_skills += len(selected_set & expected_set)
+            selected_positive_skills += len(selected_set)
+            expected_positive_skills += len(expected_set)
+            if selected_set == expected_set:
+                positive_exact_matches += 1
+            if selected_set - expected_set:
+                over_selected_cases += 1
+            if expected_set - selected_set:
+                under_selected_cases += 1
+        else:
+            negative_total += 1
+            if selected_set:
+                false_positives += 1
+                over_selected_cases += 1
+    precision = (
+        true_positive_skills / selected_positive_skills
+        if selected_positive_skills
+        else None
+    )
+    recall = (
+        true_positive_skills / expected_positive_skills
+        if expected_positive_skills
+        else None
+    )
+    return RoutingMetrics(
+        total_cases=len(case_results),
+        selection_accuracy=(
+            positive_exact_matches / positive_total if positive_total else None
+        ),
+        false_positive_rate=false_positives / negative_total if negative_total else None,
+        skill_selection_precision=precision,
+        skill_selection_recall=recall,
+        skill_selection_f1=_f1(precision, recall),
+        skill_over_selection_rate=(
+            over_selected_cases / len(case_results) if case_results else None
+        ),
+        skill_under_selection_rate=(
+            under_selected_cases / positive_total if positive_total else None
+        ),
+    )
+
+
+def _f1(precision: float | None, recall: float | None) -> float | None:
+    if precision is None or recall is None:
+        return None
+    if precision + recall == 0:
+        return 0.0
+    return 2 * precision * recall / (precision + recall)
 
 
 def _runtime_metrics_from_cases(

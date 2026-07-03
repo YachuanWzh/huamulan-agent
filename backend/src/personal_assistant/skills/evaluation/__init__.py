@@ -5,6 +5,7 @@ from personal_assistant.skills.evaluation.models import (
     CaseEvaluationDetail,
     EvaluationCheck,
     GoldenSkillCase,
+    HallucinationEvaluationMetrics,
     JudgeEvaluation,
     RoutingMetrics,
     RuntimeSkillMetrics,
@@ -23,6 +24,7 @@ from personal_assistant.skills.evaluation.judge import (
 from personal_assistant.skills.evaluation.offline import evaluate_routing_cases
 from personal_assistant.skills.evaluation.quality import (
     evaluate_answer_cases,
+    evaluate_hallucination_cases,
     evaluate_tool_cases,
 )
 from personal_assistant.skills.evaluation.report import (
@@ -35,6 +37,7 @@ from personal_assistant.skills.evaluation.static import evaluate_static_skill
 
 __all__ = [
     "GoldenSkillCase",
+    "HallucinationEvaluationMetrics",
     "AgentEvaluationCase",
     "AnswerEvaluationMetrics",
     "CaseDiagnosis",
@@ -51,6 +54,7 @@ __all__ = [
     "ToolEvaluationMetrics",
     "build_case_evaluation_detail",
     "evaluate_answer_cases",
+    "evaluate_hallucination_cases",
     "evaluate_case_with_judge",
     "evaluate_skill_registry",
     "evaluate_tool_cases",

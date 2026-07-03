@@ -517,6 +517,35 @@ describe('api', () => {
       expect(result[0]!.overall_score).toBe(0.88)
     })
 
+    it('returns persisted skill evaluation history for a skill', async () => {
+      server.use(
+        http.get(`${BASE}/api/skills/evaluation/history`, ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.get('skill_name')).toBe('weather')
+          expect(url.searchParams.get('limit')).toBe('100')
+          return HttpResponse.json([
+            {
+              id: 4,
+              created_at: '2026-07-03T01:00:00Z',
+              skill_name: 'weather',
+              overall_score: 0.9,
+              routing_score: 1,
+              runtime_score: null,
+              usage_score: null,
+              static_score: 0.7,
+              source: 'golden:new.jsonl',
+              report: {},
+            },
+          ])
+        }),
+      )
+
+      const result = await api.listSkillEvaluationHistory('weather')
+
+      expect(result[0]!.skill_name).toBe('weather')
+      expect(result[0]!.overall_score).toBe(0.9)
+    })
+
     it('runs a golden dataset evaluation', async () => {
       server.use(
         http.post(`${BASE}/api/skills/evaluation/run`, async ({ request }) => {

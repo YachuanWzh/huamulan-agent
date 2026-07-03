@@ -2,7 +2,13 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 
-from personal_assistant.api.schemas import AuditEvent, ExecutionLog, ExecutionSummary, ToolError
+from personal_assistant.api.schemas import (
+    AuditEvent,
+    ExecutionLog,
+    ExecutionSummary,
+    SkillEvaluationSnapshot,
+    ToolError,
+)
 from personal_assistant.cache import AsyncCache
 
 
@@ -83,6 +89,22 @@ class CachedPostgresMemory:
         )
         return [_model(ToolError, item) for item in data]
 
+    async def list_skill_evaluation_history(
+        self,
+        skill_name: str | None = None,
+        limit: int = 100,
+    ) -> list[SkillEvaluationSnapshot]:
+        scope = _key_part(skill_name) if skill_name else "all"
+        key = f"{PREFIX}:skills:evaluation_history:{scope}:{limit}"
+        data = await self._cached(
+            key,
+            self.default_ttl_seconds,
+            self.inner.list_skill_evaluation_history,
+            skill_name=skill_name,
+            limit=limit,
+        )
+        return [_model(SkillEvaluationSnapshot, item) for item in data]
+
     async def record_execution_log(self, log) -> None:
         await self.inner.record_execution_log(log)
         thread_id = _key_part(getattr(log, "thread_id", ""))
@@ -101,6 +123,10 @@ class CachedPostgresMemory:
         thread_id = _key_part(kwargs.get("thread_id", ""))
         await self._delete_pattern(f"{PREFIX}:tool_errors:all:*")
         await self._delete_pattern(f"{PREFIX}:tool_errors:{thread_id}:*")
+
+    async def record_skill_evaluation_results(self, report, *, source=None) -> None:
+        await self.inner.record_skill_evaluation_results(report, source=source)
+        await self._delete_pattern(f"{PREFIX}:skills:*")
 
     async def reset_skill_evaluation_results(self) -> int:
         deleted = await self.inner.reset_skill_evaluation_results()

@@ -13,6 +13,39 @@ class FakeCheckpointer:
         self.deleted_thread_ids.append(thread_id)
 
 
+class _Cursor:
+    async def fetchall(self):
+        return []
+
+
+class _Connection:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def execute(self, sql, params=None):
+        self.calls.append((sql, params))
+        return _Cursor()
+
+
+class _ConnectionContext:
+    def __init__(self, conn: _Connection) -> None:
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+class _Pool:
+    def __init__(self) -> None:
+        self.conn = _Connection()
+
+    def connection(self):
+        return _ConnectionContext(self.conn)
+
+
 @pytest.mark.asyncio
 async def test_delete_thread_uses_langgraph_postgres_delete() -> None:
     memory = PostgresMemory("postgresql://example")
@@ -40,6 +73,18 @@ def test_delete_thread_endpoint_deletes_thread(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     assert response.json() == {"thread_id": "thread-1", "deleted": True}
     assert fake_harness.deleted_thread_ids == ["thread-1"]
+
+
+@pytest.mark.asyncio
+async def test_list_threads_excludes_internal_skill_evaluation_runs() -> None:
+    memory = PostgresMemory("postgresql://example")
+    pool = _Pool()
+    memory.pool = pool
+
+    await memory.list_threads()
+
+    sql, _ = pool.conn.calls[0]
+    assert "thread_id NOT LIKE 'skill-eval-%'" in sql
 
 
 @pytest.mark.asyncio

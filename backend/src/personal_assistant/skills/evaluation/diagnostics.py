@@ -59,10 +59,36 @@ def _build_checks(case: GoldenSkillCase, outcome: dict[str, Any]) -> list[Evalua
             )
         )
     if case.expected_skills:
-        passed = set(selected) == set(case.expected_skills)
+        expected_set = set(case.expected_skills)
+        selected_set = set(selected)
+        extra = sorted(selected_set - expected_set)
+        missing = sorted(expected_set - selected_set)
+        passed = not extra and not missing
+        if extra:
+            checks.append(
+                EvaluationCheck(
+                    name="skill_selection_precision",
+                    stage="routing",
+                    passed=False,
+                    expected={"allowed": case.expected_skills},
+                    actual={"extra": extra},
+                    reason=f"extra skills selected: {', '.join(extra)}",
+                )
+            )
+        if missing:
+            checks.append(
+                EvaluationCheck(
+                    name="skill_selection_recall",
+                    stage="routing",
+                    passed=False,
+                    expected={"required": case.expected_skills},
+                    actual={"missing": missing},
+                    reason=f"expected skills missing: {', '.join(missing)}",
+                )
+            )
         checks.append(
             EvaluationCheck(
-                name="skill_routing",
+                name="skill_selection_exact_match",
                 stage="routing",
                 passed=passed,
                 expected=case.expected_skills,
@@ -93,6 +119,17 @@ def _build_checks(case: GoldenSkillCase, outcome: dict[str, Any]) -> list[Evalua
                 expected=[item.model_dump(mode="json") for item in case.expected_tool_calls],
                 actual=calls,
                 reason="" if args_passed else "Tool arguments did not match expectation",
+            )
+        )
+        repeated = _repeated_expected_tool_calls(case, calls)
+        checks.append(
+            EvaluationCheck(
+                name="repeated_tool_call",
+                stage="hallucination",
+                passed=not repeated,
+                expected="each expected tool call is issued once per argument set",
+                actual=repeated,
+                reason="" if not repeated else "Tool call was repeated with the same arguments",
             )
         )
     if case.forbidden_tools:
@@ -127,12 +164,12 @@ def _build_checks(case: GoldenSkillCase, outcome: dict[str, Any]) -> list[Evalua
         leaked = [fragment for fragment in case.forbidden_answer_contains if fragment in final_answer]
         checks.append(
             EvaluationCheck(
-                name="forbidden_answer",
-                stage="answer",
+                name="answer_hallucination",
+                stage="hallucination",
                 passed=not leaked,
                 expected={"forbidden": case.forbidden_answer_contains},
                 actual=leaked,
-                reason="" if not leaked else "Final answer contained forbidden content",
+                reason="" if not leaked else "Final answer contained forbidden or unsupported content",
             )
         )
     if outcome.get("tool_failed"):
@@ -158,17 +195,19 @@ def _diagnose(checks: list[EvaluationCheck]) -> CaseDiagnosis:
             summary="All deterministic checks passed",
             recommendation="No action needed",
         )
-    priority = {"safety": 0, "routing": 1, "tool": 2, "answer": 3}
+    priority = {"safety": 0, "routing": 1, "hallucination": 2, "tool": 3, "answer": 4}
     first = sorted(failed, key=lambda item: priority.get(item.stage, 99))[0]
     stage_summary = {
         "safety": "Safety boundary did not behave as expected",
         "routing": "Skill routing may be wrong",
+        "hallucination": "Evaluation detected a hallucination signal",
         "tool": "Tool selection or arguments may be wrong",
         "answer": "Final answer did not satisfy evaluation constraints",
     }
     recommendation = {
         "safety": "Check Prompt Guard, Tool Guard, and security-case expectations.",
         "routing": "Check skill triggers, descriptions, semantic recall, and rerank thresholds.",
+        "hallucination": "Check answer grounding, tool-call loop control, and argument extraction.",
         "tool": "Check tool-selection prompt, tool schema, argument extraction, and tool logs.",
         "answer": "Check answer constraints, evidence use, and final response prompt.",
     }
@@ -207,6 +246,24 @@ def _tool_name(call: dict[str, Any]) -> str | None:
 def _tool_args(call: dict[str, Any]) -> dict[str, Any]:
     args = call.get("args") or call.get("input") or {}
     return args if isinstance(args, dict) else {}
+
+
+def _repeated_expected_tool_calls(
+    case: GoldenSkillCase,
+    tool_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    repeated: list[dict[str, Any]] = []
+    for expectation in case.expected_tool_calls:
+        seen: set[str] = set()
+        for call in tool_calls:
+            if _tool_name(call) != expectation.tool:
+                continue
+            args = _tool_args(call)
+            args_key = str(sorted(args.items()))
+            if args_key in seen:
+                repeated.append({"name": expectation.tool, "args": args})
+            seen.add(args_key)
+    return repeated
 
 
 def _summarize_logs(logs: list[Any]) -> list[dict[str, Any]]:

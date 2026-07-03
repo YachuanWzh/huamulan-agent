@@ -157,3 +157,58 @@ async def test_list_tool_errors_maps_rows_to_schema() -> None:
     assert errors[0].tool_name == "lookup"
     assert errors[0].tool_args == {"query": "alpha"}
     assert errors[0].error_message == "bad query"
+
+
+@pytest.mark.asyncio
+async def test_list_skill_evaluation_history_maps_rows_newest_first() -> None:
+    class _RowsCursor:
+        async def fetchall(self):
+            return [
+                (
+                    12,
+                    "2026-07-03T01:00:00+00:00",
+                    "weather",
+                    0.91,
+                    1.0,
+                    0.8,
+                    None,
+                    0.7,
+                    "golden:e2e.jsonl",
+                    {"skill_name": "weather"},
+                ),
+                (
+                    9,
+                    "2026-07-02T01:00:00+00:00",
+                    "weather",
+                    0.72,
+                    0.8,
+                    None,
+                    None,
+                    0.6,
+                    "golden:quick.jsonl",
+                    {"skill_name": "weather"},
+                ),
+            ]
+
+    class _RowsConnection(_Connection):
+        async def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+            return _RowsCursor()
+
+    class _RowsPool(_Pool):
+        def __init__(self) -> None:
+            self.conn = _RowsConnection()
+
+    memory = PostgresMemory("postgresql://example")
+    pool = _RowsPool()
+    memory.pool = pool
+
+    history = await memory.list_skill_evaluation_history(skill_name="weather", limit=25)
+
+    sql, params = pool.conn.calls[0]
+    assert "FROM skill_evaluation_results" in sql
+    assert "WHERE skill_name = %s" in sql
+    assert "ORDER BY created_at DESC, id DESC" in sql
+    assert params == ("weather", 25)
+    assert [item.id for item in history] == [12, 9]
+    assert history[0].overall_score == 0.91

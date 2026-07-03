@@ -98,6 +98,62 @@ def test_case_detail_diagnoses_safety_before_routing_for_block_cases() -> None:
     )
 
 
+def test_case_detail_distinguishes_routing_over_selection_from_tool_failure() -> None:
+    case = AgentEvaluationCase(
+        id="hard-010",
+        query="find a skill",
+        expected_skills=["find-skills"],
+    )
+    outcome = {
+        "case": case,
+        "selected_skills": ["find-skills", "resolve-time"],
+        "tool_calls": [],
+        "final_answer": "",
+    }
+
+    detail = build_case_evaluation_detail(case, outcome, mode="quick")
+
+    assert detail.diagnosis.stage == "routing"
+    assert "extra skills selected" in detail.diagnosis.summary
+    assert any(
+        check.stage == "routing"
+        and check.name == "skill_selection_precision"
+        and not check.passed
+        and check.actual == {"extra": ["resolve-time"]}
+        for check in detail.checks
+    )
+    assert not any(check.stage == "tool" for check in detail.checks)
+
+
+def test_case_detail_flags_repeated_tool_call_hallucination() -> None:
+    case = AgentEvaluationCase(
+        id="repeat-tool",
+        query="check weather once",
+        expected_tool_calls=[
+            {"tool": "weather_lookup", "args_contains": {"city": "杭州"}}
+        ],
+    )
+    outcome = {
+        "case": case,
+        "selected_skills": [],
+        "tool_calls": [
+            {"name": "weather_lookup", "args": {"city": "杭州"}},
+            {"name": "weather_lookup", "args": {"city": "杭州"}},
+        ],
+        "final_answer": "done",
+    }
+
+    detail = build_case_evaluation_detail(case, outcome, mode="e2e")
+
+    assert detail.diagnosis.stage == "hallucination"
+    assert any(
+        check.stage == "hallucination"
+        and check.name == "repeated_tool_call"
+        and not check.passed
+        for check in detail.checks
+    )
+
+
 def test_judge_model_defaults_to_pro_and_rejects_flash() -> None:
     settings = _settings()
 

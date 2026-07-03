@@ -13,6 +13,7 @@ vi.mock('../lib/api', () => ({
     listExecutionLogs: vi.fn(),
     getExecutionSummary: vi.fn(),
     listSkills: vi.fn(),
+    listSkillEvaluationHistory: vi.fn(),
     listSkillEvaluationDatasets: vi.fn(),
     runSkillEvaluation: vi.fn(),
     runSkillEvaluationStream: vi.fn(),
@@ -25,6 +26,7 @@ const mockApi = vi.mocked(apiModule.api)
 describe('WorkspacePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockApi.listSkillEvaluationHistory.mockResolvedValue([])
     mockApi.listSkillEvaluationDatasets.mockResolvedValue([
       { name: 'claw_eval_smoke', path: 'claw_eval_smoke', label: 'ClawEval smoke' },
       { name: 'golden_dataset', path: 'golden_dataset', label: 'Golden dataset' },
@@ -222,6 +224,166 @@ describe('WorkspacePanel', () => {
     expect(screen.getByText('80 lines')).toBeInTheDocument()
   })
 
+  it('normalizes legacy percent-scale skill scores before rendering', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'legacy-score',
+        description: 'Legacy score scale',
+        tool_names: [],
+        path: '/skills/legacy-score',
+        loaded: false,
+        evaluation: {
+          overall_score: 91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 0,
+        },
+        latest_evaluation: {
+          id: 3,
+          created_at: '2026-07-02T01:00:00Z',
+          skill_name: 'legacy-score',
+          overall_score: 88,
+          routing_score: 80,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 60,
+          source: 'golden:legacy.jsonl',
+          report: {},
+        },
+      },
+    ])
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText('88%')).toBeInTheDocument()
+    expect(screen.queryByText('8800%')).not.toBeInTheDocument()
+  })
+
+  it('loads skill evaluation history and renders score trend deltas', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'weather',
+        description: 'Weather lookup',
+        tool_names: ['weather_lookup'],
+        path: '/skills/weather',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 2,
+          created_at: '2026-07-03T01:00:00Z',
+          skill_name: 'weather',
+          overall_score: 0.9,
+          routing_score: 1,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.7,
+          source: 'golden:new.jsonl',
+          report: {},
+        },
+      },
+    ])
+    mockApi.listSkillEvaluationHistory.mockResolvedValue([
+      {
+        id: 2,
+        created_at: '2026-07-03T01:00:00Z',
+        skill_name: 'weather',
+        overall_score: 0.9,
+        routing_score: 1,
+        runtime_score: null,
+        usage_score: null,
+        static_score: 0.7,
+        source: 'golden:new.jsonl',
+        report: {},
+      },
+      {
+        id: 1,
+        created_at: '2026-07-02T01:00:00Z',
+        skill_name: 'weather',
+        overall_score: 0.7,
+        routing_score: 0.8,
+        runtime_score: null,
+        usage_score: null,
+        static_score: 0.6,
+        source: 'golden:old.jsonl',
+        report: {},
+      },
+    ])
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect(await screen.findByText('History')).toBeInTheDocument()
+    expect(screen.getByText('+20%')).toBeInTheDocument()
+    expect(screen.getByLabelText('weather overall trend')).toBeInTheDocument()
+    expect(screen.getByText('golden:new.jsonl')).toBeInTheDocument()
+    expect(screen.getByText('golden:old.jsonl')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByText('History'))
+
+    expect(screen.getByLabelText('weather metric trend chart')).toBeInTheDocument()
+    expect(screen.getByText('overall')).toBeInTheDocument()
+    expect(screen.getByText('routing')).toBeInTheDocument()
+    expect(screen.getByText('static')).toBeInTheDocument()
+  })
+
+  it('shows an empty trend state when only one evaluation run exists', async () => {
+    mockApi.listSkills.mockResolvedValue([
+      {
+        name: 'weather',
+        description: 'Weather lookup',
+        tool_names: ['weather_lookup'],
+        path: '/skills/weather',
+        loaded: false,
+        evaluation: {
+          overall_score: 0.91,
+          description_tokens: 12,
+          skill_md_lines: 35,
+          python_lines: 80,
+          max_cyclomatic_complexity: 4,
+          tool_count: 1,
+        },
+        latest_evaluation: {
+          id: 2,
+          created_at: '2026-07-03T01:00:00Z',
+          skill_name: 'weather',
+          overall_score: 0.9,
+          routing_score: 1,
+          runtime_score: null,
+          usage_score: null,
+          static_score: 0.7,
+          source: 'golden:new.jsonl',
+          report: {},
+        },
+      },
+    ])
+    mockApi.listSkillEvaluationHistory.mockResolvedValue([
+      {
+        id: 2,
+        created_at: '2026-07-03T01:00:00Z',
+        skill_name: 'weather',
+        overall_score: 0.9,
+        routing_score: 1,
+        runtime_score: null,
+        usage_score: null,
+        static_score: 0.7,
+        source: 'golden:new.jsonl',
+        report: {},
+      },
+    ])
+
+    render(<WorkspacePanel panel="skills" threadId="t1" />)
+
+    expect((await screen.findAllByText('Need at least 2 runs')).length).toBeGreaterThan(0)
+  })
+
   it('exposes the full skill description on hover while the card preview stays compact', async () => {
     const description =
       'A very long skill description that needs to be clamped in the scorecard preview but remain available as hover detail.'
@@ -397,31 +559,39 @@ describe('WorkspacePanel', () => {
           selected_skills: ['resolve-time'],
           expected_tool_calls: [{ tool: 'resolve_current_time', args_contains: {} }],
           actual_tool_calls: [{ name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } }],
-          final_answer: '现在是 2026-07-02。',
+          final_answer: 'It is 2026-07-02.',
           checks: [
+            {
+              name: 'skill_routing',
+              stage: 'routing',
+              passed: true,
+              expected: ['resolve-time'],
+              actual: ['resolve-time'],
+              reason: '',
+            },
             {
               name: 'tool_arguments',
               stage: 'tool',
               passed: false,
               expected: [{ tool: 'resolve_current_time', args_contains: { timezone: 'UTC' } }],
               actual: [{ name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } }],
-              reason: '工具参数不符合期望',
+              reason: 'Tool arguments do not match expectation',
             },
           ],
           diagnosis: {
             stage: 'tool',
             severity: 'medium',
-            summary: '工具调用或参数环节可能出错：工具参数不符合期望',
-            signals: ['tool.tool_arguments: 工具参数不符合期望'],
-            recommendation: '检查工具选择 prompt、工具 schema、参数抽取和工具执行日志。',
+            summary: 'Tool call or argument stage may be wrong: arguments mismatch',
+            signals: ['tool.tool_arguments: Tool arguments do not match expectation'],
+            recommendation: 'Check tool selection prompt, schema, extraction, and logs.',
           },
           judge: {
             score: 0.42,
             passed: false,
             failure_stage: 'prompt_or_reasoning',
-            reason: '回答没有解释工具参数偏差',
+            reason: 'tool argument mismatch',
             evidence: ['timezone mismatch'],
-            recommendation: '强化最终回答 prompt',
+            recommendation: 'check routing prompt',
             model: 'deepseek-v4-pro',
             available: true,
           },
@@ -477,8 +647,16 @@ describe('WorkspacePanel', () => {
               actual_tool_calls: [
                 { name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } },
               ],
-              final_answer: '现在是 2026-07-02。',
+              final_answer: 'It is 2026-07-02.',
               checks: [
+                {
+                  name: 'skill_routing',
+                  stage: 'routing',
+                  passed: true,
+                  expected: ['resolve-time'],
+                  actual: ['resolve-time'],
+                  reason: '',
+                },
                 {
                   name: 'tool_arguments',
                   stage: 'tool',
@@ -487,23 +665,23 @@ describe('WorkspacePanel', () => {
                   actual: [
                     { name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } },
                   ],
-                  reason: '工具参数不符合期望',
+                  reason: 'Tool arguments do not match expectation',
                 },
               ],
               diagnosis: {
                 stage: 'tool',
                 severity: 'medium',
-                summary: '工具调用或参数环节可能出错：工具参数不符合期望',
-                signals: ['tool.tool_arguments: 工具参数不符合期望'],
-                recommendation: '检查工具选择 prompt、工具 schema、参数抽取和工具执行日志。',
+                summary: 'Tool call or argument stage may be wrong: arguments mismatch',
+                signals: ['tool.tool_arguments: Tool arguments do not match expectation'],
+                recommendation: 'Check tool selection prompt, schema, extraction, and logs.',
               },
               judge: {
                 score: 0.42,
                 passed: false,
                 failure_stage: 'prompt_or_reasoning',
-                reason: '回答没有解释工具参数偏差',
+                reason: 'tool argument mismatch',
                 evidence: ['timezone mismatch'],
-                recommendation: '强化最终回答 prompt',
+                recommendation: 'check routing prompt',
                 model: 'deepseek-v4-pro',
                 available: true,
               },
@@ -518,6 +696,46 @@ describe('WorkspacePanel', () => {
                   metadata: {},
                 },
               ],
+            },
+            {
+              case_id: 'rt-002',
+              mode: 'e2e',
+              query: 'resolve current time with weather',
+              turns: [],
+              expected_skills: ['weather'],
+              selected_skills: ['resolve-time'],
+              expected_tool_calls: [{ tool: 'get_current_weather', args_contains: { city: 'Hangzhou' } }],
+              actual_tool_calls: [
+                { name: 'resolve_current_time', args: { timezone: 'Asia/Shanghai' } },
+              ],
+              final_answer: 'It is 2026-07-02.',
+              checks: [
+                {
+                  name: 'skill_routing',
+                  stage: 'routing',
+                  passed: false,
+                  expected: ['weather'],
+                  actual: ['resolve-time'],
+                  reason: 'Selected skills did not match expected skills',
+                },
+                {
+                  name: 'tool_selection',
+                  stage: 'tool',
+                  passed: false,
+                  expected: ['get_current_weather'],
+                  actual: ['resolve_current_time'],
+                  reason: 'Expected tool was not called',
+                },
+              ],
+              diagnosis: {
+                stage: 'routing',
+                severity: 'medium',
+                summary: 'Skill routing may be wrong',
+                signals: ['routing.skill_routing: Selected skills did not match expected skills'],
+                recommendation: 'Check skill triggers.',
+              },
+              judge: null,
+              log_summary: [],
             },
           ],
         },
@@ -561,10 +779,18 @@ describe('WorkspacePanel', () => {
     expect(screen.getByText('50%')).toBeInTheDocument()
     expect(screen.getByText('Evaluation Details')).toBeInTheDocument()
     expect(screen.getByText(/rt-001/)).toBeInTheDocument()
-    expect(screen.getAllByText('tool').length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/工具参数不符合期望/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/deepseek-v4-pro/)).toBeInTheDocument()
-    expect(screen.getByText(/强化最终回答 prompt/)).toBeInTheDocument()
+    expect(screen.getByText('PASS routing.skill_routing')).toBeInTheDocument()
+    expect(screen.getByText(/rt-002/)).toBeInTheDocument()
+    expect(screen.getByText('FAIL routing.skill_routing: Selected skills did not match expected skills')).toBeInTheDocument()
+    expect(screen.getByText('Expected')).toBeInTheDocument()
+    expect(screen.getByText('Actual')).toBeInTheDocument()
+    expect(screen.getByText(/get_current_weather/)).toBeInTheDocument()
+    expect(screen.getByText(/resolve_current_time/)).toBeInTheDocument()
+    expect(screen.queryByText('FAIL tool.tool_arguments')).not.toBeInTheDocument()
+    expect(screen.queryByText('FAIL tool.tool_selection: Expected tool was not called')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Tool arguments do not match expectation/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/deepseek-v4-pro/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/check routing prompt/)).not.toBeInTheDocument()
   })
 
   it('shows skill evaluation errors when the golden dataset cannot be loaded', async () => {
