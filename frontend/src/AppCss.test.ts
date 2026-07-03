@@ -49,4 +49,23 @@ describe('App stylesheet decorations', () => {
     expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*max-height:\s*3\.54rem/s)
     expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*overflow:\s*hidden/s)
   })
+
+  it('animates the e2e evaluation run topology with reduced-motion coverage', () => {
+    expect(appCss).toMatch(/\.evaluation-run-topology\s*\{/)
+    expect(appCss).toMatch(/\.topology-node\.is-active\s*\{/)
+    expect(appCss).toMatch(/\.topology-connector::after\s*\{/)
+    expect(appCss).toMatch(/@keyframes topology-flow\s*\{/)
+    expect(appCss).toMatch(/@keyframes topology-pulse\s*\{/)
+    expect(appCss).toMatch(
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.topology-connector::after\s*\{[^}]*animation:\s*none/s,
+    )
+  })
+
+  it('presents the e2e topology as swimlanes with arrowed lane transitions', () => {
+    expect(appCss).toMatch(/\.topology-lanes\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(220px,\s*1fr\)\)/s)
+    expect(appCss).toMatch(/\.topology-lane\s*\{[^}]*min-height:\s*132px/s)
+    expect(appCss).toMatch(/\.topology-lane-title\s*\{[^}]*position:\s*absolute/s)
+    expect(appCss).toMatch(/\.topology-lane-title\s*\{[^}]*top:\s*calc\(var\(--space-3\) \* -1\)/s)
+    expect(appCss).toMatch(/\.topology-connector::before\s*\{[^}]*border-left:\s*7px solid #58a6c2/s)
+  })
 })

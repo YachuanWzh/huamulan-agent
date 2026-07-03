@@ -82,6 +82,7 @@ export function WorkspacePanel({
     completed: number
     percent: number
   } | null>(null)
+  const [activeEvaluationCase, setActiveEvaluationCase] = useState<CaseEvaluationDetail | null>(null)
   const [evaluationReport, setEvaluationReport] = useState<SkillEvaluationReport | null>(null)
   const [evaluationHistory, setEvaluationHistory] = useState<
     Record<string, SkillEvaluationSnapshot[]>
@@ -183,6 +184,7 @@ export function WorkspacePanel({
 
     setEvaluationRunning(true)
     setEvaluationProgress(null)
+    setActiveEvaluationCase(null)
     setEvaluationReport(null)
     setEvaluationError(null)
     try {
@@ -215,6 +217,9 @@ export function WorkspacePanel({
     }
     if (event.type === 'done' && event.report) {
       setEvaluationReport(event.report)
+    }
+    if (event.type === 'case_progress' && event.mode === 'e2e') {
+      setActiveEvaluationCase(event.detail)
     }
   }
 
@@ -388,6 +393,10 @@ export function WorkspacePanel({
               </div>
               <small>{evaluationProgress.source}</small>
             </div>
+          )}
+
+          {activeEvaluationCase && evaluationProgress?.mode === 'e2e' && (
+            <EvaluationRunTopology detail={activeEvaluationCase} running={evaluationRunning} />
           )}
 
           {evaluationReport && (
@@ -944,6 +953,269 @@ function pointY(score: number, height: number) {
 function formatSignedPercent(value: number) {
   const rounded = Math.round(value * 100)
   return `${rounded >= 0 ? '+' : ''}${rounded}%`
+}
+
+type TopologyNodeStatus = 'running' | 'passed' | 'failed' | 'blocked' | 'warning' | 'idle'
+
+interface TopologyNode {
+  id: string
+  title: string
+  subtitle?: string
+  status: TopologyNodeStatus
+}
+
+interface TopologyLane {
+  id: string
+  title: string
+  nodes: TopologyNode[]
+}
+
+function EvaluationRunTopology({
+  detail,
+  running,
+}: {
+  detail: CaseEvaluationDetail
+  running: boolean
+}) {
+  const lanes = buildTopologyLanes(detail)
+  const lastLane = lanes[lanes.length - 1]
+  const activeNodeId = running ? lastLane?.nodes[lastLane.nodes.length - 1]?.id : null
+
+  return (
+    <section
+      key={detail.case_id}
+      className="evaluation-run-topology"
+      aria-label="E2E case run topology"
+    >
+      <div className="topology-header">
+        <div>
+          <h3>运行拓扑</h3>
+          <p>{detail.query || detail.turns.join(' / ')}</p>
+        </div>
+        <strong>{detail.case_id}</strong>
+      </div>
+      <div className="topology-lanes">
+        {lanes.map((lane, laneIndex) => (
+          <div className="topology-lane" key={lane.id}>
+            <div className="topology-lane-title">{lane.title}</div>
+            <div className="topology-node-stack">
+              {lane.nodes.map((node) => (
+                <div
+                  className={`topology-node status-${node.status} ${
+                    node.id === activeNodeId ? 'is-active' : ''
+                  }`}
+                  key={node.id}
+                >
+                  <span className="topology-status-dot" aria-hidden="true" />
+                  <strong>{node.title}</strong>
+                  {node.subtitle && <small>{node.subtitle}</small>}
+                </div>
+              ))}
+            </div>
+            {laneIndex < lanes.length - 1 && (
+              <div className="topology-connector" aria-hidden="true" />
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function buildTopologyLanes(detail: CaseEvaluationDetail): TopologyLane[] {
+  const logs = detail.log_summary ?? []
+  const safetyLogs = logs.filter(
+    (log) => log.event_type === 'security' || log.status === 'blocked',
+  )
+  const isBlocked = safetyLogs.some((log) => log.status === 'blocked')
+  const lanes: TopologyLane[] = [
+    {
+      id: 'input',
+      title: '入口',
+      nodes: [
+        {
+          id: 'input.user',
+          title: '用户请求',
+          subtitle: detail.query || detail.turns.join(' / '),
+          status: 'passed',
+        },
+      ],
+    },
+  ]
+
+  if (safetyLogs.length > 0 || hasStage(detail, 'safety')) {
+    lanes.push({
+      id: 'safety',
+      title: '安全拦截',
+      nodes: safetyLogs.length
+        ? safetyLogs.map((log, index) => {
+            const metadata = isRecord(log.metadata) ? log.metadata : {}
+            const error = isRecord(log.error) ? log.error : {}
+            return {
+              id: `safety.${index}`,
+              title: metadata.source === 'prompt_guard' ? 'Prompt Guard' : '安全检查',
+              subtitle: String(log.name || error.reason || log.status || ''),
+              status: log.status === 'blocked' ? 'blocked' : statusForStage(detail, 'safety'),
+            }
+          })
+        : [
+            {
+              id: 'safety.check',
+              title: 'Prompt Guard',
+              subtitle: stageReasons(detail, 'safety').join(' / '),
+              status: statusForStage(detail, 'safety'),
+            },
+          ],
+    })
+  }
+
+  if (isBlocked) return lanes
+
+  lanes.push({
+    id: 'routing',
+    title: '路由',
+    nodes: buildRoutingNodes(detail),
+  })
+
+  const toolNodes = buildToolNodes(detail)
+  if (toolNodes.length > 0) {
+    lanes.push({
+      id: 'tools',
+      title: 'Skill / Tool',
+      nodes: toolNodes,
+    })
+  }
+
+  const answerNodes = buildAnswerNodes(detail)
+  if (answerNodes.length > 0) {
+    lanes.push({
+      id: 'answer',
+      title: '回答',
+      nodes: answerNodes,
+    })
+  }
+
+  return lanes
+}
+
+function buildRoutingNodes(detail: CaseEvaluationDetail): TopologyNode[] {
+  const routingTrace = detail.routing_trace ?? []
+  if (routingTrace.length > 0) {
+    return routingTrace.map((trace, index) => ({
+      id: `routing.${index}`,
+      title: String(trace.stage || `routing-${index + 1}`),
+      subtitle: compactText([
+        trace.status,
+        trace.selected_skill,
+        Array.isArray(trace.selected_skills) ? trace.selected_skills.join(', ') : undefined,
+        trace.reason,
+      ]),
+      status: statusForTrace(trace, statusForStage(detail, 'routing')),
+    }))
+  }
+
+  return [
+    {
+      id: 'routing.selection',
+      title: detail.selected_skills.length > 0 ? detail.selected_skills.join(', ') : 'Skill selection',
+      subtitle:
+        detail.expected_skills.length > 0
+          ? `expected: ${detail.expected_skills.join(', ')}`
+          : 'no skill expected',
+      status: statusForStage(detail, 'routing'),
+    },
+  ]
+}
+
+function buildToolNodes(detail: CaseEvaluationDetail): TopologyNode[] {
+  const nodes: TopologyNode[] = detail.selected_skills.map((skill) => ({
+    id: `skill.${skill}`,
+    title: skill,
+    subtitle: 'selected skill',
+    status: statusForStage(detail, 'routing'),
+  }))
+  const actualToolCalls = detail.actual_tool_calls ?? []
+  const logs = detail.log_summary ?? []
+  const calls = actualToolCalls.length > 0
+    ? actualToolCalls
+    : logs.filter((log) => log.event_type === 'tool' || log.event_type === 'tool_retry')
+
+  calls.forEach((call, index) => {
+    const name = String(call.name || call.tool || `tool-${index + 1}`)
+    const status = String(call.status || '')
+    nodes.push({
+      id: `tool.${index}.${name}`,
+      title: name,
+      subtitle: compactText([status, stringifyArgs(call.args || call.input)]),
+      status: status === 'failed' || status === 'retrying' ? 'failed' : statusForStage(detail, 'tool'),
+    })
+  })
+
+  return nodes
+}
+
+function buildAnswerNodes(detail: CaseEvaluationDetail): TopologyNode[] {
+  const nodes: TopologyNode[] = []
+  if (detail.final_answer) {
+    nodes.push({
+      id: 'answer.final',
+      title: '最终回答',
+      subtitle: detail.final_answer,
+      status: statusForStage(detail, 'answer'),
+    })
+  }
+  if (detail.judge) {
+    nodes.push({
+      id: 'answer.judge',
+      title: 'Judge',
+      subtitle: detail.judge.reason || detail.judge.recommendation,
+      status: detail.judge.passed === false ? 'failed' : 'passed',
+    })
+  }
+  return nodes
+}
+
+function statusForStage(detail: CaseEvaluationDetail, stage: string): TopologyNodeStatus {
+  const stageChecks = detail.checks.filter((check) => check.stage === stage)
+  if (stageChecks.some((check) => !check.passed)) {
+    return detail.status === 'warning' ? 'warning' : 'failed'
+  }
+  if (stageChecks.length > 0) return 'passed'
+  return detail.status === 'fail' && detail.suspected_node === stage ? 'failed' : 'passed'
+}
+
+function statusForTrace(
+  trace: Record<string, unknown>,
+  fallback: TopologyNodeStatus,
+): TopologyNodeStatus {
+  const status = String(trace.status || '')
+  if (['failed', 'rejected', 'blocked'].includes(status)) return 'failed'
+  if (['missed', 'below_threshold'].includes(status)) return 'idle'
+  if (['selected', 'completed', 'matched'].includes(status)) return 'passed'
+  return fallback
+}
+
+function hasStage(detail: CaseEvaluationDetail, stage: string) {
+  return detail.checks.some((check) => check.stage === stage)
+}
+
+function stageReasons(detail: CaseEvaluationDetail, stage: string) {
+  return detail.checks
+    .filter((check) => check.stage === stage)
+    .map((check) => check.reason || check.name)
+    .filter(Boolean)
+}
+
+function compactText(values: unknown[]) {
+  return values
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .map((value) => String(value))
+    .join(' / ')
+}
+
+function stringifyArgs(value: unknown) {
+  if (!isRecord(value) || Object.keys(value).length === 0) return ''
+  return JSON.stringify(value)
 }
 
 function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
