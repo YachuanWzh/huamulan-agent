@@ -153,6 +153,10 @@ export interface CaseEvaluationDetail {
   final_answer: string
   checks: EvaluationCheck[]
   diagnosis: CaseDiagnosis
+  status: 'pass' | 'warning' | 'fail'
+  skill_selection_precision?: number | null
+  skill_selection_recall?: number | null
+  skill_selection_f1?: number | null
   judge?: JudgeEvaluation | null
   log_summary: Record<string, unknown>[]
 }

@@ -54,8 +54,13 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
             [
                 "## Routing",
                 f"- Total Cases: {report.routing.total_cases}",
-                f"- Selection Accuracy: {_fmt_rate(report.routing.selection_accuracy)}",
+                f"- Selection Accuracy (Exact Match): {_fmt_rate(report.routing.selection_accuracy)}",
+                f"- Skill Selection Precision: {_fmt_rate(report.routing.skill_selection_precision)}",
+                f"- Skill Selection Recall: {_fmt_rate(report.routing.skill_selection_recall)}",
+                f"- Skill Selection F1: {_fmt_rate(report.routing.skill_selection_f1)}",
                 f"- False Positive Rate: {_fmt_rate(report.routing.false_positive_rate)}",
+                f"- Over-selection Rate: {_fmt_rate(report.routing.skill_over_selection_rate)}",
+                f"- Under-selection Rate: {_fmt_rate(report.routing.skill_under_selection_rate)}",
                 "",
             ]
         )

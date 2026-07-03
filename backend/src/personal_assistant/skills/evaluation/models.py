@@ -146,6 +146,10 @@ class CaseEvaluationDetail(BaseModel):
     final_answer: str = ""
     checks: list[EvaluationCheck] = Field(default_factory=list)
     diagnosis: CaseDiagnosis
+    status: str = "pass"  # pass / warning / fail
+    skill_selection_precision: float | None = None
+    skill_selection_recall: float | None = None
+    skill_selection_f1: float | None = None
     judge: JudgeEvaluation | None = None
     log_summary: list[dict[str, Any]] = Field(default_factory=list)
 

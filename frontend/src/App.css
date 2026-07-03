@@ -1551,11 +1551,11 @@ button {
 
 /* stronger visual distinction for failed cases */
 .evaluation-case:not(.stage-passed) {
-  background: #fef2f2;
+  background: #fff;
 }
 
 .evaluation-case.stage-passed {
-  background: #f0fdf4;
+  background: #fff;
 }
 
 .evaluation-case-list-wrapper {

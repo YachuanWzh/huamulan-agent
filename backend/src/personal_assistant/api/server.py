@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.agent import warmup_skill_routing
 from personal_assistant.agent.harness import AgentHarness
-from personal_assistant.agent.harness import scan_tool_guard
+from personal_assistant.agent.harness import scan_prompt_guard, scan_tool_guard
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import route_skill_names
 from personal_assistant.api.schemas import (
@@ -493,7 +493,7 @@ async def _iter_skill_evaluation_events(
     report = SkillEvaluationReport(
         skills=results,
         routing=_routing_metrics_from_case_results(case_results),
-        safety=evaluate_safety_cases(cases, case_results) if mode == "e2e" else None,
+        safety=evaluate_safety_cases(cases, case_results),  # 快检也需要Prompt Guard安全检测
         tools=evaluate_tool_cases(cases, case_results) if mode == "e2e" else None,
         answers=evaluate_answer_cases(cases, case_results) if mode == "e2e" else None,
         hallucinations=(
@@ -530,10 +530,38 @@ def _build_evaluation_judge(settings):
 
 
 async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dict:
-    selected = await route_skill_names(registry, _case_query(case))
+    query = _case_query(case)
+    logs: list[dict] = []
+    # 快检模式也先过Prompt Guard检测（输入层第一道防线）
+    guard_match = scan_prompt_guard(query)
+    if guard_match:
+        logs.append({
+            "event_type": "security",
+            "status": "blocked",
+            "name": guard_match.category,
+            "input": {"message": query[:200]},
+            "error": {"reason": guard_match.reason},
+            "metadata": {"severity": guard_match.severity, "source": "prompt_guard"},
+        })
+        # Prompt Guard命中时直接拦截，不进入路由
+        return {
+            "case": case,
+            "selected_skills": [],
+            "logs": logs,
+            "final_answer": "",
+            "tool_names": [],
+            "tool_calls": [],
+            "tool_completed": False,
+            "tool_failed": False,
+        }
+    selected = await route_skill_names(registry, query)
     return {
         "case": case,
         "selected_skills": selected,
+        "logs": logs,
+        "final_answer": "",
+        "tool_names": [],
+        "tool_calls": [],
         "tool_completed": False,
         "tool_failed": False,
     }

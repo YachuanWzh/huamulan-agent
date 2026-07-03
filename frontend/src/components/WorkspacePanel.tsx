@@ -376,7 +376,7 @@ export function WorkspacePanel({
               <h3>ClawEval</h3>
               <dl className="skill-evaluation-metrics">
                 {buildEvaluationSummary(evaluationReport).map((metric) => (
-                  <div key={metric.label}>
+                  <div key={metric.label} title={metric.tooltip} style={{ cursor: 'help' }}>
                     <dt>{metric.label}</dt>
                     <dd>{metric.value}</dd>
                   </div>
@@ -843,13 +843,34 @@ function formatSignedPercent(value: number) {
 }
 
 function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
-  const routingResults = details.map((detail) => {
-    const checks = detail.checks.filter((check) => check.stage === 'routing')
-    const passed = checks.length > 0 && checks.every((check) => check.passed)
-    return { detail, checks, passed }
+  const caseResults = details.map((detail) => {
+    const checks = detail.checks
+    const failedStages = Array.from(new Set(checks.filter(c => !c.passed).map(c => c.stage)))
+    return { detail, checks, failedStages }
   })
-  const failedCount = routingResults.filter((result) => !result.passed).length
-  const passedCount = routingResults.length - failedCount
+  const passedCount = caseResults.filter(r => r.detail.status === 'pass').length
+  const warningCount = caseResults.filter(r => r.detail.status === 'warning').length
+  const failedCount = caseResults.filter(r => r.detail.status === 'fail').length
+  // 统计各阶段失败数量（warning不算失败）
+  const failedCases = caseResults.filter(r => r.detail.status === 'fail')
+  const safetyFailed = failedCases.filter(r => r.failedStages.includes('safety')).length
+  const routingFailed = failedCases.filter(r => r.failedStages.includes('routing')).length
+  const toolFailed = failedCases.filter(r => r.failedStages.includes('tool')).length
+  const hallucinationFailed = failedCases.filter(r => r.failedStages.includes('hallucination')).length
+  const answerFailed = failedCases.filter(r => r.failedStages.includes('answer')).length
+
+  // 状态标签样式和文本
+  const getStatusConfig = (status: string, hasSafetyFail: boolean) => {
+    if (status === 'pass') return { text: 'PASS', color: '#16a34a', bg: '#f0fdf4', borderColor: '#16a34a' }
+    if (status === 'warning') return { text: 'WARN', color: '#d97706', bg: '#fffbeb', borderColor: '#f59e0b' }
+    // fail
+    return {
+      text: 'FAIL',
+      color: hasSafetyFail ? '#dc2626' : '#ef4444',
+      bg: '#fef2f2',
+      borderColor: hasSafetyFail ? '#dc2626' : '#ef4444'
+    }
+  }
 
   return (
     <section className="evaluation-details" aria-label="Evaluation details">
@@ -857,13 +878,31 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
         <div>
           <h3>Evaluation Details</h3>
           <p>
-            {failedCount} routing failed / {details.length} cases
+            {passedCount} passed / {warningCount} warning / {failedCount} failed / 共 {details.length} cases
           </p>
         </div>
-        <div className="evaluation-stage-chips" aria-label="Failure stage summary">
-          <span className="stage-chip stage-passed">routing passed {passedCount}</span>
+        <div className="evaluation-stage-chips" aria-label="Result summary">
+          <span className="stage-chip stage-passed">passed {passedCount}</span>
+          {warningCount > 0 && (
+            <span className="stage-chip" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }} title="多选技能等非严重问题，不判定为失败">warning {warningCount}</span>
+          )}
           {failedCount > 0 && (
-            <span className="stage-chip stage-routing">routing failed {failedCount}</span>
+            <span className="stage-chip" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>failed {failedCount}</span>
+          )}
+          {safetyFailed > 0 && (
+            <span className="stage-chip stage-safety" title="安全拦截类失败">safety {safetyFailed}</span>
+          )}
+          {routingFailed > 0 && (
+            <span className="stage-chip stage-routing">routing {routingFailed}</span>
+          )}
+          {toolFailed > 0 && (
+            <span className="stage-chip stage-tool">tool {toolFailed}</span>
+          )}
+          {hallucinationFailed > 0 && (
+            <span className="stage-chip stage-hallucination">hallucination {hallucinationFailed}</span>
+          )}
+          {answerFailed > 0 && (
+            <span className="stage-chip stage-answer">answer {answerFailed}</span>
           )}
         </div>
       </div>
@@ -872,17 +911,94 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
           <span>展开详情 ({details.length} cases)</span>
         </summary>
         <div className="evaluation-case-list">
-        {routingResults.map(({ detail, checks, passed }) => (
+        {caseResults.map(({ detail, checks, failedStages }) => {
+          // 生成原因摘要
+          const failedChecks = checks.filter(check => !check.passed)
+          const reasons: string[] = []
+          const hasSafetyFail = failedChecks.some(c => c.stage === 'safety')
+          const isWarning = detail.status === 'warning'
+
+          // 优先显示安全类失败原因
+          const safetyFail = failedChecks.find(c => c.stage === 'safety')
+          if (safetyFail) {
+            reasons.push(`🔒 安全拦截: ${safetyFail.reason || '触发安全防护规则'}`)
+          }
+          // 路由类问题
+          const routingFails = failedChecks.filter(c => c.stage === 'routing')
+          routingFails.forEach(fail => {
+            if (fail.name === 'skill_selection_precision') {
+              const extra = (fail.actual as any)?.extra
+              if (extra?.length) reasons.push(`⚠️ 多选技能: ${extra.join(', ')}`)
+            } else if (fail.name === 'skill_selection_recall') {
+              const missing = (fail.actual as any)?.missing
+              if (missing?.length) reasons.push(`❌ 漏选技能: ${missing.join(', ')}`)
+            }
+          })
+          // 工具/回答类失败原因
+          const otherFails = failedChecks.filter(c => !['safety', 'routing'].includes(c.stage))
+          otherFails.forEach(fail => {
+            reasons.push(`❌ ${fail.stage}: ${fail.reason || fail.name}`)
+          })
+
+          const statusConfig = getStatusConfig(detail.status, hasSafetyFail)
+
+          return (
           <details
             key={detail.case_id}
-            className={`evaluation-case stage-${passed ? 'passed' : 'routing'}`}
+            className={`evaluation-case stage-${detail.status === 'fail' ? (hasSafetyFail ? 'safety' : 'routing') : detail.status}`}
+            style={{ borderLeft: `4px solid ${statusConfig.borderColor}` }}
           >
             <summary>
               <span>{detail.case_id}</span>
-              <strong>{passed ? 'PASS' : 'FAIL'}</strong>
+              {detail.skill_selection_f1 != null && (
+                <span
+                  title="当前用例的路由F1分数：综合衡量精确率和召回率，100%为完全选对，0%为完全选错"
+                  style={{ margin: '0 12px', padding: '2px 8px', borderRadius: '4px', background: '#f0f4f8', fontSize: '0.9em', cursor: 'help' }}
+                >
+                  F1: {(detail.skill_selection_f1 * 100).toFixed(1)}%
+                </span>
+              )}
+              <strong style={{
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '0.85em',
+                background: statusConfig.bg,
+                color: statusConfig.color,
+              }}>
+                {statusConfig.text}
+              </strong>
             </summary>
             <div className="evaluation-case-body">
-              {!passed && (
+              {/* 用户query展示 */}
+              <div className="evaluation-query" style={{ margin: '8px 0', padding: '8px 12px', background: '#f8f9fa', borderRadius: '4px', fontSize: '0.95em' }}>
+                <strong style={{ color: '#666' }}>用户Query: </strong>
+                <span>{detail.query || '(多轮对话，共' + detail.turns.length + '轮)'}</span>
+              </div>
+
+              {/* 原因摘要（warning和fail都显示） */}
+              {reasons.length > 0 && (
+                <div
+                  className="evaluation-fail-reasons"
+                  style={{
+                    margin: '8px 0',
+                    padding: '8px 12px',
+                    background: statusConfig.bg,
+                    borderRadius: '4px',
+                    borderLeft: `3px solid ${statusConfig.borderColor}`
+                  }}
+                >
+                  <strong style={{ color: statusConfig.color }}>
+                    {isWarning ? '提示: ' : '失败原因: '}
+                  </strong>
+                  <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
+                    {reasons.map((reason, idx) => (
+                      <li key={idx} style={{ color: '#374151' }}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {detail.status === 'fail' && (
                 <div className="evaluation-detail-grid">
                   <EvaluationJsonBlock
                     label="Expected"
@@ -901,19 +1017,25 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
                 </div>
               )}
               <div className="evaluation-checks">
-                {checks.map((check) => (
-                  <span
-                    key={`${detail.case_id}-${check.stage}-${check.name}`}
-                    data-status={check.passed ? 'pass' : 'fail'}
-                  >
-                    {check.passed ? 'PASS' : 'FAIL'} {check.stage}.{check.name}
-                    {check.reason ? `: ${check.reason}` : ''}
-                  </span>
-                ))}
+                {checks.map((check) => {
+                  const checkKey = `${check.stage}.${check.name}`
+                  const tooltip = CHECK_TOOLTIPS[checkKey] || check.reason
+                  return (
+                    <span
+                      key={`${detail.case_id}-${check.stage}-${check.name}`}
+                      data-status={check.passed ? 'pass' : isWarning ? 'warning' : 'fail'}
+                      title={tooltip}
+                      style={{ cursor: 'help' }}
+                    >
+                      {check.passed ? 'PASS' : isWarning ? 'WARN' : 'FAIL'} {check.stage}.{check.name}
+                      {check.reason ? `: ${check.reason}` : ''}
+                    </span>
+                  )
+                })}
               </div>
             </div>
           </details>
-        ))}
+        )})}
         </div>
       </details>
     </section>
@@ -935,61 +1057,114 @@ function formatEvaluationError(error: unknown) {
   return detailMatch?.[1] ?? message
 }
 
+// 指标说明映射
+const METRIC_TOOLTIPS: Record<string, string> = {
+  'Routing Exact Match': '路由精确匹配率：选中技能和期望技能完全一致（不多不少）的用例占比，要求最严格',
+  'Routing Precision': '路由精确率：所有被选中的技能中，真正应该选的比例，越低说明多选的无关技能越多',
+  'Routing Recall': '路由召回率：所有应该选的技能中，真的被选中的比例，越低说明漏选的必要技能越多',
+  'Routing F1': '路由F1分数：精确率和召回率的调和平均值，综合衡量路由质量，越高越好',
+  'Routing False Positive': '路由误报率：不需要任何技能的负向用例中，错误选中了技能的比例',
+  'Routing Over-select': '过度选择率：多选了无关技能的用例占比',
+  'Routing Under-select': '遗漏选择率：漏选了必要技能的用例占比',
+  'Attack Block': '攻击拦截率：恶意提示词攻击被安全系统成功拦截的比例',
+  'Unsafe Tools': '危险工具调用率：测试中实际调用了危险工具的比例，越低越好',
+  'Secret Leak Rate': '敏感信息泄露率：回答中泄露了密钥、密码等禁止内容的比例，越低越好（Prompt Guard相关）',
+  'Security Event Precision': '安全事件准确率：触发的安全事件类型和预期完全匹配的比例，越高说明安全拦截越精准（Prompt Guard相关）',
+  'Tool Selection': '工具选择准确率：调用了所有期望工具的用例占比',
+  'Tool F1': '工具调用F1：工具选择精确率和召回率的综合得分',
+  'Argument Fidelity': '参数准确率：工具参数中包含所有期望关键字段的用例占比',
+  'Argument F1': '参数F1：参数匹配的综合得分',
+  'Answer Contains': '回答覆盖率：回答中包含了所有期望内容的用例占比',
+  'Answer Violations': '回答违规率：回答中出现了禁止内容的比例，越低越好',
+  'Answer Hallucination': '回答幻觉率：回答中编造了无依据内容的比例，越低越好',
+  'Repeated Tools': '重复工具调用率：相同参数重复调用同一工具（陷入无效循环）的比例，越低越好',
+  'Argument Hallucination': '参数幻觉率：工具参数编造了不存在值的比例，越低越好',
+  'Evidence Usage': '证据使用率：工具返回的真实数据在回答中被引用的比例，越高说明回答越 grounded',
+  'Unsupported Answer': '无依据回答率：回答内容没有工具返回结果支撑的比例，越低越好',
+}
+
+const CHECK_TOOLTIPS: Record<string, string> = {
+  'routing.skill_selection_precision': '技能选择精确率检查：是否多选了无关技能',
+  'routing.skill_selection_recall': '技能选择召回率检查：是否漏选了必要技能',
+  'routing.skill_selection_exact_match': '技能精确匹配检查：选中技能和期望技能是否完全一致',
+  'safety.security_event': '安全检查：是否成功拦截了恶意请求',
+  'tool.tool_selection': '工具选择检查：是否调用了正确的工具',
+  'tool.tool_arguments': '工具参数检查：工具参数是否正确',
+  'hallucination.repeated_tool_call': '重复调用检查：是否重复调用相同参数的工具（无效循环）',
+  'tool.forbidden_tools': '禁用工具检查：是否调用了禁止使用的工具',
+  'answer.answer_contains': '回答内容检查：回答是否包含了期望的关键信息',
+  'hallucination.answer_hallucination': '回答幻觉检查：回答是否包含了无依据的编造内容',
+  'tool.tool_execution': '工具执行检查：工具运行是否成功没有报错',
+}
+
 function buildEvaluationSummary(report: SkillEvaluationReport) {
-  return [
-    {
-      label: 'Attack Block',
-      value: formatPercent(report.safety?.attack_block_rate),
-    },
-    {
-      label: 'Unsafe Tools',
-      value: formatPercent(report.safety?.unsafe_tool_call_rate),
-    },
-    {
-      label: 'Tool Selection',
-      value: formatPercent(report.tools?.tool_selection_accuracy),
-    },
-    {
-      label: 'Tool F1',
-      value: formatPercent(report.tools?.tool_call_f1),
-    },
-    {
-      label: 'Argument Fidelity',
-      value: formatPercent(report.tools?.argument_fidelity),
-    },
-    {
-      label: 'Argument F1',
-      value: formatPercent(report.tools?.argument_f1),
-    },
-    {
-      label: 'Answer Contains',
-      value: formatPercent(report.answers?.answer_contains_rate),
-    },
-    {
-      label: 'Answer Violations',
-      value: formatPercent(report.answers?.forbidden_answer_violation_rate),
-    },
-    {
-      label: 'Answer Hallucination',
-      value: formatPercent(report.hallucinations?.answer_hallucination_rate),
-    },
-    {
-      label: 'Repeated Tools',
-      value: formatPercent(report.hallucinations?.repeated_tool_call_rate),
-    },
-    {
-      label: 'Argument Hallucination',
-      value: formatPercent(report.hallucinations?.tool_argument_hallucination_rate),
-    },
-    {
-      label: 'Evidence Usage',
-      value: formatPercent(report.hallucinations?.tool_evidence_usage_rate),
-    },
-    {
-      label: 'Unsupported Answer',
-      value: formatPercent(report.hallucinations?.unsupported_answer_rate),
-    },
-  ]
+  const routingMetrics = report.routing as Record<string, number | null | undefined> | null | undefined
+  const metrics: Array<{label: string, value: number | null | undefined, tooltip: string}> = []
+
+  // 路由指标（quick和e2e都有）
+  if (routingMetrics) {
+    metrics.push(
+      { label: 'Routing Exact Match', value: routingMetrics.selection_accuracy, tooltip: METRIC_TOOLTIPS['Routing Exact Match'] },
+      { label: 'Routing Precision', value: routingMetrics.skill_selection_precision, tooltip: METRIC_TOOLTIPS['Routing Precision'] },
+      { label: 'Routing Recall', value: routingMetrics.skill_selection_recall, tooltip: METRIC_TOOLTIPS['Routing Recall'] },
+      { label: 'Routing F1', value: routingMetrics.skill_selection_f1, tooltip: METRIC_TOOLTIPS['Routing F1'] },
+      { label: 'Routing False Positive', value: routingMetrics.false_positive_rate, tooltip: METRIC_TOOLTIPS['Routing False Positive'] },
+      { label: 'Routing Over-select', value: routingMetrics.skill_over_selection_rate, tooltip: METRIC_TOOLTIPS['Routing Over-select'] },
+      { label: 'Routing Under-select', value: routingMetrics.skill_under_selection_rate, tooltip: METRIC_TOOLTIPS['Routing Under-select'] },
+    )
+  }
+
+  // 安全指标（快检仅显示Prompt Guard相关指标，E2E显示全部安全指标）
+  if (report.safety) {
+    // 快检模式判断：没有工具/回答/幻觉指标说明是快检
+    const isQuickMode = !report.tools && !report.answers && !report.hallucinations
+    // Prompt Guard核心指标，两种模式都显示
+    metrics.push(
+      { label: 'Attack Block', value: report.safety.attack_block_rate, tooltip: METRIC_TOOLTIPS['Attack Block'] },
+      { label: 'Security Event Precision', value: report.safety.security_event_precision, tooltip: METRIC_TOOLTIPS['Security Event Precision'] },
+    )
+    // 以下指标仅E2E模式有意义（快检不执行工具、不生成回答，指标恒为0）
+    if (!isQuickMode) {
+      metrics.push(
+        { label: 'Unsafe Tools', value: report.safety.unsafe_tool_call_rate, tooltip: METRIC_TOOLTIPS['Unsafe Tools'] },
+        { label: 'Secret Leak Rate', value: report.safety.secret_leak_rate, tooltip: METRIC_TOOLTIPS['Secret Leak Rate'] },
+      )
+    }
+  }
+
+  // 工具指标（仅e2e有）
+  if (report.tools) {
+    metrics.push(
+      { label: 'Tool Selection', value: report.tools.tool_selection_accuracy, tooltip: METRIC_TOOLTIPS['Tool Selection'] },
+      { label: 'Tool F1', value: report.tools.tool_call_f1, tooltip: METRIC_TOOLTIPS['Tool F1'] },
+      { label: 'Argument Fidelity', value: report.tools.argument_fidelity, tooltip: METRIC_TOOLTIPS['Argument Fidelity'] },
+      { label: 'Argument F1', value: report.tools.argument_f1, tooltip: METRIC_TOOLTIPS['Argument F1'] },
+    )
+  }
+
+  // 回答指标（仅e2e有）
+  if (report.answers) {
+    metrics.push(
+      { label: 'Answer Contains', value: report.answers.answer_contains_rate, tooltip: METRIC_TOOLTIPS['Answer Contains'] },
+      { label: 'Answer Violations', value: report.answers.forbidden_answer_violation_rate, tooltip: METRIC_TOOLTIPS['Answer Violations'] },
+    )
+  }
+
+  // 幻觉指标（仅e2e有）
+  if (report.hallucinations) {
+    metrics.push(
+      { label: 'Answer Hallucination', value: report.hallucinations.answer_hallucination_rate, tooltip: METRIC_TOOLTIPS['Answer Hallucination'] },
+      { label: 'Repeated Tools', value: report.hallucinations.repeated_tool_call_rate, tooltip: METRIC_TOOLTIPS['Repeated Tools'] },
+      { label: 'Argument Hallucination', value: report.hallucinations.tool_argument_hallucination_rate, tooltip: METRIC_TOOLTIPS['Argument Hallucination'] },
+      { label: 'Evidence Usage', value: report.hallucinations.tool_evidence_usage_rate, tooltip: METRIC_TOOLTIPS['Evidence Usage'] },
+      { label: 'Unsupported Answer', value: report.hallucinations.unsupported_answer_rate, tooltip: METRIC_TOOLTIPS['Unsupported Answer'] },
+    )
+  }
+
+  // 格式化值，过滤掉完全没有数据的指标
+  return metrics
+    .filter(metric => metric.value != null)
+    .map(metric => ({ ...metric, value: formatPercent(metric.value) }))
 }
 
 function getSkillScore(skill: SkillInfo) {

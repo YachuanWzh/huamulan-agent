@@ -18,18 +18,66 @@ def build_case_evaluation_detail(
     judge: JudgeEvaluation | None = None,
 ) -> CaseEvaluationDetail:
     checks = _build_checks(case, outcome)
+    selected = _string_list(outcome.get("selected_skills"))
+    # Calculate per-case routing P/R/F1
+    precision = None
+    recall = None
+    f1 = None
+    if case.expected_skills:
+        expected_set = set(case.expected_skills)
+        selected_set = set(selected)
+        tp = len(expected_set & selected_set)
+        fp = len(selected_set - expected_set)
+        fn = len(expected_set - selected_set)
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        if precision + recall > 0:
+            f1 = 2 * precision * recall / (precision + recall)
+        else:
+            f1 = 0.0
+
+    # 判定case状态：pass/warning/fail
+    failed_checks = [c for c in checks if not c.passed]
+    status = "pass"
+    diagnosis = _diagnose(checks)
+    if failed_checks:
+        # 仅多选技能（无漏选、无其他阶段失败）→ warning（黄色提示，不算失败）
+        has_recall_failure = any(
+            c.stage == "routing" and c.name == "skill_selection_recall"
+            for c in failed_checks
+        )
+        has_non_routing_failure = any(c.stage != "routing" for c in failed_checks)
+        only_over_selected = not has_recall_failure and not has_non_routing_failure
+        if only_over_selected:
+            status = "warning"
+            diagnosis.severity = "warning"
+            # 提取多选择的技能名称
+            precision_fail = next(
+                (c for c in failed_checks if c.name == "skill_selection_precision"),
+                None
+            )
+            extra = precision_fail.reason if precision_fail else "存在冗余技能选择"
+            diagnosis.summary = f"⚠️ 路由存在冗余选择: {extra}"
+            diagnosis.signals = [f"warning.routing.over_selection: {extra}"]
+        else:
+            status = "fail"
+
     return CaseEvaluationDetail(
         case_id=case.id,
         mode=mode,
         query=_case_query(case),
         turns=_case_turns(case),
         expected_skills=case.expected_skills,
-        selected_skills=_string_list(outcome.get("selected_skills")),
+        selected_skills=selected,
         expected_tool_calls=case.expected_tool_calls,
         actual_tool_calls=_tool_calls(outcome),
         final_answer=str(outcome.get("final_answer") or ""),
         checks=checks,
-        diagnosis=_diagnose(checks),
+        diagnosis=diagnosis,
+        status=status,
+        skill_selection_precision=precision,
+        skill_selection_recall=recall,
+        skill_selection_f1=f1,
         judge=judge,
         log_summary=_summarize_logs(outcome.get("logs") or []),
     )
