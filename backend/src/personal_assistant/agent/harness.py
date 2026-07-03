@@ -114,19 +114,19 @@ _PROMPT_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
         "instruction_override",
         "HIGH",
         "User message attempts to override prior or system instructions.",
-        r"(?is)(?:\b(?:forget|ignore|disregard)\b.{0,20}\b(?:previous|above|all|system)\b.{0,20}\b(?:instructions?|rules?|prompts?|constraints?)\b|忽略.{0,10}(?:之前|以上|所有|以前).{0,10}(?:指令|指示|设定|规则|命令|约束|限制|要求))",
+        r"(?is)(?:\b(?:forget|ignore|disregard)\b.{0,20}\b(?:previous|above|all|system)\b.{0,20}\b(?:instructions?|rules?|prompts?|constraints?)\b|忽略.{0,10}(?:之前|以上|所有|以前|上面的|前述|上述|前面).{0,10}(?:指令|指示|设定|规则|命令|约束|限制|要求))",
     ),
     (
         "system_prompt_leak",
         "HIGH",
         "User message attempts to reveal hidden system or developer instructions.",
-        r"(?is)(?:\b(?:output|print|show|reveal|repeat|dump)\b.{0,20}\b(?:your|the)\b.{0,10}\b(?:system|developer)\b.{0,10}\b(?:prompt|instructions?)\b|(?:输出|打印|展示|泄露|复述|逐字).{0,10}(?:系统|开发者|角色).{0,10}(?:提示词|指令|设定|规则))",
+        r"(?is)(?:\b(?:output|print|show|reveal|repeat|dump)\b.{0,20}\b(?:your|the)\b.{0,10}\b(?:system|developer)\b.{0,10}\b(?:prompt|instructions?)\b|(?:输出|打印|展示|泄露|复述|逐字|告诉|给我).{0,15}(?:系统|开发者|角色).{0,15}(?:提示词|指令|设定|规则)|(?:系统|开发者|角色).{0,15}(?:提示词|指令|设定|规则).{0,15}(?:输出|打印|展示|泄露|复述|逐字|告诉|给我))",
     ),
     (
         "role_play_jailbreak",
         "HIGH",
         "User message attempts to activate a jailbreak role or unsafe mode.",
-        r"(?is)(?:\byou\s+are\s+now\s+(?:dan|developer\s+mode)\b|\benter\s+developer\s+mode\b|你现在是.{0,10}DAN|进入.{0,10}开发者模式)",
+        r"(?is)(?:\byou\s+are\s+now\s+(?:dan|developer\s+mode)\b|\benter\s+developer\s+mode\b|你现在(?:是|进入|变成|扮演).{0,10}(?:DAN|开发者|无限制|不受限).{0,5}模式|进入.{0,10}DAN.{0,5}模式)",
     ),
     (
         "identity_spoof",

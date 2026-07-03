@@ -226,7 +226,7 @@ def build_observability_snapshot(
 def _is_slow_frontend_metric(event: FrontendRumEvent) -> bool:
     thresholds = {
         "LCP": 2500,
-        "FID": 100,
+        "FCP": 1800,
         "INP": 200,
         "CLS": 0.1,
         "TTFB": 800,
