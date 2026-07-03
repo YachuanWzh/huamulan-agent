@@ -1,0 +1,6 @@
+langgraph>=0.2
+langchain-core>=0.3
+langchain-openai>=0.3
+python-dotenv>=1.0
+pytest>=8.0
+PyYAML>=6.0
