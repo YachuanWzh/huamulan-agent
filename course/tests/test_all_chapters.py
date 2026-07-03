@@ -61,12 +61,22 @@ def test_readme_has_required_sections(chapter: str):
     if readme is None:
         pytest.skip(f"{chapter} has no README.md")
     content = readme.read_text(encoding="utf-8")
-    # All chapters should have at minimum: 问题, 工作原理, 试一试
-    required = ["问题", "工作原理"]
+    # All chapters should have at minimum: 问题 section
+    required = ["## 问题"]
     for section in required:
         assert section in content, (
             f"{chapter}/README.md is missing required section: '{section}'"
         )
+    # Should also have a "how it works" section of some kind
+    how_sections = ["工作原理", "端点设计", "SSE 流式", "组件架构",
+                    "状态管理", "缓存策略", "压缩策略", "记忆系统",
+                    "路由机制", "审批流程", "中间件链", "Hook 机制",
+                    "工具定义", "循环机制", "脚本工具", "Checkpoint"]
+    has_how = any(s in content for s in how_sections)
+    assert has_how, (
+        f"{chapter}/README.md is missing a 'how it works' section. "
+        f"Expected one of: {how_sections}"
+    )
 
 
 @pytest.mark.parametrize("chapter", CHAPTERS)

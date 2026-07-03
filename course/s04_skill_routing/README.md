@@ -158,12 +158,12 @@ python s04_skill_routing/code.py
 
 | Prompt | 期望选中的技能 | 原因 |
 |--------|--------------|------|
-| `今天天气怎么样？` | weather | 匹配 `天气` regex |
+| `今天天气怎么样？` | weather, datetime | `天气` 触发 weather，`今天` 触发 datetime |
 | `现在几点了？` | datetime | 匹配 `几点` regex |
-| `帮我找一下 README.md 在哪里` | file-search | 匹配 `找` + 文件名模式 |
-| `天气很热，什么时候下雨？` | weather, datetime | 匹配 `天气` + `什么时候` |
-| `hello` | （无） | 没有任何 regex 匹配 |
-| `帮我创建一个 hello.py` | （无） | 创建不是搜索，不触发 file-search |
+| `帮我找一下 README.md 在哪里` | file-search | 匹配 `找` regex |
+| `告诉我时间和天气` | weather, datetime | `时间` 触发 datetime，`天气` 触发 weather |
+| `hello world` | （无） | 没有任何 regex 匹配 |
+| `帮我创建一个 hello.py` | （无） | `创建` 不在 file-search 的 regex 中 |
 
 注意最后一个例子：`创建` 不触发 `file-search`，因为 file-search 的 regex 是
 `find\|search\|找`。这是**精确路由**的体现——不会过度激活不相关的技能。

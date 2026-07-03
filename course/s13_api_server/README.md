@@ -65,7 +65,7 @@ API Server 的三件事：
   每个事件转换为一条 SSE 消息推送给客户端。
 - **`GET /health`**：返回 `{"status": "ok"}`，K8s liveness probe 使用。
 
-## SSE 流式机制（本章核心）
+## 工作原理：SSE 流式机制
 
 ### 什么是 SSE
 
