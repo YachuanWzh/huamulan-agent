@@ -9,11 +9,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from personal_assistant.agent.agent import warmup_skill_routing
+from personal_assistant.agent.agent import (
+    build_skill_router_components,
+    build_skill_vector_index,
+    warmup_skill_routing,
+)
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.agent.harness import scan_prompt_guard, scan_tool_guard
 from personal_assistant.agent.llm import build_llm
-from personal_assistant.agent.router import route_skill_names
+from personal_assistant.agent.router import route_skill_names_with_trace
 from personal_assistant.apm import (
     FrontendRumEvent,
     ObservabilitySnapshot,
@@ -176,13 +180,27 @@ harness = AgentHarness(
     callbacks=[langfuse_callback] if langfuse_callback else None,
     cache=cache,
 )
+logger = logging.getLogger(__name__)
+
+# Initialize full three-layer routing components for quick evaluation mode
+# 只保留route_skill_names_with_trace支持的参数，去掉build_skill_router专用的long_term_memory/cache
+quick_eval_semantic_index = build_skill_vector_index(settings) if getattr(settings, "skill_routing_semantic_enabled", False) else None
+_full_router_kwargs = build_skill_router_components(
+    settings,
+    long_term_memory=None,
+    cache=None,
+)
+quick_eval_router_kwargs = {
+    k: v for k, v in _full_router_kwargs.items()
+    if k not in ("long_term_memory", "cache", "memory_cache_ttl_seconds")
+}
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await postgres_memory.start()
     registry.start_watching()
-    await warmup_skill_routing(settings, registry)
+    await warmup_skill_routing(settings, registry, semantic_index=quick_eval_semantic_index)
     try:
         yield
     finally:
@@ -576,10 +594,17 @@ async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dic
             "tool_completed": False,
             "tool_failed": False,
         }
-    selected = await route_skill_names(registry, query)
+    # 快检模式使用完整三层漏斗路由：正则→语义检索→LLM判定
+    # 服务不可用时自动降级，和生产环境逻辑一致
+    try:
+        routing = await route_skill_names_with_trace(registry, query, **quick_eval_router_kwargs)
+    except Exception as exc:
+        logger.warning("Quick evaluation full routing failed, falling back to regex only: %s", exc)
+        routing = await route_skill_names_with_trace(registry, query)
     return {
         "case": case,
-        "selected_skills": selected,
+        "selected_skills": routing.selected_skills,
+        "routing_trace": routing.trace,
         "logs": logs,
         "final_answer": "",
         "tool_names": [],
@@ -597,10 +622,12 @@ async def _run_e2e_case(harness: AgentHarness, case: GoldenSkillCase, run_id: st
         response = await _auto_resolve_eval_approvals(harness, thread_id, response)
     logs = await harness.list_execution_logs(thread_id, limit=500)
     selected = _selected_skills_from_logs(logs)
+    routing_trace = _routing_trace_from_logs(logs)
     final_answer = _final_answer_from_response(response) or _final_answer_from_logs(logs)
     return {
         "case": case,
         "selected_skills": selected,
+        "routing_trace": routing_trace,
         "logs": logs,
         "final_answer": final_answer,
         "tool_names": _tool_names_from_logs(logs),
@@ -716,6 +743,15 @@ def _selected_skills_from_logs(logs) -> list[str]:
         selected = metadata.get("selected_skills") if isinstance(metadata, dict) else None
         if isinstance(selected, list):
             return [str(item) for item in selected]
+    return []
+
+
+def _routing_trace_from_logs(logs) -> list[dict]:
+    for log in reversed(list(logs)):
+        metadata = _log_value(log, "metadata") or {}
+        trace = metadata.get("routing_trace") if isinstance(metadata, dict) else None
+        if isinstance(trace, list):
+            return [item for item in trace if isinstance(item, dict)]
     return []
 
 

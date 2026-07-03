@@ -639,6 +639,51 @@ describe('WorkspacePanel', () => {
             model: 'deepseek-v4-pro',
             available: true,
           },
+          suspected_node: 'prompt',
+          diagnostic_outputs: {
+            final_answer: 'It is 2026-07-02.',
+            missing_answer_fragments: ['UTC timezone'],
+            routing_trace: [
+              {
+                stage: 'regex',
+                status: 'missed',
+                selected_skills: [],
+                reason: 'no regex or trigger matched',
+              },
+              {
+                stage: 'semantic',
+                status: 'below_threshold',
+                candidates: [{ name: 'resolve-time', score: 0.31 }],
+                threshold: 0.8,
+                top_candidate: 'resolve-time',
+                reason: 'top candidate score below threshold',
+              },
+              {
+                stage: 'llm_judge',
+                status: 'rejected',
+                selected_skill: null,
+                confidence: 0.22,
+                reason: 'not enough evidence',
+              },
+            ],
+            judge: {
+              reason: 'tool argument mismatch',
+              evidence: ['timezone mismatch'],
+              recommendation: 'check routing prompt',
+              model: 'deepseek-v4-pro',
+            },
+            logs: [
+              {
+                event_type: 'tool',
+                status: 'completed',
+                name: 'resolve_current_time',
+                input: { timezone: 'Asia/Shanghai' },
+                output: { date: '2026-07-02' },
+                error: {},
+                metadata: {},
+              },
+            ],
+          },
           log_summary: [
             {
               event_type: 'tool',
@@ -728,6 +773,51 @@ describe('WorkspacePanel', () => {
                 recommendation: 'check routing prompt',
                 model: 'deepseek-v4-pro',
                 available: true,
+              },
+              suspected_node: 'prompt',
+              diagnostic_outputs: {
+                final_answer: 'It is 2026-07-02.',
+                missing_answer_fragments: ['UTC timezone'],
+                routing_trace: [
+                  {
+                    stage: 'regex',
+                    status: 'missed',
+                    selected_skills: [],
+                    reason: 'no regex or trigger matched',
+                  },
+                  {
+                    stage: 'semantic',
+                    status: 'below_threshold',
+                    candidates: [{ name: 'resolve-time', score: 0.31 }],
+                    threshold: 0.8,
+                    top_candidate: 'resolve-time',
+                    reason: 'top candidate score below threshold',
+                  },
+                  {
+                    stage: 'llm_judge',
+                    status: 'rejected',
+                    selected_skill: null,
+                    confidence: 0.22,
+                    reason: 'not enough evidence',
+                  },
+                ],
+                judge: {
+                  reason: 'tool argument mismatch',
+                  evidence: ['timezone mismatch'],
+                  recommendation: 'check routing prompt',
+                  model: 'deepseek-v4-pro',
+                },
+                logs: [
+                  {
+                    event_type: 'tool',
+                    status: 'completed',
+                    name: 'resolve_current_time',
+                    input: { timezone: 'Asia/Shanghai' },
+                    output: { date: '2026-07-02' },
+                    error: {},
+                    metadata: {},
+                  },
+                ],
               },
               log_summary: [
                 {
@@ -829,12 +919,23 @@ describe('WorkspacePanel', () => {
     expect(screen.getByText('Expected')).toBeInTheDocument()
     expect(screen.getByText('Actual')).toBeInTheDocument()
     expect(screen.getByText(/get_current_weather/)).toBeInTheDocument()
-    expect(screen.getByText(/resolve_current_time/)).toBeInTheDocument()
-    expect(screen.queryByText('FAIL tool.tool_arguments')).not.toBeInTheDocument()
-    expect(screen.queryByText('FAIL tool.tool_selection: Expected tool was not called')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Tool arguments do not match expectation/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/deepseek-v4-pro/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/check routing prompt/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(/resolve_current_time/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Suspected node/i)).toBeInTheDocument()
+    expect(screen.getByText(/Suspected node: prompt/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Final answer/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/It is 2026-07-02/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Judge/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/deepseek-v4-pro/)).toBeInTheDocument()
+    expect(screen.getByText(/timezone mismatch/)).toBeInTheDocument()
+    expect(screen.getByText(/check routing prompt/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Routing funnel/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/regex/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/semantic/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/llm_judge/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/below_threshold/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/not enough evidence/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Execution outputs/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/2026-07-02/).length).toBeGreaterThan(0)
   })
 
   it('collapses evaluation case details by default after evaluation completes', async () => {

@@ -152,6 +152,9 @@ class CaseEvaluationDetail(BaseModel):
     skill_selection_f1: float | None = None
     judge: JudgeEvaluation | None = None
     log_summary: list[dict[str, Any]] = Field(default_factory=list)
+    suspected_node: str | None = None
+    routing_trace: list[dict[str, Any]] = Field(default_factory=list)
+    diagnostic_outputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillEvaluationResult(BaseModel):

@@ -16,6 +16,7 @@ from personal_assistant.agent.router import (
     build_skill_router,
     build_system_prompt,
     route_skill_names,
+    route_skill_names_with_trace,
     _keyword_route,
 )
 from personal_assistant.memory.long_term import LongTermMemoryStore
@@ -159,6 +160,18 @@ class TestPatrolRouting:
         )
 
         assert result == ["patrol", "troubleshoot"]
+
+    def test_routes_full_patrol_with_chinese_thresholds(self, tmp_path: Path):
+        """e2e-patrol-019: 全量巡检+中文阈值场景应该命中patrol技能"""
+        _make_named_skill(tmp_path, "patrol")
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            "帮我做一次全量巡检：当前 API 健康通过率 99.2%、数据库连接正常、Redis 命中率 87%、前端 JS 错误率 2.1%、订单接口 p95 延迟 3200ms。告警阈值：API 健康<99%、Redis 命中率<90%、JS 错误率>5%、p95 延迟>2000ms。输出每项 pass/fail 和修复建议。",
+        )
+
+        assert result == ["patrol"]
 
 
 class FakeSemanticIndex:
@@ -455,6 +468,56 @@ class TestSkillRoutingFunnel:
         assert '"userInput": "ambiguous date wording"' in llm.payloads[0]
         assert '"relatedFind": [' in llm.payloads[0]
         assert "cal: Calendar arithmetic." in llm.payloads[0]
+
+    @pytest.mark.asyncio
+    async def test_route_trace_records_each_funnel_stage(self, tmp_path: Path):
+        _make_triggered_skill(tmp_path)
+        registry = SkillRegistry(tmp_path)
+        semantic = FakeSemanticIndex(
+            [SkillSemanticCandidate(name="cal", description="Calendar arithmetic.", score=0.31)]
+        )
+        llm = FakeStructuredLLM(
+            [{"selectedSkill": None, "confidence": 0.22, "reason": "not enough evidence"}]
+        )
+
+        result = await route_skill_names_with_trace(
+            registry,
+            "ambiguous date wording",
+            semantic_index=semantic,
+            llm=llm,
+            semantic_threshold=0.8,
+        )
+
+        assert result.selected_skills == []
+        assert result.trace == [
+            {
+                "stage": "regex",
+                "status": "missed",
+                "selected_skills": [],
+                "reason": "no regex or trigger matched",
+            },
+            {
+                "stage": "semantic",
+                "status": "below_threshold",
+                "candidates": [
+                    {
+                        "name": "cal",
+                        "description": "Calendar arithmetic.",
+                        "score": 0.31,
+                    }
+                ],
+                "threshold": 0.8,
+                "top_candidate": "cal",
+                "reason": "top candidate score below threshold",
+            },
+            {
+                "stage": "llm_judge",
+                "status": "rejected",
+                "selected_skill": None,
+                "confidence": 0.22,
+                "reason": "not enough evidence",
+            },
+        ]
 
     @pytest.mark.asyncio
     async def test_llm_judge_accepts_chat_message_json_content(self, tmp_path: Path):

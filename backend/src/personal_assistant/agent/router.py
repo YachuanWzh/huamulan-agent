@@ -56,12 +56,12 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
     ],
     "patrol": [
         r"\b(patrol|inspection|scheduled check|health check|alert rule|automatic repair)\b",
-        r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:_rate|_ratio|_p95|_p99)?\s*(?:>=|<=|>|<|==)\s*\d+(?:\.\d+)?\s+for\s+\d+[smhd]\b",
+        r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:_rate|_ratio|_p95|_p99)?\s*(?:>=|<=|>|<|==)\s*\d+(?:\.\d+)?(?:\s+for\s+\d+[smhd])?\b",
         (
-            r"(\u5de1\u68c0\u89c4\u5219|\u544a\u8b66\u89c4\u5219|"
-            r"\u81ea\u52a8\u5de1\u68c0|\u5b9a\u65f6\u5de1\u68c0|"
+            r"(\u5de1\u68c0|\u5de1\u68c0\u89c4\u5219|\u544a\u8b66\u89c4\u5219|"
+            r"\u544a\u8b66\u9608\u503c|\u81ea\u52a8\u5de1\u68c0|\u5b9a\u65f6\u5de1\u68c0|"
             r"\u591c\u95f4\u5de1\u68c0|\u5065\u5eb7\u68c0\u67e5|"
-            r"\u8dd1.*\u5de1\u68c0|\u8f93\u51fa\u5f02\u5e38\u53d1\u73b0)"
+            r"\u8f93\u51fa\u5f02\u5e38\u53d1\u73b0|pass/fail)"
         ),
     ],
     "troubleshoot": [
@@ -113,6 +113,12 @@ class SkillSemanticCandidate:
     name: str
     description: str
     score: float
+
+
+@dataclass(frozen=True)
+class SkillRoutingResult:
+    selected_skills: list[str]
+    trace: list[dict]
 
 
 class SkillEmbeddingProvider(Protocol):
@@ -560,7 +566,7 @@ def build_skill_router(
             if getattr(message, "type", "") == "human"
         )[-4000:]
 
-        selected = await route_skill_names(
+        routing = await route_skill_names_with_trace(
             registry,
             user_text,
             semantic_index=semantic_index,
@@ -572,6 +578,7 @@ def build_skill_router(
             rerank_top_k=rerank_top_k,
             llm_retry_count=llm_retry_count,
         )
+        selected = routing.selected_skills
 
         for name in selected:
             registry.load_skill(name)
@@ -591,6 +598,7 @@ def build_skill_router(
         return {
             "messages": [system],
             "selected_skills": selected,
+            "routing_trace": routing.trace,
             "allowed_tools": list(registry.tool_map_for_skills(selected)),
         }
 
@@ -610,11 +618,56 @@ async def route_skill_names(
     llm_retry_count: int = 1,
 ) -> list[str]:
     """Route skills through regex, semantic retrieval, then optional LLM judgment."""
+    result = await route_skill_names_with_trace(
+        registry,
+        user_text,
+        semantic_index=semantic_index,
+        reranker=reranker,
+        llm=llm,
+        semantic_threshold=semantic_threshold,
+        semantic_top_k=semantic_top_k,
+        rerank_threshold=rerank_threshold,
+        rerank_top_k=rerank_top_k,
+        llm_retry_count=llm_retry_count,
+    )
+    return result.selected_skills
+
+
+async def route_skill_names_with_trace(
+    registry: SkillRegistry,
+    user_text: str,
+    semantic_index: SkillVectorIndex | None = None,
+    reranker: SkillReranker | None = None,
+    llm=None,
+    semantic_threshold: float = 0.72,
+    semantic_top_k: int = 3,
+    rerank_threshold: float | None = None,
+    rerank_top_k: int | None = None,
+    llm_retry_count: int = 1,
+) -> SkillRoutingResult:
+    """Route skills and return a structured funnel trace for diagnostics."""
+    trace: list[dict] = []
     regex_selected = _regex_route(registry, user_text)
     if regex_selected:
         logger.info("Skill routing regex stage selected=%s", ",".join(regex_selected))
-        return regex_selected
+        trace.append(
+            {
+                "stage": "regex",
+                "status": "selected",
+                "selected_skills": regex_selected,
+                "reason": "regex or trigger matched",
+            }
+        )
+        return SkillRoutingResult(selected_skills=regex_selected, trace=trace)
     logger.info("Skill routing regex stage missed")
+    trace.append(
+        {
+            "stage": "regex",
+            "status": "missed",
+            "selected_skills": [],
+            "reason": "no regex or trigger matched",
+        }
+    )
 
     semantic_candidates: list[SkillSemanticCandidate] = []
     if semantic_index is not None and user_text.strip():
@@ -623,6 +676,15 @@ async def route_skill_names(
         except Exception:
             logger.exception("Skill routing semantic stage failed")
             semantic_candidates = []
+            trace.append(
+                {
+                    "stage": "semantic",
+                    "status": "failed",
+                    "candidates": [],
+                    "threshold": semantic_threshold,
+                    "reason": "semantic search failed",
+                }
+            )
         candidate_summary = _semantic_candidate_summary(semantic_candidates)
         logger.info(
             "Skill routing semantic stage candidates=%s threshold=%.4f",
@@ -646,6 +708,7 @@ async def route_skill_names(
                 _semantic_candidate_summary(semantic_candidates),
             )
             try:
+                input_candidates = _candidate_trace(semantic_candidates)
                 semantic_candidates = await _rerank_semantic_candidates(
                     reranker,
                     user_text,
@@ -658,16 +721,44 @@ async def route_skill_names(
                     _semantic_candidate_summary(semantic_candidates),
                     selection_threshold,
                 )
+                trace.append(
+                    {
+                        "stage": "rerank",
+                        "status": "completed",
+                        "input_candidates": input_candidates,
+                        "candidates": _candidate_trace(semantic_candidates),
+                        "threshold": selection_threshold,
+                        "top_k": effective_rerank_top_k,
+                    }
+                )
             except RerankUnavailableError as exc:
                 logger.warning(
                     "Skill routing rerank stage unavailable: reason=%s input_candidates=%s",
                     exc,
                     _semantic_candidate_summary(semantic_candidates),
                 )
+                trace.append(
+                    {
+                        "stage": "rerank",
+                        "status": "unavailable",
+                        "candidates": _candidate_trace(semantic_candidates),
+                        "threshold": effective_rerank_threshold,
+                        "reason": str(exc),
+                    }
+                )
             except Exception:
                 logger.exception(
                     "Skill routing rerank stage failed: input_candidates=%s",
                     _semantic_candidate_summary(semantic_candidates),
+                )
+                trace.append(
+                    {
+                        "stage": "rerank",
+                        "status": "failed",
+                        "candidates": _candidate_trace(semantic_candidates),
+                        "threshold": effective_rerank_threshold,
+                        "reason": "rerank request failed",
+                    }
                 )
         if semantic_candidates and semantic_candidates[0].score >= selection_threshold:
             logger.info(
@@ -675,7 +766,20 @@ async def route_skill_names(
                 semantic_candidates[0].name,
                 semantic_candidates[0].score,
             )
-            return [semantic_candidates[0].name]
+            trace.append(
+                {
+                    "stage": "semantic",
+                    "status": "selected",
+                    "candidates": _candidate_trace(semantic_candidates),
+                    "threshold": selection_threshold,
+                    "selected_skill": semantic_candidates[0].name,
+                    "reason": "top candidate score met threshold",
+                }
+            )
+            return SkillRoutingResult(
+                selected_skills=[semantic_candidates[0].name],
+                trace=trace,
+            )
         if semantic_candidates:
             logger.info(
                 "Skill routing semantic top candidate below threshold: top=%s score=%.4f threshold=%.4f",
@@ -683,10 +787,44 @@ async def route_skill_names(
                 semantic_candidates[0].score,
                 selection_threshold,
             )
+            trace.append(
+                {
+                    "stage": "semantic",
+                    "status": "below_threshold",
+                    "candidates": _candidate_trace(semantic_candidates),
+                    "threshold": selection_threshold,
+                    "top_candidate": semantic_candidates[0].name,
+                    "reason": "top candidate score below threshold",
+                }
+            )
+        elif not any(item.get("stage") == "semantic" for item in trace):
+            trace.append(
+                {
+                    "stage": "semantic",
+                    "status": "no_candidates",
+                    "candidates": [],
+                    "threshold": selection_threshold,
+                    "reason": "semantic search returned no candidates",
+                }
+            )
     elif semantic_index is None:
         logger.info("Skill routing semantic stage skipped: no semantic index")
+        trace.append(
+            {
+                "stage": "semantic",
+                "status": "skipped",
+                "reason": "no semantic index",
+            }
+        )
     else:
         logger.info("Skill routing semantic stage skipped: empty user text")
+        trace.append(
+            {
+                "stage": "semantic",
+                "status": "skipped",
+                "reason": "empty user text",
+            }
+        )
 
     if llm is None or not semantic_candidates:
         logger.info(
@@ -694,21 +832,43 @@ async def route_skill_names(
             llm is not None,
             len(semantic_candidates),
         )
-        return []
+        trace.append(
+            {
+                "stage": "llm_judge",
+                "status": "skipped",
+                "reason": "llm unavailable" if llm is None else "no semantic candidates",
+                "llm_available": llm is not None,
+                "semantic_candidates": len(semantic_candidates),
+            }
+        )
+        return SkillRoutingResult(selected_skills=[], trace=trace)
 
-    return await _llm_route(
+    llm_result = await _llm_route_with_trace(
         registry,
         user_text,
         semantic_candidates,
         llm,
         retry_count=llm_retry_count,
     )
+    trace.extend(llm_result.trace)
+    return SkillRoutingResult(selected_skills=llm_result.selected_skills, trace=trace)
 
 
 def _semantic_candidate_summary(candidates: list[SkillSemanticCandidate]) -> str:
     if not candidates:
         return "none"
     return ", ".join(f"{candidate.name}:{candidate.score:.4f}" for candidate in candidates)
+
+
+def _candidate_trace(candidates: list[SkillSemanticCandidate]) -> list[dict]:
+    return [
+        {
+            "name": candidate.name,
+            "description": candidate.description,
+            "score": candidate.score,
+        }
+        for candidate in candidates
+    ]
 
 
 async def _rerank_semantic_candidates(
@@ -822,6 +982,24 @@ async def _llm_route(
     llm,
     retry_count: int,
 ) -> list[str]:
+    return (
+        await _llm_route_with_trace(
+            registry,
+            user_text,
+            semantic_candidates,
+            llm,
+            retry_count,
+        )
+    ).selected_skills
+
+
+async def _llm_route_with_trace(
+    registry: SkillRegistry,
+    user_text: str,
+    semantic_candidates: list[SkillSemanticCandidate],
+    llm,
+    retry_count: int,
+) -> SkillRoutingResult:
     payload = {
         "userInput": user_text,
         "relatedFind": [
@@ -854,7 +1032,17 @@ async def _llm_route(
                 attempt,
                 exc,
             )
-            return []
+            return SkillRoutingResult(
+                selected_skills=[],
+                trace=[
+                    {
+                        "stage": "llm_judge",
+                        "status": "failed",
+                        "attempt": attempt,
+                        "reason": str(exc),
+                    }
+                ],
+            )
         if decision.selectedSkill in registry.skills:
             logger.info(
                 "Skill routing LLM judge selected=%s confidence=%.4f reason=%s",
@@ -862,16 +1050,47 @@ async def _llm_route(
                 decision.confidence,
                 decision.reason,
             )
-            return [decision.selectedSkill]
+            return SkillRoutingResult(
+                selected_skills=[decision.selectedSkill],
+                trace=[
+                    {
+                        "stage": "llm_judge",
+                        "status": "selected",
+                        "selected_skill": decision.selectedSkill,
+                        "confidence": decision.confidence,
+                        "reason": decision.reason,
+                    }
+                ],
+            )
         logger.info(
             "Skill routing LLM judge rejected candidates: selected=%s confidence=%.4f reason=%s",
             decision.selectedSkill,
             decision.confidence,
             decision.reason,
         )
-        return []
+        return SkillRoutingResult(
+            selected_skills=[],
+            trace=[
+                {
+                    "stage": "llm_judge",
+                    "status": "rejected",
+                    "selected_skill": decision.selectedSkill,
+                    "confidence": decision.confidence,
+                    "reason": decision.reason,
+                }
+            ],
+        )
     logger.info("Skill routing LLM judge exhausted retries without valid decision")
-    return []
+    return SkillRoutingResult(
+        selected_skills=[],
+        trace=[
+            {
+                "stage": "llm_judge",
+                "status": "failed",
+                "reason": "exhausted retries without valid decision",
+            }
+        ],
+    )
 
 
 def _llm_route_prompt(payload: dict) -> str:

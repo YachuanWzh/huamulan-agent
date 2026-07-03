@@ -1,0 +1,36 @@
+{
+  "rum_events": [
+    {"type":"web_vital","name":"LCP","value":2100,"url":"/dashboard","session_id":"sess-baseline-01","timestamp":"2025-07-12T02:55:00+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2050,"url":"/dashboard","session_id":"sess-baseline-02","timestamp":"2025-07-12T02:55:10+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2180,"url":"/dashboard","session_id":"sess-baseline-03","timestamp":"2025-07-12T02:55:20+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":1950,"url":"/dashboard","session_id":"sess-baseline-04","timestamp":"2025-07-12T02:55:30+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2220,"url":"/dashboard","session_id":"sess-baseline-05","timestamp":"2025-07-12T02:55:40+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2080,"url":"/dashboard","session_id":"sess-baseline-06","timestamp":"2025-07-12T02:55:50+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2150,"url":"/dashboard","session_id":"sess-baseline-07","timestamp":"2025-07-12T02:56:00+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2030,"url":"/dashboard","session_id":"sess-baseline-08","timestamp":"2025-07-12T02:56:10+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2300,"url":"/dashboard","session_id":"sess-baseline-09","timestamp":"2025-07-12T02:56:20+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2110,"url":"/dashboard","session_id":"sess-baseline-10","timestamp":"2025-07-12T02:56:30+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":1990,"url":"/dashboard","session_id":"sess-baseline-11","timestamp":"2025-07-12T02:56:40+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2250,"url":"/dashboard","session_id":"sess-baseline-12","timestamp":"2025-07-12T02:56:50+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2400,"url":"/dashboard","session_id":"sess-baseline-13","timestamp":"2025-07-12T02:57:00+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2120,"url":"/dashboard","session_id":"sess-baseline-14","timestamp":"2025-07-12T02:57:10+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2060,"url":"/dashboard","session_id":"sess-baseline-15","timestamp":"2025-07-12T02:57:20+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2180,"url":"/dashboard","session_id":"sess-baseline-16","timestamp":"2025-07-12T02:57:30+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":1970,"url":"/dashboard","session_id":"sess-baseline-17","timestamp":"2025-07-12T02:57:40+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2330,"url":"/dashboard","session_id":"sess-baseline-18","timestamp":"2025-07-12T02:57:50+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2090,"url":"/dashboard","session_id":"sess-baseline-19","timestamp":"2025-07-12T02:58:00+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2210,"url":"/dashboard","session_id":"sess-baseline-20","timestamp":"2025-07-12T02:58:10+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2040,"url":"/dashboard","session_id":"sess-baseline-21","timestamp":"2025-07-12T02:58:20+08:00","metadata":{}},
+    {"type":"web_vital","name":"LCP","value":2160,"url":"/dashboard","session_id":"sess-baseline-22","timestamp":"2025-07-12T02:58:30+08:00","metadata":{}},
+
+    {"type":"web_vital","name":"LCP","value":6750,"url":"/dashboard","session_id":"sess-anomaly-A","timestamp":"2025-07-12T03:01:00+08:00","metadata":{}},
+    {"type":"js_error","name":"TypeError","value":1,"url":"/dashboard","session_id":"sess-anomaly-A","timestamp":"2025-07-12T03:01:01+08:00","metadata":{"message":"Cannot read properties of undefined (reading 'config')","stack":"DashboardWidget.render (main.js:342)","component":"DashboardWidget"}},
+
+    {"type":"web_vital","name":"LCP","value":6820,"url":"/dashboard","session_id":"sess-anomaly-B","timestamp":"2025-07-12T03:02:00+08:00","metadata":{}},
+    {"type":"js_error","name":"TypeError","value":1,"url":"/dashboard","session_id":"sess-anomaly-B","timestamp":"2025-07-12T03:02:01+08:00","metadata":{"message":"Cannot read properties of undefined (reading 'config')","stack":"DashboardWidget.render (main.js:342)","component":"DashboardWidget"}},
+
+    {"type":"web_vital","name":"LCP","value":6650,"url":"/dashboard","session_id":"sess-anomaly-C","timestamp":"2025-07-12T03:03:00+08:00","metadata":{}},
+    {"type":"js_error","name":"TypeError","value":1,"url":"/dashboard","session_id":"sess-anomaly-C","timestamp":"2025-07-12T03:03:01+08:00","metadata":{"message":"Cannot read properties of undefined (reading 'config')","stack":"DashboardWidget.render (main.js:342)","component":"DashboardWidget"}}
+  ],
+  "execution_logs": []
+}

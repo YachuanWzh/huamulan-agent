@@ -159,6 +159,9 @@ export interface CaseEvaluationDetail {
   skill_selection_f1?: number | null
   judge?: JudgeEvaluation | null
   log_summary: Record<string, unknown>[]
+  suspected_node?: string | null
+  routing_trace?: Record<string, unknown>[]
+  diagnostic_outputs?: Record<string, unknown>
 }
 
 export interface SkillEvaluationReport {

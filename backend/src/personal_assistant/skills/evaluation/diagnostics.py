@@ -61,6 +61,8 @@ def build_case_evaluation_detail(
             diagnosis.signals = [f"warning.routing.over_selection: {extra}"]
         else:
             status = "fail"
+    log_summary = _summarize_logs(outcome.get("logs") or [])
+    routing_trace = _routing_trace(outcome)
 
     return CaseEvaluationDetail(
         case_id=case.id,
@@ -79,7 +81,17 @@ def build_case_evaluation_detail(
         skill_selection_recall=recall,
         skill_selection_f1=f1,
         judge=judge,
-        log_summary=_summarize_logs(outcome.get("logs") or []),
+        log_summary=log_summary,
+        suspected_node=_suspected_node(checks, judge),
+        routing_trace=routing_trace,
+        diagnostic_outputs=_diagnostic_outputs(
+            case,
+            outcome,
+            checks,
+            judge=judge,
+            log_summary=log_summary,
+            routing_trace=routing_trace,
+        ),
     )
 
 
@@ -273,6 +285,78 @@ def _diagnose(checks: list[EvaluationCheck]) -> CaseDiagnosis:
         signals=[f"{check.stage}.{check.name}: {check.reason}" for check in failed],
         recommendation=recommendation.get(first.stage, "Inspect case logs to locate the failure."),
     )
+
+
+def _suspected_node(checks: list[EvaluationCheck], judge: JudgeEvaluation | None) -> str | None:
+    if judge and judge.failure_stage:
+        judge_stage = judge.failure_stage.lower()
+        if "prompt" in judge_stage or "reason" in judge_stage or "answer" in judge_stage:
+            return "prompt"
+        if "skill" in judge_stage or "routing" in judge_stage:
+            return "skill"
+        if "tool" in judge_stage:
+            return "tool"
+        if "safety" in judge_stage or "guard" in judge_stage:
+            return "prompt_guard"
+
+    failed = [check for check in checks if not check.passed]
+    if not failed:
+        return None
+    priority = {"safety": 0, "routing": 1, "tool": 2, "answer": 3, "hallucination": 4}
+    first = sorted(failed, key=lambda item: priority.get(item.stage, 99))[0]
+    return {
+        "safety": "prompt_guard",
+        "routing": "skill",
+        "tool": "tool",
+        "answer": "prompt",
+        "hallucination": "prompt",
+    }.get(first.stage, first.stage)
+
+
+def _diagnostic_outputs(
+    case: GoldenSkillCase,
+    outcome: dict[str, Any],
+    checks: list[EvaluationCheck],
+    *,
+    judge: JudgeEvaluation | None,
+    log_summary: list[dict[str, Any]],
+    routing_trace: list[dict[str, Any]],
+) -> dict[str, Any]:
+    final_answer = str(outcome.get("final_answer") or "")
+    failed_checks = [check.model_dump(mode="json") for check in checks if not check.passed]
+    outputs: dict[str, Any] = {
+        "expected": {
+            "skills": case.expected_skills,
+            "tool_calls": [item.model_dump(mode="json") for item in case.expected_tool_calls],
+            "answer_contains": case.expected_answer_contains,
+            "forbidden_answer_contains": case.forbidden_answer_contains,
+            "forbidden_tools": case.forbidden_tools,
+        },
+        "actual": {
+            "skills": _string_list(outcome.get("selected_skills")),
+            "tool_calls": _tool_calls(outcome),
+        },
+        "failed_checks": failed_checks,
+        "final_answer": final_answer,
+        "logs": log_summary,
+        "routing_trace": routing_trace,
+    }
+    if case.expected_answer_contains:
+        outputs["missing_answer_fragments"] = [
+            fragment for fragment in case.expected_answer_contains if fragment not in final_answer
+        ]
+    if case.forbidden_answer_contains:
+        outputs["forbidden_answer_fragments"] = [
+            fragment for fragment in case.forbidden_answer_contains if fragment in final_answer
+        ]
+    if judge:
+        outputs["judge"] = judge.model_dump(mode="json")
+    return outputs
+
+
+def _routing_trace(outcome: dict[str, Any]) -> list[dict[str, Any]]:
+    trace = outcome.get("routing_trace") or []
+    return [item for item in trace if isinstance(item, dict)] if isinstance(trace, list) else []
 
 
 def _expected_args_present(case: GoldenSkillCase, tool_calls: list[dict[str, Any]]) -> bool:

@@ -1022,17 +1022,9 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
           <span>展开详情 ({details.length} cases)</span>
         </summary>
         <div className="evaluation-case-list">
-        {caseResults.map(({ detail, checks, failedStages }) => {
+        {caseResults.map(({ detail, checks }) => {
           // 生成原因摘要
-          const hasPrimaryStageFailure = failedStages.some((stage) =>
-            ['safety', 'routing'].includes(stage),
-          )
-          const primaryChecks =
-            detail.status === 'warning'
-              ? checks.filter((check) => check.passed)
-              : hasPrimaryStageFailure
-              ? checks.filter((check) => check.passed || ['safety', 'routing'].includes(check.stage))
-              : checks
+          const primaryChecks = checks
           const failedChecks = primaryChecks.filter(check => !check.passed)
           const reasons: string[] = []
           const hasSafetyFail = failedChecks.some(c => c.stage === 'safety')
@@ -1136,6 +1128,9 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
                   />
                 </div>
               )}
+              {(detail.status === 'fail' || detail.status === 'warning') && (
+                <EvaluationDiagnosticPanel detail={detail} />
+              )}
               <div className="evaluation-checks">
                 {primaryChecks.map((check) => {
                   const checkKey = `${check.stage}.${check.name}`
@@ -1169,6 +1164,138 @@ function EvaluationJsonBlock({ label, value }: { label: string; value: unknown }
       <pre>{JSON.stringify(value, null, 2)}</pre>
     </div>
   )
+}
+
+function EvaluationDiagnosticPanel({ detail }: { detail: CaseEvaluationDetail }) {
+  const outputs = detail.diagnostic_outputs ?? {}
+  const finalAnswer =
+    typeof outputs.final_answer === 'string' ? outputs.final_answer : detail.final_answer
+  const logs = Array.isArray(outputs.logs) ? outputs.logs : detail.log_summary
+  const judge = isRecord(outputs.judge) ? outputs.judge : detail.judge
+  const routingTrace = Array.isArray(outputs.routing_trace)
+    ? outputs.routing_trace.filter(isRecord)
+    : detail.routing_trace ?? []
+  const missingFragments = Array.isArray(outputs.missing_answer_fragments)
+    ? outputs.missing_answer_fragments
+    : []
+  const hasDiagnostics =
+    detail.suspected_node ||
+    finalAnswer ||
+    missingFragments.length > 0 ||
+    routingTrace.length > 0 ||
+    judge ||
+    logs.length > 0 ||
+    Object.keys(outputs).length > 0
+
+  if (!hasDiagnostics) return null
+
+  return (
+    <div
+      className="evaluation-diagnostic-panel"
+      style={{
+        margin: '10px 0',
+        padding: '10px 12px',
+        border: '1px solid #dbe3ef',
+        borderRadius: '6px',
+        background: '#f8fafc',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          flexWrap: 'wrap',
+          marginBottom: '8px',
+        }}
+      >
+        <strong>Diagnostic output</strong>
+        {detail.suspected_node && (
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: '4px',
+              background: '#eef2ff',
+              color: '#3730a3',
+              fontSize: '0.85em',
+            }}
+          >
+            Suspected node: {detail.suspected_node}
+          </span>
+        )}
+      </div>
+      {finalAnswer && (
+        <div style={{ marginBottom: '8px' }}>
+          <strong>Final answer</strong>
+          <pre>{finalAnswer}</pre>
+        </div>
+      )}
+      {missingFragments.length > 0 && (
+        <div style={{ marginBottom: '8px' }}>
+          <strong>Missing expected content</strong>
+          <pre>{JSON.stringify(missingFragments, null, 2)}</pre>
+        </div>
+      )}
+      {routingTrace.length > 0 && (
+        <div style={{ marginBottom: '8px' }}>
+          <strong>Routing funnel</strong>
+          <div style={{ display: 'grid', gap: '6px', marginTop: '6px' }}>
+            {routingTrace.map((step, index) => (
+              <div
+                key={`${String(step.stage)}-${index}`}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '130px 1fr',
+                  gap: '8px',
+                  padding: '8px',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '4px',
+                  background: '#ffffff',
+                }}
+              >
+                <span style={{ fontWeight: 700 }}>
+                  {String(step.stage ?? `stage-${index + 1}`)}
+                </span>
+                <div>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      background: '#f1f5f9',
+                      color: '#334155',
+                      fontSize: '0.85em',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    {String(step.status ?? 'unknown')}
+                  </span>
+                  {step.reason ? <div>{String(step.reason)}</div> : null}
+                  <pre>{JSON.stringify(step, null, 2)}</pre>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {judge && (
+        <div style={{ marginBottom: '8px' }}>
+          <strong>Judge</strong>
+          <pre>{JSON.stringify(judge, null, 2)}</pre>
+        </div>
+      )}
+      {logs.length > 0 && (
+        <div>
+          <strong>Execution outputs</strong>
+          <pre>{JSON.stringify(logs, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function formatEvaluationError(error: unknown) {

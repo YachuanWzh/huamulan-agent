@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from personal_assistant.config import Settings
-from personal_assistant.skills.evaluation import AgentEvaluationCase
+from personal_assistant.skills.evaluation import AgentEvaluationCase, JudgeEvaluation
 from personal_assistant.skills.evaluation.diagnostics import build_case_evaluation_detail
 from personal_assistant.skills.evaluation.judge import (
     evaluate_case_with_judge,
@@ -61,6 +61,90 @@ def test_case_detail_diagnoses_tool_argument_failure_before_answer_failure() -> 
     )
     assert detail.actual_tool_calls == [{"name": "weather_lookup", "args": {"city": "上海"}}]
     assert detail.log_summary[0]["event_type"] == "tool"
+
+
+def test_case_detail_exposes_diagnostic_outputs_and_suspected_node() -> None:
+    case = AgentEvaluationCase(
+        id="apm-answer",
+        query="CLS 和 INP 分别衡量什么？",
+        expected_skills=["apm-metrics"],
+        expected_answer_contains=["CLS", "INP", "稳定性", "响应"],
+    )
+    outcome = {
+        "case": case,
+        "selected_skills": ["apm-metrics"],
+        "tool_calls": [],
+        "final_answer": "CLS 衡量布局偏移。",
+        "logs": [
+            {
+                "event_type": "llm",
+                "status": "completed",
+                "name": "agent",
+                "output": {"content": "CLS 衡量布局偏移。"},
+            }
+        ],
+        "tool_failed": False,
+        "tool_completed": True,
+    }
+    judge = JudgeEvaluation(
+        score=0.2,
+        passed=False,
+        failure_stage="prompt_or_reasoning",
+        reason="回答漏掉 INP 和优秀线阈值。",
+        evidence=["最终回答只解释了 CLS"],
+        recommendation="收紧 apm-metrics skill 的回答约束。",
+        model="deepseek-v4-pro",
+        available=True,
+    )
+
+    detail = build_case_evaluation_detail(case, outcome, mode="e2e", judge=judge)
+
+    assert detail.suspected_node == "prompt"
+    assert detail.diagnostic_outputs["final_answer"] == "CLS 衡量布局偏移。"
+    assert detail.diagnostic_outputs["missing_answer_fragments"] == ["INP", "稳定性", "响应"]
+    assert detail.diagnostic_outputs["judge"]["reason"] == "回答漏掉 INP 和优秀线阈值。"
+    assert detail.diagnostic_outputs["logs"][0]["event_type"] == "llm"
+
+
+def test_case_detail_exposes_routing_funnel_trace() -> None:
+    case = AgentEvaluationCase(
+        id="patrol-missed",
+        query="帮我做一次全量巡检",
+        expected_skills=["patrol"],
+    )
+    routing_trace = [
+        {
+            "stage": "regex",
+            "status": "missed",
+            "selected_skills": [],
+            "reason": "no regex or trigger matched",
+        },
+        {
+            "stage": "semantic",
+            "status": "below_threshold",
+            "candidates": [{"name": "patrol", "score": 0.42}],
+            "threshold": 0.72,
+            "top_candidate": "patrol",
+            "reason": "top candidate score below threshold",
+        },
+        {
+            "stage": "llm_judge",
+            "status": "skipped",
+            "reason": "llm unavailable",
+        },
+    ]
+    outcome = {
+        "case": case,
+        "selected_skills": [],
+        "routing_trace": routing_trace,
+        "tool_calls": [],
+        "final_answer": "",
+    }
+
+    detail = build_case_evaluation_detail(case, outcome, mode="e2e")
+
+    assert detail.routing_trace == routing_trace
+    assert detail.diagnostic_outputs["routing_trace"] == routing_trace
 
 
 def test_case_detail_diagnoses_safety_before_routing_for_block_cases() -> None:

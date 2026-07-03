@@ -39,6 +39,78 @@ from personal_assistant.tools import build_basic_tools
 logger = logging.getLogger(__name__)
 
 
+def build_skill_vector_index(settings: Settings):
+    """Build skill semantic vector index from settings."""
+    embedding_provider = OllamaBgeM3EmbeddingProvider(
+        base_url=settings.skill_routing_ollama_base_url,
+        model=settings.skill_routing_embedding_model,
+    )
+    if settings.skill_routing_vector_store == "qdrant" and settings.skill_routing_qdrant_url:
+        return QdrantSkillVectorIndex(
+            embedding_provider,
+            url=settings.skill_routing_qdrant_url,
+            collection=settings.skill_routing_qdrant_collection,
+            api_key=settings.skill_routing_qdrant_api_key,
+        )
+    return InMemorySkillVectorIndex(embedding_provider)
+
+
+def build_skill_reranker(settings: Settings):
+    """Build skill reranker from settings if enabled."""
+    if not getattr(settings, "skill_routing_rerank_enabled", False):
+        return None
+    return OllamaBgeM3Reranker(
+        base_url=settings.skill_routing_ollama_base_url,
+        model=settings.skill_routing_rerank_model,
+    )
+
+
+def build_skill_routing_llm(settings: Settings, llm_config: LLMConfig | None = None):
+    """Build LLM instance for skill routing judgment."""
+    routing_model = getattr(settings, "skill_routing_llm_model", None)
+    if not routing_model:
+        return build_llm(settings, llm_config)
+    base_config = llm_config or LLMConfig()
+    routing_config = LLMConfig(
+        base_url=base_config.base_url,
+        api_key=base_config.api_key,
+        model=routing_model,
+        temperature=base_config.temperature,
+    )
+    return build_llm(settings, routing_config)
+
+
+def build_skill_router_components(
+    settings: Settings,
+    llm_config: LLMConfig | None = None,
+    long_term_memory: LongTermMemoryStore | None = None,
+    cache=None,
+) -> dict[str, Any]:
+    """Build all components needed for the full three-layer skill routing funnel."""
+    router_kwargs: dict[str, Any] = {"long_term_memory": long_term_memory}
+    if getattr(settings, "skill_routing_semantic_enabled", False):
+        router_kwargs.update(
+            {
+                "semantic_index": build_skill_vector_index(settings),
+                "reranker": build_skill_reranker(settings),
+                "llm": build_skill_routing_llm(settings, llm_config),
+                "semantic_threshold": settings.skill_routing_similarity_threshold,
+                "semantic_top_k": settings.skill_routing_top_k,
+                "rerank_threshold": settings.skill_routing_rerank_threshold,
+                "rerank_top_k": settings.skill_routing_rerank_top_k,
+                "llm_retry_count": settings.skill_routing_llm_retry_count,
+            }
+        )
+    if cache is not None:
+        router_kwargs.update(
+            {
+                "cache": cache,
+                "memory_cache_ttl_seconds": getattr(settings, "cache_memory_ttl_seconds", 60),
+            }
+        )
+    return router_kwargs
+
+
 def compile_agent(
     settings: Settings,
     registry: SkillRegistry,
@@ -96,7 +168,10 @@ def compile_agent(
                 output={"content": str(getattr(response, "content", ""))[:1000]},
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 token_usage=_extract_token_usage(response),
-                metadata={"selected_skills": state.get("selected_skills", [])},
+                metadata={
+                    "selected_skills": state.get("selected_skills", []),
+                    "routing_trace": state.get("routing_trace", []),
+                },
             ),
         )
         return {"messages": [response]}
@@ -209,27 +284,12 @@ def compile_agent(
         return approval_gate.inspect(state)
 
     graph = StateGraph(AgentState)
-    router_kwargs = {"long_term_memory": long_term_memory}
-    if getattr(settings, "skill_routing_semantic_enabled", False):
-        router_kwargs.update(
-            {
-                "semantic_index": _build_skill_vector_index(settings),
-                "reranker": _build_skill_reranker(settings),
-                "llm": _build_skill_routing_llm(settings, llm_config),
-                "semantic_threshold": settings.skill_routing_similarity_threshold,
-                "semantic_top_k": settings.skill_routing_top_k,
-                "rerank_threshold": settings.skill_routing_rerank_threshold,
-                "rerank_top_k": settings.skill_routing_rerank_top_k,
-                "llm_retry_count": settings.skill_routing_llm_retry_count,
-            }
-        )
-    if cache is not None:
-        router_kwargs.update(
-            {
-                "cache": cache,
-                "memory_cache_ttl_seconds": getattr(settings, "cache_memory_ttl_seconds", 60),
-            }
-        )
+    router_kwargs = build_skill_router_components(
+        settings,
+        llm_config=llm_config,
+        long_term_memory=long_term_memory,
+        cache=cache,
+    )
     graph.add_node(
         "route_skills",
         with_hooks(
@@ -286,49 +346,14 @@ def compile_agent(
     return graph.compile(checkpointer=memory.checkpointer)
 
 
-def _build_skill_vector_index(settings: Settings):
-    embedding_provider = OllamaBgeM3EmbeddingProvider(
-        base_url=settings.skill_routing_ollama_base_url,
-        model=settings.skill_routing_embedding_model,
-    )
-    if settings.skill_routing_vector_store == "qdrant" and settings.skill_routing_qdrant_url:
-        return QdrantSkillVectorIndex(
-            embedding_provider,
-            url=settings.skill_routing_qdrant_url,
-            collection=settings.skill_routing_qdrant_collection,
-            api_key=settings.skill_routing_qdrant_api_key,
-        )
-    return InMemorySkillVectorIndex(embedding_provider)
-
-
-def _build_skill_reranker(settings: Settings):
-    if not getattr(settings, "skill_routing_rerank_enabled", False):
-        return None
-    return OllamaBgeM3Reranker(
-        base_url=settings.skill_routing_ollama_base_url,
-        model=settings.skill_routing_rerank_model,
-    )
-
-
-def _build_skill_routing_llm(settings: Settings, llm_config: LLMConfig | None = None):
-    routing_model = getattr(settings, "skill_routing_llm_model", None)
-    if not routing_model:
-        return build_llm(settings, llm_config)
-    base_config = llm_config or LLMConfig()
-    routing_config = LLMConfig(
-        base_url=base_config.base_url,
-        api_key=base_config.api_key,
-        model=routing_model,
-        temperature=base_config.temperature,
-    )
-    return build_llm(settings, routing_config)
-
-
-async def warmup_skill_routing(settings: Settings, registry: SkillRegistry) -> None:
+async def warmup_skill_routing(settings: Settings, registry: SkillRegistry, semantic_index=None) -> None:
+    """Warmup skill routing semantic index embeddings."""
     if not getattr(settings, "skill_routing_semantic_enabled", False):
         return
+    if semantic_index is None:
+        semantic_index = build_skill_vector_index(settings)
     try:
-        await _build_skill_vector_index(settings).warmup(registry)
+        await semantic_index.warmup(registry)
     except Exception:
         logger.exception("Skill routing vector warmup failed")
 
