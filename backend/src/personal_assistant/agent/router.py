@@ -54,6 +54,23 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
             r"\u5b89\u88c5.*\u6280\u80fd|\u6709\u6ca1\u6709.*\u6280\u80fd)"
         ),
     ],
+    "patrol": [
+        r"\b(patrol|inspection|scheduled check|health check|alert rule|automatic repair)\b",
+        r"\b[a-zA-Z_][a-zA-Z0-9_]*(?:_rate|_ratio|_p95|_p99)?\s*(?:>=|<=|>|<|==)\s*\d+(?:\.\d+)?\s+for\s+\d+[smhd]\b",
+        (
+            r"(\u5de1\u68c0\u89c4\u5219|\u544a\u8b66\u89c4\u5219|"
+            r"\u81ea\u52a8\u5de1\u68c0|\u5b9a\u65f6\u5de1\u68c0|"
+            r"\u591c\u95f4\u5de1\u68c0|\u5065\u5eb7\u68c0\u67e5|"
+            r"\u8dd1.*\u5de1\u68c0|\u8f93\u51fa\u5f02\u5e38\u53d1\u73b0)"
+        ),
+    ],
+    "troubleshoot": [
+        r"\b(troubleshoot|root cause|RCA|APM incident|frontend error|performance anomaly)\b",
+        (
+            r"(\u6392\u969c|\u6839\u56e0|\u667a\u80fd\u6392\u969c|"
+            r"\u6545\u969c\u5b9a\u4f4d|\u5f02\u5e38\u8bca\u65ad|RCA)"
+        ),
+    ],
     "audit-sop": [
         r"\b(audit|trace|execution log|tool failure|retry chain|token usage|approval|security event)\b",
         (
@@ -72,6 +89,22 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
         ),
         r"\b\d{6}\b",
     ],
+}
+
+_TOKEN_FALLBACK_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "for",
+    "from",
+    "how",
+    "into",
+    "the",
+    "this",
+    "use",
+    "when",
+    "with",
 }
 
 
@@ -741,6 +774,10 @@ def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
 
 def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
     normalized = user_text.lower()
+    patrol_selected = _route_patrol_intent(registry, user_text)
+    if patrol_selected:
+        return patrol_selected
+
     selected: list[str] = []
     for skill in registry.skills.values():
         if any(_regex_match(pattern, user_text) for pattern in _DEFAULT_SKILL_REGEXES.get(skill.name, [])):
@@ -753,12 +790,28 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
 
         haystack = f"{skill.name}\n{skill.description}".lower()
         tokens = {
-            token.strip(".,:;()[]{}#`*_-/")
+            stripped
             for token in haystack.split()
-            if len(token.strip(".,:;()[]{}#`*_-/")) >= 3
+            if len(stripped := token.strip(".,:;()[]{}#`*_-/")) >= 3
+            and stripped.lower() not in _TOKEN_FALLBACK_STOPWORDS
         }
         if any(re.search(rf"\b{re.escape(token)}\b", normalized) for token in tokens):
             selected.append(skill.name)
+    return selected
+
+
+def _route_patrol_intent(registry: SkillRegistry, user_text: str) -> list[str]:
+    if "patrol" not in registry.skills:
+        return []
+    if not any(_regex_match(pattern, user_text) for pattern in _DEFAULT_SKILL_REGEXES["patrol"]):
+        return []
+
+    selected = ["patrol"]
+    if "troubleshoot" in registry.skills and any(
+        _regex_match(pattern, user_text)
+        for pattern in _DEFAULT_SKILL_REGEXES.get("troubleshoot", [])
+    ):
+        selected.append("troubleshoot")
     return selected
 
 

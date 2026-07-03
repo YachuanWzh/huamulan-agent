@@ -18,6 +18,7 @@ vi.mock('../lib/api', () => ({
     runSkillEvaluation: vi.fn(),
     runSkillEvaluationStream: vi.fn(),
     resetSkillEvaluations: vi.fn(),
+    getObservabilitySnapshot: vi.fn(),
   },
 }))
 
@@ -119,6 +120,49 @@ describe('WorkspacePanel', () => {
     expect(screen.getByText(/第 1 次失败/i)).toBeInTheDocument()
     expect(screen.getByText(/第 2 次失败/i)).toBeInTheDocument()
     expect(screen.getByText(/第 3 次完成/i)).toBeInTheDocument()
+  })
+
+  it('renders frontend performance observability snapshot', async () => {
+    mockApi.getObservabilitySnapshot.mockResolvedValue({
+      frontend: {
+        total_events: 3,
+        error_count: 1,
+        resource_error_count: 1,
+        web_vitals: {
+          LCP: { avg: 2100, p75: 2400, p95: 4300, count: 3 },
+        },
+        top_errors: [{ name: 'resource:script', count: 1 }],
+      },
+      backend: {
+        total_events: 2,
+        tool_errors: 0,
+        tool_retries: 1,
+        p95_duration_ms: 90,
+      },
+      anomalies: [
+        {
+          metric: 'LCP',
+          value: 4300,
+          method: 'iqr',
+          severity: 'high',
+          reason: 'LCP value 4300 is above baseline',
+        },
+      ],
+      root_cause: {
+        category: 'frontend_resource',
+        summary: 'Resource loading failures can break rendering.',
+        evidence: ['script failed at /assets/app.js'],
+        recommendation: 'Check asset URL generation.',
+      },
+    })
+
+    render(<WorkspacePanel panel="performance" threadId="t1" />)
+
+    expect(await screen.findByText('Frontend Performance')).toBeInTheDocument()
+    expect(screen.getByText('LCP')).toBeInTheDocument()
+    expect(screen.getByText('4300ms')).toBeInTheDocument()
+    expect(screen.getByText('frontend_resource')).toBeInTheDocument()
+    expect(screen.getByText(/Check asset URL generation/i)).toBeInTheDocument()
   })
 
   it('uses the main workspace for execution audit lookup', async () => {

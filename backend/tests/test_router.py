@@ -129,6 +129,38 @@ class TestChineseRegexRouting:
         assert _keyword_route(registry, query) == [skill_name]
 
 
+class TestPatrolRouting:
+    def test_routes_alert_rule_patrol_before_audit_or_find_skills(self, tmp_path: Path):
+        for name in ("patrol", "audit-sop", "find-skills"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            "配置一条巡检规则：frontend_error_rate > 0.02 for 5m，帮我跑业务治理巡检并输出异常发现。",
+        )
+
+        assert result == ["patrol"]
+
+    def test_routes_night_patrol_then_troubleshoot(self, tmp_path: Path):
+        for name in (
+            "patrol",
+            "troubleshoot",
+            "apm-metrics",
+            "audit-sop",
+            "troubleshoot-runbook",
+        ):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            "夜间巡检发现 LCP p95、JS error rate、tool retry ratio 都异常，请先做自动巡检，再触发智能排障分析根因。",
+        )
+
+        assert result == ["patrol", "troubleshoot"]
+
+
 class FakeSemanticIndex:
     def __init__(self, candidates: list[SkillSemanticCandidate]):
         self.candidates = candidates

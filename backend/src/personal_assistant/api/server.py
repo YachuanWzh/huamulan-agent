@@ -14,6 +14,11 @@ from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.agent.harness import scan_prompt_guard, scan_tool_guard
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import route_skill_names
+from personal_assistant.apm import (
+    FrontendRumEvent,
+    ObservabilitySnapshot,
+    build_observability_snapshot,
+)
 from personal_assistant.api.schemas import (
     ApprovalBatchDecision,
     ApprovalDecision,
@@ -163,6 +168,7 @@ memory = CachedPostgresMemory(
     log_ttl_seconds=settings.cache_log_ttl_seconds,
 )
 langfuse_callback = build_langfuse_callback(settings)
+frontend_rum_events: list[FrontendRumEvent] = []
 harness = AgentHarness(
     settings,
     registry,
@@ -296,6 +302,22 @@ async def list_audit_events(thread_id: str | None = None, limit: int = 100) -> l
 @app.get("/api/tool-errors", response_model=list[ToolError])
 async def list_tool_errors(thread_id: str | None = None, limit: int = 100) -> list[ToolError]:
     return await harness.list_tool_errors(thread_id=thread_id, limit=limit)
+
+
+@app.post("/api/observability/frontend/events", response_model=FrontendRumEvent)
+async def record_frontend_rum_event(event: FrontendRumEvent) -> FrontendRumEvent:
+    frontend_rum_events.append(event)
+    del frontend_rum_events[:-1000]
+    return event
+
+
+@app.get("/api/observability/frontend/summary", response_model=ObservabilitySnapshot)
+async def frontend_observability_summary(
+    thread_id: str | None = None,
+    limit: int = 500,
+) -> ObservabilitySnapshot:
+    logs = await harness.list_execution_logs(thread_id=thread_id, limit=limit) if thread_id else []
+    return build_observability_snapshot(frontend_rum_events[-limit:], logs)
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

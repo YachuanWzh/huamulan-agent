@@ -1,11 +1,12 @@
 ---
 name: audit-sop
-description: Audit SOP skill. Use when the user asks to analyze agent audit logs, inspect a thread execution trace, diagnose tool failures or retry chains, review token usage, explain security or approval events, or generate an audit report for a LangGraph Assistant conversation.
+description: Audit and business governance SOP skill. Use when the user asks to analyze agent audit logs, inspect one thread execution trace, diagnose tool failures or retry chains, review token usage, explain security or approval events, aggregate cross-thread governance signals, identify systemic reliability issues, or generate an audit/patrol report for LangGraph Assistant conversations.
 ---
 
 # Audit SOP
 
-Use this SOP to analyze execution logs for one conversation thread.
+Use this SOP to analyze execution logs for one conversation thread or to perform
+cross-thread business governance patrol.
 
 ## Procedure
 
@@ -23,5 +24,32 @@ Use this SOP to analyze execution logs for one conversation thread.
    - Tool Retry Analysis
    - Security And Approval Events
    - Recommendations
+
+## Governance Patrol Upgrade
+
+When the user asks for business governance, patrol, stability review, or
+system-wide audit:
+
+1. Aggregate across threads instead of stopping at one conversation. Compare
+   retry rate, tool error rate, security block rate, approval denial rate,
+   token growth, and p95 duration.
+2. Cluster repeated failures by `metadata.tool_call_id`, tool name, error type,
+   skill route, and user goal.
+3. Identify systemic issues:
+   - repeated ineffective tool calls
+   - high retry ratio for one dependency
+   - recurring approval denials
+   - prompt/tool guard hot spots
+   - abnormal token expansion
+   - low-value skill routing or missing skill coverage
+4. If frontend RUM or patrol findings are available, correlate them with agent
+   execution logs and call out user-visible impact.
+5. Produce a governance report with these additional sections:
+   - Cross-thread Signals
+   - Systemic Risks
+   - Business Impact
+   - Owner And Priority
+   - Remediation Backlog
+   - Verification Plan
 
 Do not invent logs. If required audit data is unavailable, say exactly which data is missing and what endpoint or page should be checked.

@@ -125,6 +125,37 @@ def test_case_detail_distinguishes_routing_over_selection_from_tool_failure() ->
     assert not any(check.stage == "tool" for check in detail.checks)
 
 
+def test_quick_case_detail_ignores_e2e_tool_and_answer_expectations() -> None:
+    case = AgentEvaluationCase(
+        id="e2e-time-weather-001",
+        turns=[
+            "我下周一要出差去深圳，下周三回来。",
+            "帮我确认下周一是星期几和大概日期，并查深圳未来天气，重点提醒是否需要带伞。",
+        ],
+        expected_skills=["resolve-time", "weather"],
+        expected_tool_calls=[
+            {"tool": "resolve_date_by_weekday", "args_contains": {"weekday": "Monday"}},
+            {"tool": "get_forecast", "args_contains": {"city": "深圳"}},
+        ],
+        expected_answer_contains=["深圳"],
+    )
+    outcome = {
+        "case": case,
+        "selected_skills": ["resolve-time", "weather"],
+        "tool_calls": [],
+        "final_answer": "",
+    }
+
+    detail = build_case_evaluation_detail(case, outcome, mode="quick")
+
+    assert detail.status == "pass"
+    assert detail.diagnosis.stage == "passed"
+    assert [check.stage for check in detail.checks] == ["routing"]
+    assert detail.expected_tool_calls == []
+    assert detail.actual_tool_calls == []
+    assert detail.final_answer == ""
+
+
 def test_case_detail_flags_repeated_tool_call_hallucination() -> None:
     case = AgentEvaluationCase(
         id="repeat-tool",

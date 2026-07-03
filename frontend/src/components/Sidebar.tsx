@@ -11,10 +11,10 @@ interface Props {
   onThreadCleared?: () => void
   onThreadSelected?: (threadId: string) => void
   onReplayState?: (state: ReplayState) => void
-  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit') => void
+  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance') => void
 }
 
-type Tab = 'skills' | 'history' | 'checkpoint' | 'audit'
+type Tab = 'skills' | 'history' | 'checkpoint' | 'audit' | 'performance'
 
 export function Sidebar({
   threadId,
@@ -124,7 +124,7 @@ export function Sidebar({
     setClearingHistory(false)
   }
 
-  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit') => {
+  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance') => {
     setTab(nextTab)
     onPanelChange?.(panel)
   }
@@ -163,6 +163,14 @@ export function Sidebar({
           onClick={() => selectTab('audit', 'audit')}
         >
           校阅
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'performance'}
+          className={`tab ${tab === 'performance' ? 'active' : ''}`}
+          onClick={() => selectTab('performance', 'performance')}
+        >
+          APM
         </button>
       </div>
 
@@ -276,6 +284,15 @@ export function Sidebar({
               <h3>行军校阅</h3>
             </div>
             <div className="sidebar-panel-note-body">在主案台查看</div>
+          </div>
+        )}
+
+        {tab === 'performance' && (
+          <div className="sidebar-panel-note">
+            <div className="sidebar-panel-note-header">
+              <h3>Frontend Performance</h3>
+            </div>
+            <div className="sidebar-panel-note-body">在主案台查看 APM 指标</div>
           </div>
         )}
       </div>

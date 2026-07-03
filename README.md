@@ -74,6 +74,68 @@
 
 后续若要真正实现这些扩展，建议按 superharness 流程拆成独立 spec/plan，并保持严格 TDD：每个扩展先有失败测试，再实现最小后端或前端能力。
 
+## APM 可观测与智能排障能力
+
+项目内置了一条可运行的前端可观测链路：浏览器侧 RUM SDK 采集性能和错误事件，后端 APM 引擎聚合前端信号与 Agent 执行日志，前端 Performance 面板展示异常和根因建议，排障/巡检/知识库 Skill 则负责把这些信号转成可复用的处理流程。
+
+```mermaid
+flowchart LR
+    Browser["浏览器页面"] --> SDK["RUM SDK<br/>rum.ts"]
+    SDK --> API["FastAPI<br/>/api/observability/frontend/events"]
+    API --> APM["APM Engine<br/>apm.py"]
+    Logs["Agent 执行日志<br/>tool/llm/retry/security"] --> APM
+    APM --> Panel["Frontend Performance 面板"]
+    APM --> RCA["Root Cause Report"]
+    User["用户排障或巡检请求"] --> Router["Skill 路由"]
+    Router --> TS["troubleshoot Skill"]
+    Router --> Patrol["patrol Skill"]
+    Router --> KB["apm-metrics / runbook"]
+    TS --> RCA
+    Patrol --> TS
+    Golden["APM Golden Dataset"] --> Eval["ClawEval Quick/E2E"]
+```
+
+通俗地讲，浏览器里发生的慢加载、脚本报错、资源失败会先被 SDK 收集；后端把这些前端信号和 Agent 自己的执行日志放在一起分析；界面负责展示；当用户问“为什么白屏”“为什么 LCP 变慢”“帮我做巡检”时，Agent 会路由到对应 Skill，按 SOP 给出排障报告或巡检结论。
+
+### 主要模块
+
+| 能力 | 文件/入口 | 说明 |
+|---|---|---|
+| 前端 RUM SDK | `frontend/src/lib/rum.ts` | 支持 `reportTiming`、`reportWebVital`、`reportError`、`reportResourceError`，优先使用 `sendBeacon`，失败时退回 `fetch keepalive` |
+| RUM 自动接入 | `frontend/src/main.tsx` | 监听浏览器 error 事件，上报 JS 运行时错误和资源加载错误 |
+| APM 后端模型 | `backend/src/personal_assistant/apm.py` | 定义 RUM 事件、前端摘要、后端摘要、异常信号、根因报告 |
+| 异常检测 Pipeline | `detect_anomalies()` | 使用 IQR / Z-score 识别异常值，比如 LCP p95 突增 |
+| RCA 根因分析 | `infer_root_cause()` | 按 JS Error、资源错误、慢指标、后端重试优先级判断主因 |
+| 前端可观测 API | `/api/observability/frontend/events`、`/api/observability/frontend/summary` | 接收 RUM 事件并返回聚合后的 APM 快照 |
+| APM 面板 | `WorkspacePanel` 的 `performance` 分支 | 展示 RUM 总量、错误数、后端 p95、Web Vitals、异常和根因建议 |
+| 智能排障 Skill | `backend/src/personal_assistant/skills/troubleshoot` | 面向错误堆栈、性能异常、资源失败、retry chain 的排障 SOP，并带 `analyze_apm_incident` 脚本 |
+| 巡检 Skill | `backend/src/personal_assistant/skills/patrol` | 面向告警规则、健康检查、异常分流和人工审批修复闭环 |
+| APM 指标知识库 | `backend/src/personal_assistant/skills/apm-metrics` | 收录 LCP、CLS、INP、TTFB、Error Rate、Apdex 等指标定义和阈值 |
+| 排障 Runbook | `backend/src/personal_assistant/skills/troubleshoot-runbook` | 收录 JS Error、Resource Failure、Slow API、Memory Leak 等 SOP |
+| 业务治理巡检 | `audit-sop` 升级 | 从单线程日志审计扩展到跨线程 retry/error/security/token 趋势治理 |
+| APM 评测 case | `backend/evaluation/golden/golden_dataset.jsonl` | `apm-*` 用例覆盖 troubleshoot、patrol、metrics、runbook、audit-sop |
+
+### 使用入口
+
+1. 启动后端和前端。
+2. 打开前端页面后，RUM SDK 会自动为当前浏览器 session 生成 `rumSessionId`。
+3. 侧边栏点击 `APM`，主工作区会打开 `Frontend Performance` 面板。
+4. 如果想在对话里触发排障，可以直接问：
+
+```text
+前端 /chat 页面出现 TypeError，同时 LCP p95 升到 4300ms，帮我做智能排障和根因分析。
+```
+
+也可以问巡检类问题：
+
+```text
+配置一条巡检规则：frontend_error_rate > 0.02 for 5m，帮我跑业务治理巡检并输出异常发现。
+```
+
+### 技术边界
+
+这套能力目前定位为本地原型和评测闭环：RUM 数据保存在服务端内存中；RCA 以确定性规则为主，便于测试和复现；`patrol` 已有规则执行脚本和 Skill SOP，但还没有接真实 Cron、Issue 创建、PR 生成和部署自动化。生产化时建议补充持久化存储、调度器、告警通道、权限隔离、瀑布图和 Session Replay。
+
 ## 技术栈
 
 | 层 | 技术 |

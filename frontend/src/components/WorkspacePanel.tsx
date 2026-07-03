@@ -3,6 +3,7 @@ import {
   api,
   type ExecutionLog,
   type ExecutionSummary,
+  type ObservabilitySnapshot,
   type CaseEvaluationDetail,
   type ReplayResponse,
   type ReplayState,
@@ -14,7 +15,7 @@ import {
 } from '../lib/api'
 
 interface Props {
-  panel: 'skills' | 'checkpoint' | 'audit'
+  panel: 'skills' | 'checkpoint' | 'audit' | 'performance'
   threadId: string | null
   onThreadCleared?: () => void
   onReplayState?: (state: ReplayState) => void
@@ -61,6 +62,8 @@ export function WorkspacePanel({
   const [executionLogs, setExecutionLogs] = useState<ExecutionLog[]>([])
   const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null)
   const [executionLoading, setExecutionLoading] = useState(false)
+  const [observability, setObservability] = useState<ObservabilitySnapshot | null>(null)
+  const [observabilityLoading, setObservabilityLoading] = useState(false)
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('all')
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
@@ -117,6 +120,16 @@ export function WorkspacePanel({
       setExecutionLogs([])
     }
     setExecutionLoading(false)
+  }, [threadId])
+
+  const loadObservability = useCallback(async () => {
+    setObservabilityLoading(true)
+    try {
+      setObservability(await api.getObservabilitySnapshot(threadId ?? undefined))
+    } catch {
+      setObservability(null)
+    }
+    setObservabilityLoading(false)
   }, [threadId])
 
   const loadSkills = useCallback(async () => {
@@ -237,6 +250,12 @@ export function WorkspacePanel({
       loadExecutionAudit()
     }
   }, [loadExecutionAudit, panel])
+
+  useEffect(() => {
+    if (panel === 'performance') {
+      loadObservability()
+    }
+  }, [loadObservability, panel])
 
   const deleteCurrentHistory = async () => {
     if (!threadId) return
@@ -496,6 +515,91 @@ export function WorkspacePanel({
                 </details>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {panel === 'performance' && (
+        <div className="workspace-section performance-section">
+          <div className="workspace-header">
+            <div>
+              <h2>Frontend Performance</h2>
+              <p>Web vitals, browser errors, anomaly signals, and RCA recommendations.</p>
+            </div>
+            <div className="workspace-actions">
+              <button onClick={loadObservability} disabled={observabilityLoading}>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {observabilityLoading && <div className="loading">Loading...</div>}
+          {!observabilityLoading && !observability && (
+            <div className="workspace-empty">No frontend observability data yet.</div>
+          )}
+          {observability && (
+            <>
+              <div className="audit-summary-grid">
+                <div className="audit-metric">
+                  <span>RUM Events</span>
+                  <strong>{observability.frontend.total_events}</strong>
+                </div>
+                <div className="audit-metric">
+                  <span>Browser Errors</span>
+                  <strong>{observability.frontend.error_count}</strong>
+                </div>
+                <div className="audit-metric">
+                  <span>Tool Retries</span>
+                  <strong>{observability.backend.tool_retries}</strong>
+                </div>
+                <div className="audit-metric">
+                  <span>Backend p95</span>
+                  <strong>{observability.backend.p95_duration_ms ?? 0}ms</strong>
+                </div>
+              </div>
+
+              <div className="performance-grid">
+                {Object.entries(observability.frontend.web_vitals).map(([metric, values]) => (
+                  <section key={metric} className="performance-card">
+                    <h3>{metric}</h3>
+                    <dl className="skill-evaluation-metrics">
+                      <div>
+                        <dt>avg</dt>
+                        <dd>{formatMetricValue(metric, values.avg)}</dd>
+                      </div>
+                      <div>
+                        <dt>p75</dt>
+                        <dd>{formatMetricValue(metric, values.p75)}</dd>
+                      </div>
+                      <div>
+                        <dt>p95</dt>
+                        <dd>{formatMetricValue(metric, values.p95)}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                ))}
+              </div>
+
+              <section className="performance-card">
+                <h3>Root Cause</h3>
+                <strong>{observability.root_cause.category}</strong>
+                <p>{observability.root_cause.summary}</p>
+                <p>{observability.root_cause.recommendation}</p>
+              </section>
+
+              {observability.anomalies.length > 0 && (
+                <section className="performance-card">
+                  <h3>Anomalies</h3>
+                  <ul>
+                    {observability.anomalies.map((signal) => (
+                      <li key={`${signal.metric}-${signal.value}-${signal.method}`}>
+                        {signal.metric} {formatMetricValue(signal.metric, signal.value)}: {signal.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </>
           )}
         </div>
       )}
@@ -846,7 +950,14 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
   const caseResults = details.map((detail) => {
     const checks = detail.checks
     const failedStages = Array.from(new Set(checks.filter(c => !c.passed).map(c => c.stage)))
-    return { detail, checks, failedStages }
+    const status =
+      detail.status ??
+      (failedStages.length === 0
+        ? 'pass'
+        : failedStages.some((stage) => ['safety', 'routing'].includes(stage))
+          ? 'fail'
+          : 'warning')
+    return { detail: { ...detail, status }, checks, failedStages }
   })
   const passedCount = caseResults.filter(r => r.detail.status === 'pass').length
   const warningCount = caseResults.filter(r => r.detail.status === 'warning').length
@@ -913,7 +1024,16 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
         <div className="evaluation-case-list">
         {caseResults.map(({ detail, checks, failedStages }) => {
           // 生成原因摘要
-          const failedChecks = checks.filter(check => !check.passed)
+          const hasPrimaryStageFailure = failedStages.some((stage) =>
+            ['safety', 'routing'].includes(stage),
+          )
+          const primaryChecks =
+            detail.status === 'warning'
+              ? checks.filter((check) => check.passed)
+              : hasPrimaryStageFailure
+              ? checks.filter((check) => check.passed || ['safety', 'routing'].includes(check.stage))
+              : checks
+          const failedChecks = primaryChecks.filter(check => !check.passed)
           const reasons: string[] = []
           const hasSafetyFail = failedChecks.some(c => c.stage === 'safety')
           const isWarning = detail.status === 'warning'
@@ -1017,7 +1137,7 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
                 </div>
               )}
               <div className="evaluation-checks">
-                {checks.map((check) => {
+                {primaryChecks.map((check) => {
                   const checkKey = `${check.stage}.${check.name}`
                   const tooltip = CHECK_TOOLTIPS[checkKey] || check.reason
                   return (
@@ -1055,6 +1175,10 @@ function formatEvaluationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   const detailMatch = message.match(/"detail"\s*:\s*"([^"]+)"/)
   return detailMatch?.[1] ?? message
+}
+
+function formatMetricValue(metric: string, value: number) {
+  return metric.toUpperCase() === 'CLS' ? value.toFixed(3) : `${Math.round(value)}ms`
 }
 
 // 指标说明映射
@@ -1099,7 +1223,7 @@ const CHECK_TOOLTIPS: Record<string, string> = {
 
 function buildEvaluationSummary(report: SkillEvaluationReport) {
   const routingMetrics = report.routing as Record<string, number | null | undefined> | null | undefined
-  const metrics: Array<{label: string, value: number | null | undefined, tooltip: string}> = []
+  const metrics: Array<{label: string, value: number | null | undefined, tooltip?: string}> = []
 
   // 路由指标（quick和e2e都有）
   if (routingMetrics) {

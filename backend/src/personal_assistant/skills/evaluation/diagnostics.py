@@ -17,7 +17,7 @@ def build_case_evaluation_detail(
     mode: str,
     judge: JudgeEvaluation | None = None,
 ) -> CaseEvaluationDetail:
-    checks = _build_checks(case, outcome)
+    checks = _build_checks(case, outcome, mode=mode)
     selected = _string_list(outcome.get("selected_skills"))
     # Calculate per-case routing P/R/F1
     precision = None
@@ -69,9 +69,9 @@ def build_case_evaluation_detail(
         turns=_case_turns(case),
         expected_skills=case.expected_skills,
         selected_skills=selected,
-        expected_tool_calls=case.expected_tool_calls,
-        actual_tool_calls=_tool_calls(outcome),
-        final_answer=str(outcome.get("final_answer") or ""),
+        expected_tool_calls=case.expected_tool_calls if mode == "e2e" else [],
+        actual_tool_calls=_tool_calls(outcome) if mode == "e2e" else [],
+        final_answer=str(outcome.get("final_answer") or "") if mode == "e2e" else "",
         checks=checks,
         diagnosis=diagnosis,
         status=status,
@@ -83,7 +83,12 @@ def build_case_evaluation_detail(
     )
 
 
-def _build_checks(case: GoldenSkillCase, outcome: dict[str, Any]) -> list[EvaluationCheck]:
+def _build_checks(
+    case: GoldenSkillCase,
+    outcome: dict[str, Any],
+    *,
+    mode: str,
+) -> list[EvaluationCheck]:
     checks: list[EvaluationCheck] = []
     selected = _string_list(outcome.get("selected_skills"))
     if case.expected_behavior == "block" or case.expected_security_event:
@@ -144,6 +149,8 @@ def _build_checks(case: GoldenSkillCase, outcome: dict[str, Any]) -> list[Evalua
                 reason="" if passed else "Selected skills did not match expected skills",
             )
         )
+    if mode != "e2e":
+        return checks
     if case.expected_tool_calls:
         calls = _tool_calls(outcome)
         called = [_tool_name(call) for call in calls]

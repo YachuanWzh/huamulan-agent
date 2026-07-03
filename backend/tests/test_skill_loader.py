@@ -181,6 +181,14 @@ def test_builtin_audit_sop_skill_is_discoverable() -> None:
     assert "audit" in skill.description.lower()
 
 
+def test_apm_and_governance_skills_are_discoverable() -> None:
+    skills_dir = Path("src/personal_assistant/skills")
+    registry = SkillRegistry(skills_dir)
+
+    for name in ["troubleshoot", "patrol", "apm-metrics", "troubleshoot-runbook"]:
+        assert name in registry.skills
+
+
 def test_audit_sop_openai_metadata_exists() -> None:
     metadata_path = Path("src/personal_assistant/skills/audit-sop/agents/openai.yaml")
 

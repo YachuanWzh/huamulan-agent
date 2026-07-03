@@ -152,8 +152,8 @@ export interface CaseEvaluationDetail {
   actual_tool_calls: { name?: string; tool?: string; args?: Record<string, unknown> }[]
   final_answer: string
   checks: EvaluationCheck[]
-  diagnosis: CaseDiagnosis
-  status: 'pass' | 'warning' | 'fail'
+  diagnosis?: CaseDiagnosis | null
+  status?: 'pass' | 'warning' | 'fail'
   skill_selection_precision?: number | null
   skill_selection_recall?: number | null
   skill_selection_f1?: number | null
@@ -332,6 +332,35 @@ export interface ExecutionSummary {
   tool_retries: number
   security_events: number
   total_duration_ms: number
+}
+
+export interface ObservabilitySnapshot {
+  frontend: {
+    total_events: number
+    error_count: number
+    resource_error_count: number
+    web_vitals: Record<string, { avg: number; p75: number; p95: number; count: number }>
+    top_errors: { name: string; count: number }[]
+  }
+  backend: {
+    total_events: number
+    tool_errors: number
+    tool_retries: number
+    p95_duration_ms?: number | null
+  }
+  anomalies: {
+    metric: string
+    value: number
+    method: 'iqr' | 'zscore'
+    severity: 'medium' | 'high'
+    reason: string
+  }[]
+  root_cause: {
+    category: string
+    summary: string
+    evidence: string[]
+    recommendation: string
+  }
 }
 
 // --- SSE Streaming types ---
@@ -526,6 +555,13 @@ export const api = {
     request<ExecutionSummary>(
       `/api/threads/${threadId}/execution-summary`,
     ),
+
+  getObservabilitySnapshot: (threadId?: string) => {
+    const params = new URLSearchParams()
+    if (threadId) params.set('thread_id', threadId)
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return request<ObservabilitySnapshot>(`/api/observability/frontend/summary${suffix}`)
+  },
 
   listSkills: () => request<SkillInfo[]>('/api/skills'),
 

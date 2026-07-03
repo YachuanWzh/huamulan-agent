@@ -506,6 +506,34 @@ def test_resolve_golden_path_accepts_bundled_smoke_dataset() -> None:
     assert path.exists()
 
 
+def test_bundled_golden_dataset_covers_apm_governance_skills() -> None:
+    import json
+
+    path = _resolve_golden_path("golden_dataset")
+    cases = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    by_id = {case["id"]: case for case in cases}
+
+    expected = {
+        "apm-ts-001": ["troubleshoot"],
+        "apm-ts-002": ["troubleshoot"],
+        "apm-patrol-001": ["patrol"],
+        "apm-patrol-002": ["patrol", "troubleshoot"],
+        "apm-metrics-001": ["apm-metrics"],
+        "apm-metrics-002": ["apm-metrics"],
+        "apm-runbook-001": ["troubleshoot-runbook"],
+        "apm-runbook-002": ["troubleshoot-runbook"],
+        "apm-audit-001": ["audit-sop"],
+        "apm-audit-002": ["audit-sop", "troubleshoot"],
+    }
+
+    for case_id, expected_skills in expected.items():
+        assert by_id[case_id]["expected_skills"] == expected_skills
+
+
 @pytest.mark.asyncio
 async def test_quick_skill_evaluation_stream_emits_case_progress_and_per_skill_scores(
     tmp_path: Path,
