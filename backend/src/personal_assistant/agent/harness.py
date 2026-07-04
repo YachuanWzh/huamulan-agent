@@ -264,7 +264,7 @@ class AgentHarness:
         if prompt_guard_llm is not None:
             return prompt_guard_llm
         settings = getattr(self, "settings", None)
-        if settings is None or not settings.prompt_guard_llm_enabled:
+        if settings is None or not getattr(settings, "prompt_guard_llm_enabled", False):
             return None
         try:
             from personal_assistant.agent.llm import build_llm
@@ -322,6 +322,7 @@ class AgentHarness:
         message: str,
         llm_config: LLMConfig | None = None,
         callbacks: list[Any] | None = None,
+        agent_mode: str = "single",
     ) -> ChatResponse:
         # Layer 1: 正则快速拦截
         match = scan_prompt_guard(message)
@@ -343,7 +344,11 @@ class AgentHarness:
                     match.reason[:150],
                 )
                 return await self._handle_prompt_guard_block(thread_id, message, match)
-        app = self._compile_without_memory_reflection(llm_config)
+        app = (
+            self._compile_multi_agent(llm_config)
+            if agent_mode == "multi"
+            else self._compile_without_memory_reflection(llm_config)
+        )
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         started = time.perf_counter()
@@ -354,7 +359,7 @@ class AgentHarness:
                 event_type="turn",
                 status="started",
                 name="user_turn",
-                input={"message": _clip_subject(message)},
+                input={"message": _clip_subject(message), "agent_mode": agent_mode},
             ),
         )
         try:
@@ -444,6 +449,7 @@ class AgentHarness:
         message: str,
         llm_config: LLMConfig | None = None,
         callbacks: list[Any] | None = None,
+        agent_mode: str = "single",
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
         try:
@@ -463,7 +469,11 @@ class AgentHarness:
                 yield _sse_event("done", {"status": "completed", "message": _PROMPT_GUARD_MESSAGE})
                 yield "data: [DONE]\n\n"
                 return
-            app = self._compile_without_memory_reflection(llm_config)
+            app = (
+                self._compile_multi_agent(llm_config)
+                if agent_mode == "multi"
+                else self._compile_without_memory_reflection(llm_config)
+            )
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             async for event in app.astream_events(
@@ -727,6 +737,21 @@ class AgentHarness:
             self.registry,
             self.memory,
             self.decisions,
+            llm_config,
+            hook_manager=self.hook_manager,
+            **kwargs,
+        )
+
+    def _compile_multi_agent(self, llm_config: LLMConfig | None):
+        from personal_assistant.agent import multi_agent as multi_agent_module
+
+        kwargs = {}
+        if self.cache is not None:
+            kwargs["cache"] = self.cache
+        return multi_agent_module.compile_multi_agent(
+            self.settings,
+            self.registry,
+            self.memory,
             llm_config,
             hook_manager=self.hook_manager,
             **kwargs,

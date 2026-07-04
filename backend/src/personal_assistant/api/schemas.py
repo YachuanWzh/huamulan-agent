@@ -15,6 +15,7 @@ class ChatRequest(BaseModel):
     thread_id: str
     message: str
     llm: LLMConfig | None = None
+    agent_mode: Literal["single", "multi"] = "single"
 
 
 class ApprovalDecision(BaseModel):
@@ -88,6 +89,7 @@ class ExecutionLogCreate(BaseModel):
         "tool_retry",
         "approval",
         "security",
+        "multiagent",
     ]
     status: Literal[
         "started",
@@ -160,6 +162,7 @@ class SkillEvaluationSnapshot(BaseModel):
 class SkillEvaluationRunRequest(BaseModel):
     golden_path: str | None = None
     evaluation_mode: Literal["quick", "e2e"] = "quick"
+    agent_mode: Literal["single", "multi"] = "single"
 
 
 class SkillEvaluationDataset(BaseModel):

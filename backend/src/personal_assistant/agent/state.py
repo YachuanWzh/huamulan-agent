@@ -12,3 +12,8 @@ class AgentState(TypedDict, total=False):
     allowed_tools: list[str]
     pending_approvals: list[dict[str, Any]]
     approval_turn_count: Annotated[int, operator.add]
+    rewritten_query: str
+    intent_slots: dict[str, Any]
+    user_vector_context: dict[str, Any]
+    multiagent_plan: dict[str, Any]
+    apm_reports: Annotated[list[dict[str, Any]], operator.add]

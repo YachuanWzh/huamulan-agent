@@ -4,6 +4,7 @@ import {
   type ExecutionLog,
   type ExecutionSummary,
   type ObservabilitySnapshot,
+  type AgentMode,
   type CaseEvaluationDetail,
   type ReplayResponse,
   type ReplayState,
@@ -20,6 +21,7 @@ interface Props {
   threadId: string | null
   onThreadCleared?: () => void
   onReplayState?: (state: ReplayState) => void
+  agentMode?: AgentMode
 }
 
 type AuditFilter = 'all' | 'llm' | 'tool' | 'tool_retry' | 'security' | 'approval'
@@ -56,6 +58,7 @@ export function WorkspacePanel({
   threadId,
   onThreadCleared,
   onReplayState,
+  agentMode = 'single',
 }: Props) {
   const [replay, setReplay] = useState<ReplayResponse | null>(null)
   const [replayLoading, setReplayLoading] = useState(false)
@@ -192,6 +195,7 @@ export function WorkspacePanel({
       for await (const event of api.runSkillEvaluationStream({
         golden_path: trimmedPath,
         evaluation_mode: mode,
+        agent_mode: agentMode,
       })) {
         applyEvaluationEvent(event)
       }

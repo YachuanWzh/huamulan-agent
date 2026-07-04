@@ -3,13 +3,14 @@ import { MessageList } from './MessageList'
 import { MessageInput } from './MessageInput'
 import { ToolApprovalCard } from './ToolApprovalCard'
 import { ToolApprovalBatchCard } from './ToolApprovalBatchCard'
-import type { ReplayState } from '../lib/api'
+import type { AgentMode, ReplayState } from '../lib/api'
 
 interface Props {
   threadId: string | null
   onThreadCreated: () => string
   onNewConversation: () => void
   replayState?: ReplayState | null
+  agentMode?: AgentMode
 }
 
 export function ChatPanel({
@@ -17,6 +18,7 @@ export function ChatPanel({
   onThreadCreated,
   onNewConversation,
   replayState,
+  agentMode = 'single',
 }: Props) {
   const {
     messages,
@@ -32,7 +34,7 @@ export function ChatPanel({
     clearError,
     toggleReasoning,
     toggleCompacting,
-  } = useChat(threadId, onThreadCreated, replayState)
+  } = useChat(threadId, onThreadCreated, replayState, agentMode)
 
   return (
     <div className="chat-panel">

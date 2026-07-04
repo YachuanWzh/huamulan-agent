@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   api,
+  type AgentMode,
   type ApprovalBatchItem,
   type ReplayState,
   type StreamEvent,
@@ -26,6 +27,7 @@ export function useChat(
   threadId: string | null,
   ensureThreadId: () => string,
   replayState?: ReplayState | null,
+  agentMode: AgentMode = 'single',
 ) {
   const [messages, setMessages] = useState<Message[]>([])
   const [pendingApprovals, setPendingApprovals] = useState<ToolCallApproval[]>([])
@@ -302,7 +304,11 @@ export function useChat(
 
       try {
         const activeThreadId = threadId ?? ensureThreadId()
-        const stream = api.chatStream({ thread_id: activeThreadId, message: text })
+        const stream = api.chatStream({
+          thread_id: activeThreadId,
+          message: text,
+          agent_mode: agentMode,
+        })
         await processStream(stream)
         await pollMemoryApprovals(activeThreadId)
       } catch (e) {
@@ -312,7 +318,7 @@ export function useChat(
         setLoading(false)
       }
     },
-    [threadId, ensureThreadId, processStream, pollMemoryApprovals],
+    [threadId, ensureThreadId, processStream, pollMemoryApprovals, agentMode],
   )
 
   const approve = useCallback(

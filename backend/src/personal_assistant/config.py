@@ -131,6 +131,23 @@ class Settings(BaseSettings):
         default=None,
         alias="SKILL_ROUTING_LLM_MODEL",
     )
+    user_vector_retrieval_enabled: bool = Field(
+        default=False,
+        alias="USER_VECTOR_RETRIEVAL_ENABLED",
+    )
+    user_vector_qdrant_url: str | None = Field(
+        default=None,
+        alias="USER_VECTOR_QDRANT_URL",
+    )
+    user_vector_qdrant_api_key: str | None = Field(
+        default=None,
+        alias="USER_VECTOR_QDRANT_API_KEY",
+    )
+    user_vector_qdrant_collection: str = Field(
+        default="user_memory",
+        alias="USER_VECTOR_QDRANT_COLLECTION",
+    )
+    user_vector_top_k: int = Field(default=5, alias="USER_VECTOR_TOP_K")
     evaluation_judge_enabled: bool = Field(
         default=True,
         alias="EVALUATION_JUDGE_ENABLED",

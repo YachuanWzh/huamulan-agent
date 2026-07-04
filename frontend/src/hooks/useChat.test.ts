@@ -119,6 +119,24 @@ describe('useChat', () => {
     expect(result.current.pendingApprovals).toEqual([])
   })
 
+  it('sends selected multi-agent mode with chat stream requests', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([{ type: 'done', status: 'completed', message: 'ok' }]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1', null, 'multi'))
+
+    await act(async () => {
+      await result.current.send('排查 p95')
+    })
+
+    expect(mockApi.chatStream).toHaveBeenCalledWith({
+      thread_id: 'thread-1',
+      message: '排查 p95',
+      agent_mode: 'multi',
+    })
+  })
+
   it('sets streaming true during token streaming', async () => {
     let resolveStream!: () => void
     const streamPromise = new Promise<void>((resolve) => {

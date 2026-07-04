@@ -10,10 +10,12 @@ vi.mock('./components/ChatPanel', async () => {
     ChatPanel: ({
       threadId,
       replayState,
+      agentMode,
       onThreadCreated,
     }: {
       threadId: string | null
       replayState?: { checkpoint_id: string } | null
+      agentMode: 'single' | 'multi'
       onThreadCreated: () => string
     }) => {
       const [initialThreadId] = React.useState(threadId)
@@ -21,6 +23,7 @@ vi.mock('./components/ChatPanel', async () => {
       return (
         <div>
           <div data-testid="chat-thread">{threadId}</div>
+          <div data-testid="chat-agent-mode">{agentMode}</div>
           <div data-testid="chat-initial-thread">{initialThreadId}</div>
           <div data-testid="chat-mount-id">{mountId}</div>
           <div data-testid="chat-replay">{replayState?.checkpoint_id ?? ''}</div>
@@ -66,12 +69,14 @@ vi.mock('./components/WorkspacePanel', () => ({
   WorkspacePanel: ({
     panel,
     threadId,
+    agentMode,
   }: {
     panel: 'checkpoint' | 'audit'
     threadId: string | null
+    agentMode: 'single' | 'multi'
   }) => (
     <div data-testid="workspace-panel">
-      Workspace {panel} {threadId}
+      Workspace {panel} {threadId} {agentMode}
     </div>
   ),
 }))
@@ -181,6 +186,21 @@ describe('App thread id', () => {
     expect(
       screen.getByRole('heading', { name: /huamulan-agent/i }),
     ).toBeInTheDocument()
+  })
+
+  it('keeps agent mode global for chat and workspace panels', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(screen.getByTestId('chat-agent-mode')).toHaveTextContent('single')
+
+    await user.click(screen.getByRole('button', { name: /multi agent/i }))
+
+    expect(screen.getByTestId('chat-agent-mode')).toHaveTextContent('multi')
+
+    await user.click(screen.getByRole('button', { name: /mock audit panel/i }))
+
+    expect(screen.getByTestId('workspace-panel')).toHaveTextContent('multi')
   })
 
   it('presents the four-market kit rail in the header', () => {

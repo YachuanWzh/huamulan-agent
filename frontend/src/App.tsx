@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { Sidebar } from './components/Sidebar'
 import { WorkspacePanel } from './components/WorkspacePanel'
-import type { ReplayState } from './lib/api'
+import type { AgentMode, ReplayState } from './lib/api'
 import './App.css'
 
 function createThreadId() {
@@ -15,6 +15,7 @@ function App() {
   const [threadId, setThreadId] = useState<string | null>(null)
   const [conversationKey, setConversationKey] = useState('empty-thread')
   const [replayState, setReplayState] = useState<ReplayState | null>(null)
+  const [agentMode, setAgentMode] = useState<AgentMode>('single')
   const [activePanel, setActivePanel] = useState<'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance'>('chat')
 
   const handleThreadCreated = () => {
@@ -54,6 +55,22 @@ function App() {
           </div>
         </div>
         <div className="header-actions">
+          <div className="agent-mode-toggle" role="group" aria-label="Agent mode">
+            <button
+              type="button"
+              aria-pressed={agentMode === 'single'}
+              onClick={() => setAgentMode('single')}
+            >
+              Single agent
+            </button>
+            <button
+              type="button"
+              aria-pressed={agentMode === 'multi'}
+              onClick={() => setAgentMode('multi')}
+            >
+              Multi agent
+            </button>
+          </div>
           <div className="thread-info" title={threadId ?? ''}>
             军令: {threadId ? `${threadId.slice(0, 8)}...` : '未出征'}
           </div>
@@ -67,12 +84,14 @@ function App() {
             onThreadCreated={handleThreadCreated}
             onNewConversation={handleNewConversation}
             replayState={replayState}
+            agentMode={agentMode}
           />
         ) : (
           <WorkspacePanel
             panel={activePanel}
             threadId={threadId}
             onThreadCleared={handleThreadCleared}
+            agentMode={agentMode}
             onReplayState={(state) => {
               setReplayState(state)
               setActivePanel('chat')

@@ -226,13 +226,23 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    return await harness.run_user_turn(request.thread_id, request.message, request.llm)
+    return await harness.run_user_turn(
+        request.thread_id,
+        request.message,
+        request.llm,
+        agent_mode=request.agent_mode,
+    )
 
 
 @app.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
     return StreamingResponse(
-        harness.run_user_turn_stream(request.thread_id, request.message, request.llm),
+        harness.run_user_turn_stream(
+            request.thread_id,
+            request.message,
+            request.llm,
+            agent_mode=request.agent_mode,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
@@ -412,6 +422,7 @@ async def run_skill_evaluation_stream(
             memory,
             path,
             mode=request.evaluation_mode,
+            agent_mode=request.agent_mode,
             harness=harness,
             judge_client=_build_evaluation_judge(settings)
             if request.evaluation_mode == "e2e"
@@ -465,6 +476,7 @@ async def _iter_skill_evaluation_events(
     golden_path: str | Path | None,
     *,
     mode: str = "quick",
+    agent_mode: str = "single",
     harness: AgentHarness | None = None,
     judge_client=None,
     judge_model: str | None = None,
@@ -497,7 +509,7 @@ async def _iter_skill_evaluation_events(
         if mode == "e2e":
             if harness is None:
                 raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
-            outcome = await _run_e2e_case(harness, case, run_id)
+            outcome = await _run_e2e_case(harness, case, run_id, agent_mode=agent_mode)
         else:
             outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm)
         case_results.append(outcome)
@@ -631,11 +643,20 @@ async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase, guard_
     }
 
 
-async def _run_e2e_case(harness: AgentHarness, case: GoldenSkillCase, run_id: str) -> dict:
+async def _run_e2e_case(
+    harness: AgentHarness,
+    case: GoldenSkillCase,
+    run_id: str,
+    *,
+    agent_mode: str = "single",
+) -> dict:
     thread_id = f"{run_id}-{case.id}"
     response = None
     for message in _case_messages(case):
-        response = await harness.run_user_turn(thread_id, message)
+        if agent_mode == "single":
+            response = await harness.run_user_turn(thread_id, message)
+        else:
+            response = await harness.run_user_turn(thread_id, message, agent_mode=agent_mode)
         response = await _auto_resolve_eval_approvals(harness, thread_id, response)
     logs = await harness.list_execution_logs(thread_id, limit=500)
     selected = _selected_skills_from_logs(logs)

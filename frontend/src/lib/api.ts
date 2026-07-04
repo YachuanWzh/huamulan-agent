@@ -7,10 +7,13 @@ export interface LLMConfig {
   temperature?: number
 }
 
+export type AgentMode = 'single' | 'multi'
+
 export interface ChatRequest {
   thread_id: string
   message: string
   llm?: LLMConfig
+  agent_mode?: AgentMode
 }
 
 export interface ToolCallApproval {
@@ -78,6 +81,7 @@ export interface SkillEvaluationSnapshot {
 export interface SkillEvaluationRunRequest {
   golden_path?: string | null
   evaluation_mode?: 'quick' | 'e2e'
+  agent_mode?: AgentMode
 }
 
 export interface SkillEvaluationDataset {

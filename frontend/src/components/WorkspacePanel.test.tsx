@@ -254,7 +254,7 @@ describe('WorkspacePanel', () => {
       },
     ])
 
-    render(<WorkspacePanel panel="skills" threadId="t1" />)
+    render(<WorkspacePanel panel="skills" threadId="t1" agentMode="multi" />)
 
     expect(await screen.findByText('Skill Evaluation')).toBeInTheDocument()
     expect(screen.getByLabelText('Golden dataset')).toHaveValue('claw_eval_smoke')
@@ -299,7 +299,7 @@ describe('WorkspacePanel', () => {
       },
     ])
 
-    render(<WorkspacePanel panel="skills" threadId="t1" />)
+    render(<WorkspacePanel panel="skills" threadId="t1" agentMode="multi" />)
 
     expect(await screen.findByText('88%')).toBeInTheDocument()
     expect(screen.queryByText('8800%')).not.toBeInTheDocument()
@@ -528,7 +528,7 @@ describe('WorkspacePanel', () => {
     })
     const user = userEvent.setup()
 
-    render(<WorkspacePanel panel="skills" threadId="t1" />)
+    render(<WorkspacePanel panel="skills" threadId="t1" agentMode="multi" />)
 
     await user.selectOptions(await screen.findByLabelText('Golden dataset'), 'golden_dataset')
     await user.click(screen.getByRole('button', { name: '快速巡检' }))
@@ -536,6 +536,7 @@ describe('WorkspacePanel', () => {
     expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
       golden_path: 'golden_dataset',
       evaluation_mode: 'quick',
+      agent_mode: 'multi',
     })
     expect(await screen.findByText('88%')).toBeInTheDocument()
     expect(screen.getAllByText('golden:new.jsonl').length).toBeGreaterThan(0)
@@ -899,6 +900,7 @@ describe('WorkspacePanel', () => {
     expect(mockApi.runSkillEvaluationStream).toHaveBeenCalledWith({
       golden_path: 'golden_dataset',
       evaluation_mode: 'e2e',
+      agent_mode: 'single',
     })
     expect(await screen.findByRole('progressbar', { name: /Skill evaluation progress/i }))
       .toHaveAttribute('aria-valuenow', '100')

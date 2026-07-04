@@ -181,6 +181,33 @@ button {
   min-width: 0;
 }
 
+.agent-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(138, 90, 53, 0.3);
+  border-radius: var(--radius);
+  background: rgba(255, 250, 240, 0.72);
+}
+
+.agent-mode-toggle button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-saddle-leather);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.agent-mode-toggle button[aria-pressed="true"] {
+  background: var(--color-crimson);
+  color: #fffaf0;
+}
+
 .thread-info {
   min-width: 0;
   max-width: 42vw;
@@ -2617,6 +2644,11 @@ button {
   .header-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .agent-mode-toggle {
+    max-width: 100%;
+    overflow-x: auto;
   }
 
   .message-list {
