@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from personal_assistant.skills.loader import SkillRegistry, _parse_frontmatter
 
 # Dynamically import the script from scripts/resolve_date.py
@@ -284,3 +286,53 @@ class TestResolveTimeToolsRunScripts:
         result = tool.invoke({"day_offset": 1})
         data = json.loads(result)
         assert data["day_offset"] == 1
+
+
+class TestScriptLunarToSolar:
+    """Tests for calc_lunar_to_solar — lunar calendar to Gregorian conversion."""
+
+    @patch.object(_script, "now", return_value=FAKE_NOW)
+    def test_mid_autumn_2026(self, _):
+        """农历八月十五 in 2026 → approximately Sep 26, 2026."""
+        r = _script.calc_lunar_to_solar(8, 15)
+        assert r["date"] == "2026-09-26"
+        assert r["lunar_month"] == 8
+        assert r["lunar_day"] == 15
+        assert r["lunar_year"] == 2026
+        assert "八月" in r["lunar_description"]
+        assert "十五" in r["lunar_description"]
+
+    @patch.object(_script, "now", return_value=FAKE_NOW)
+    def test_spring_festival_2026(self, _):
+        """正月初一 in 2026 → Feb 17, 2026 (CNY)."""
+        r = _script.calc_lunar_to_solar(1, 1)
+        assert r["date"] == "2026-02-17"
+        assert r["lunar_description"] == "正月初一"
+
+    @patch.object(_script, "now", return_value=FAKE_NOW)
+    def test_lunar_new_year_eve_2026(self, _):
+        """腊月廿九 in lunar year 2026 → Feb 5, 2027 (day before CNY 2027)."""
+        r = _script.calc_lunar_to_solar(12, 29)
+        assert r["date"] == "2027-02-05"
+        assert "腊月" in r["lunar_description"]
+
+    @patch.object(_script, "now", return_value=FAKE_NOW)
+    def test_explicit_year_2027(self, _):
+        """Pass explicit year instead of inferring from current date."""
+        r = _script.calc_lunar_to_solar(8, 15, year=2027)
+        assert r["lunar_year"] == 2027
+        assert r["date"] == "2027-09-15"
+        assert "八月" in r["lunar_description"]
+
+    def test_invalid_lunar_month(self):
+        with pytest.raises(ValueError, match="lunar month"):
+            _script.calc_lunar_to_solar(13, 1)
+
+    def test_invalid_lunar_day(self):
+        with pytest.raises(ValueError, match="lunar day"):
+            _script.calc_lunar_to_solar(1, 31)
+
+    @patch.object(_script, "now", return_value=FAKE_NOW)
+    def test_unsupported_year_raises(self, _):
+        with pytest.raises(ValueError, match="not available"):
+            _script.calc_lunar_to_solar(8, 15, year=2020)
