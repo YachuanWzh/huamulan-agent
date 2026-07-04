@@ -239,6 +239,65 @@ class TestChineseRegexRouting:
 
         assert _keyword_route(registry, query) == ["audit-sop"]
 
+    def test_multi_weather_api_performance_query_routes_all_required_skills(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("resolve-time", "weather", "troubleshoot"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u540e\u5929\u4e0a\u6d77\u5929\u6c14\u600e\u6837\uff1f"
+            "\u5982\u679c\u4e0b\u96e8\u7684\u8bdd\u5e2e\u6211\u6392\u67e5"
+            "\u4e00\u4e0b\u6700\u8fd1\u7684API\u662f\u4e0d\u662f"
+            "\u6709\u96e8\u5929\u7684\u6027\u80fd\u95ee\u9898\u3002"
+        )
+
+        assert _keyword_route(registry, query) == [
+            "resolve-time",
+            "weather",
+            "troubleshoot",
+        ]
+
+    def test_real_registry_multi_weather_api_query_keeps_auxiliary_time(self):
+        registry = SkillRegistry(
+            Path(__file__).parents[1] / "src" / "personal_assistant" / "skills"
+        )
+
+        query = (
+            "\u540e\u5929\u4e0a\u6d77\u5929\u6c14\u600e\u6837\uff1f"
+            "\u5982\u679c\u4e0b\u96e8\u7684\u8bdd\u5e2e\u6211\u6392\u67e5"
+            "\u4e00\u4e0b\u6700\u8fd1\u7684API\u662f\u4e0d\u662f"
+            "\u6709\u96e8\u5929\u7684\u6027\u80fd\u95ee\u9898\u3002"
+        )
+
+        assert _keyword_route(registry, query) == [
+            "resolve-time",
+            "weather",
+            "troubleshoot",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_deterministic_route_trace_includes_rule_metadata(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "weather")
+        registry = SkillRegistry(tmp_path)
+
+        result = await route_skill_names_with_trace(
+            registry,
+            "\u5317\u4eac\u4eca\u5929\u7a7a\u6c14\u8d28\u91cfAQI"
+            "\u591a\u5c11\uff1f",
+        )
+
+        regex_stage = result.trace[0]
+        assert regex_stage["stage"] == "regex"
+        assert regex_stage["matches"][0]["skill"] == "weather"
+        assert regex_stage["matches"][0]["rule_id"] == "weather.air_quality"
+        assert regex_stage["matches"][0]["source"] == "regex"
+
 
 class TestPatrolRouting:
     def test_routes_alert_rule_patrol_before_audit_or_find_skills(self, tmp_path: Path):
