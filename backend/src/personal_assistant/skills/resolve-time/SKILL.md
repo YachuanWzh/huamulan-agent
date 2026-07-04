@@ -19,6 +19,18 @@ triggers:
   - yesterday
   - next week
   - this week
+  - 农历
+  - 阴历
+  - 春节
+  - 除夕
+  - 元宵
+  - 端午
+  - 七夕
+  - 中秋
+  - 重阳
+  - 腊八
+  - 正月
+  - lunar
 scripts:
   - name: resolve_date_by_offset
     description: Calculate a date by day offset from today (e.g. tomorrow=1, yesterday=-1, N days from today).
@@ -56,6 +68,26 @@ scripts:
         type: string
         description: IANA timezone, e.g. Asia/Shanghai.
         default: Asia/Shanghai
+  - name: resolve_lunar_to_solar
+    description: Convert a 农历/阴历 date (month, day) to the Gregorian (公历) date. Supports years 2024-2027.
+    command: ["python", "scripts/resolve_date.py", "lunar", "{lunar_month}", "{lunar_day}", "{year}", "{timezone}"]
+    params:
+      lunar_month:
+        type: integer
+        description: Lunar month number (1=正月, 2=二月, ..., 12=腊月).
+        required: true
+      lunar_day:
+        type: integer
+        description: Lunar day number (1=初一, 2=初二, ..., 30=三十). Must be within the valid range for the month.
+        required: true
+      year:
+        type: integer
+        description: Gregorian year. Optional; inferred from current date if omitted.
+        required: false
+      timezone:
+        type: string
+        description: IANA timezone, e.g. Asia/Shanghai.
+        default: Asia/Shanghai
 ---
 
 # Resolve Time — 日期时间解析
@@ -69,6 +101,7 @@ scripts:
 - `resolve_current_time(timezone="Asia/Shanghai")` — 返回指定时区的当前 ISO-8601 时间。
 - `resolve_date_by_offset(day_offset, timezone="Asia/Shanghai")` — 按天数偏移计算日期（今天 ±N 天）。
 - `resolve_date_by_weekday(weekday, week_offset=1, timezone="Asia/Shanghai")` — 按星期几 + 周偏移计算日期。
+- `resolve_lunar_to_solar(lunar_month, lunar_day, year=None, timezone="Asia/Shanghai")` — 农历/阴历日期转公历日期。
 
 工具返回的 JSON 包含 `date`、`weekday`、偏移量与 `description` 字段。请用人类语言把结果
 转述给用户，而不是直接贴 JSON。
@@ -93,6 +126,22 @@ scripts:
 
 `weekday` 支持：英文（Monday）、中文星期（星期一）、中文周（周一）、缩写（Mon）。
 
+## 农历/阴历转换
+
+| 用户表达 | 工具 | 参数 |
+|---------|------|------|
+| 农历八月十五 / 中秋节 | resolve_lunar_to_solar | lunar_month=8, lunar_day=15 |
+| 正月初一 / 春节 | resolve_lunar_to_solar | lunar_month=1, lunar_day=1 |
+| 腊月三十 / 除夕 | resolve_lunar_to_solar | lunar_month=12, lunar_day=30 |
+| 腊月最后一天 | resolve_lunar_to_solar | lunar_month=12, lunar_day=29 |
+| 五月初五 / 端午 | resolve_lunar_to_solar | lunar_month=5, lunar_day=5 |
+| 七月初七 / 七夕 | resolve_lunar_to_solar | lunar_month=7, lunar_day=7 |
+| 九月初九 / 重阳 | resolve_lunar_to_solar | lunar_month=9, lunar_day=9 |
+| 2027年农历八月十五 | resolve_lunar_to_solar | lunar_month=8, lunar_day=15, year=2027 |
+
+**注意**：农历月份天数（29或30天）因年而异。各月的实际天数由系统内置的农历数据表确定。
+如果指定 `year` 参数，会直接使用该年份的农历数据；否则从当前日期推断年份。
+
 ## 脚本
 
 核心计算逻辑在 `scripts/resolve_date.py`，可独立运行以便调试：
@@ -100,5 +149,8 @@ scripts:
 ```bash
 python scripts/resolve_date.py offset 1
 python scripts/resolve_date.py weekday Tuesday 1
+python scripts/resolve_date.py lunar 8 15         # 中秋节（当年）
+python scripts/resolve_date.py lunar 1 1           # 春节（当年）
+python scripts/resolve_date.py lunar 8 15 2027     # 2027年中秋节
 python scripts/resolve_date.py now
 ```

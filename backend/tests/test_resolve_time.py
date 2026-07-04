@@ -166,14 +166,19 @@ class TestResolveTimeFrontmatter:
         assert "今天" in triggers
         assert "tomorrow" in triggers
 
-    def test_declares_three_script_tools(self):
+    def test_declares_four_script_tools(self):
         skill_dir = (
             Path(__file__).resolve().parent.parent
             / "src" / "personal_assistant" / "skills" / "resolve-time"
         )
         meta = _parse_frontmatter(skill_dir / "SKILL.md")
         names = {s["name"] for s in meta["scripts"]}
-        assert names == {"resolve_current_time", "resolve_date_by_offset", "resolve_date_by_weekday"}
+        assert names == {
+            "resolve_current_time",
+            "resolve_date_by_offset",
+            "resolve_date_by_weekday",
+            "resolve_lunar_to_solar",
+        }
 
     def test_each_script_decl_points_at_resolve_date_py(self):
         skill_dir = (
@@ -210,7 +215,7 @@ class TestSkillLoadingWithFrontmatter:
         assert "resolve_date_by_offset" in skill.instructions
         assert "scripts/resolve_date.py" in skill.instructions
 
-    def test_load_skill_builds_three_script_tools(self):
+    def test_load_skill_builds_four_script_tools(self):
         """The scripts/ declarations become LangChain tools on load."""
         skills_dir = (
             Path(__file__).resolve().parent.parent
@@ -224,6 +229,7 @@ class TestSkillLoadingWithFrontmatter:
             "resolve_current_time",
             "resolve_date_by_offset",
             "resolve_date_by_weekday",
+            "resolve_lunar_to_solar",
         ]
 
     def test_tool_map_exposes_resolve_time_tools(self):
@@ -237,6 +243,7 @@ class TestSkillLoadingWithFrontmatter:
         assert "resolve_date_by_offset" in tool_map
         assert "resolve_date_by_weekday" in tool_map
         assert "resolve_current_time" in tool_map
+        assert "resolve_lunar_to_solar" in tool_map
 
 
 class TestResolveTimeToolsRunScripts:
