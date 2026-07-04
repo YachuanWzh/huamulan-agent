@@ -239,6 +239,27 @@ class TestChineseRegexRouting:
 
         assert _keyword_route(registry, query) == ["audit-sop"]
 
+    @pytest.mark.parametrize(
+        ("skill_name", "query"),
+        [
+            ("resolve-time", "农历八月十五对应公历哪天？"),
+            ("resolve-time", "今年春节是几月几号？"),
+            ("resolve-time", "阴历正月初一是公历哪天？"),
+            ("resolve-time", "端午是几号"),
+            ("resolve-time", "中秋节在几月几号"),
+        ],
+    )
+    def test_lunar_queries_route_to_resolve_time(
+        self,
+        tmp_path: Path,
+        skill_name: str,
+        query: str,
+    ):
+        _make_named_skill(tmp_path, skill_name)
+        registry = SkillRegistry(tmp_path)
+
+        assert _keyword_route(registry, query) == [skill_name]
+
 
 class TestPatrolRouting:
     def test_routes_alert_rule_patrol_before_audit_or_find_skills(self, tmp_path: Path):
@@ -282,6 +303,189 @@ class TestPatrolRouting:
         )
 
         assert result == ["patrol"]
+
+    def test_audit_apm_routes_patrol_and_audit_for_system_patrol_log_audit(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("patrol", "audit-sop", "troubleshoot"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "帮我跑一次系统巡检，看看有没有异常指标。"
+                "如果有的话，审计一下对应的执行日志看看根因是什么。"
+            ),
+        )
+
+        assert result == ["patrol", "audit-sop"]
+
+    def test_audit_apm_routes_sla_compliance_report_to_audit_sop(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("patrol", "audit-sop", "apm-metrics"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "检查所有活跃线程的 SLA 合规情况：tool_success_rate < 95%、"
+                "approval_response_time > 30s 的标记为不合规，输出合规报告。"
+            ),
+        )
+
+        assert result == ["audit-sop"]
+
+    def test_audit_apm_routes_custom_business_metric_definition_to_apm_metrics(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("audit-sop", "apm-metrics", "patrol"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "APM 里怎么定义和采集自定义业务指标？"
+                "比如用户下单成功率、支付转化率这些。"
+            ),
+        )
+
+        assert result == ["apm-metrics"]
+
+    def test_audit_apm_routes_cross_thread_governance_patrol_to_audit_only(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("patrol", "audit-sop", "troubleshoot"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "帮我做一次跨线程业务治理巡检，聚合最近的 tool error rate、"
+                "retry rate、安全拦截率、审批拒绝率和 token 增长，找系统性风险。"
+            ),
+        )
+
+        assert result == ["audit-sop"]
+
+    def test_audit_apm_does_not_route_find_skills_when_skill_names_are_mentioned(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "audit-sop")
+        _make_named_skill(tmp_path, "troubleshoot")
+        _make_named_skill(
+            tmp_path,
+            "find-skills",
+            "Helps users discover and install agent skills.",
+        )
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "最近多个会话都有前端白屏和 agent 工具重试，请把 audit-sop "
+                "的跨线程治理报告和 troubleshoot 的根因分析结合起来，"
+                "输出业务影响和修复优先级。"
+            ),
+        )
+
+        assert result == ["audit-sop", "troubleshoot"]
+
+    def test_audit_apm_routes_error_rate_metric_explanation_to_apm_metrics_only(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "apm-metrics")
+        _make_named_skill(tmp_path, "audit-sop")
+        _make_named_skill_with_triggers(
+            tmp_path,
+            "troubleshoot-runbook",
+            ["JS error"],
+            description="APM troubleshooting runbook library for JS errors.",
+        )
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "什么是 JS error rate、resource error rate 和 Apdex？"
+                "这些 APM 指标应该怎样在前端性能监控 SDK 里采集？"
+            ),
+        )
+
+        assert result == ["apm-metrics"]
+
+    def test_audit_apm_routes_business_metric_threshold_design_before_patrol(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("apm-metrics", "patrol", "audit-sop"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "APM 里怎么定义和采集下单成功率、支付转化率和优惠券使用率？"
+                "请给出 numerator、denominator、去重规则、维度和告警阈值。"
+            ),
+        )
+
+        assert result == ["apm-metrics"]
+
+    def test_audit_apm_runbook_query_does_not_token_match_every_apm_skill(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "apm-metrics", "APM metric knowledge base.")
+        _make_named_skill(tmp_path, "audit-sop", "Agent execution audit and APM governance.")
+        _make_named_skill(tmp_path, "troubleshoot", "APM incident RCA.")
+        _make_named_skill_with_triggers(
+            tmp_path,
+            "troubleshoot-runbook",
+            ["runbook"],
+            description="APM troubleshooting runbook library.",
+        )
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "第三方支付回调 30s 超时，订单状态出现 paid_pending 和 "
+                "paid_success 不一致。请按 APM runbook 给出排查步骤、"
+                "降级策略和回滚方案。"
+            ),
+        )
+
+        assert result == ["troubleshoot-runbook"]
+
+    def test_audit_apm_rca_with_execution_logs_does_not_overselect_audit(
+        self,
+        tmp_path: Path,
+    ):
+        for name in ("apm-metrics", "audit-sop", "troubleshoot"):
+            _make_named_skill(tmp_path, name)
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            (
+                "生产发布后 /checkout 页面 TypeError 集中爆发，LCP p95 从 "
+                "2.4s 涨到 6.7s。请结合 RUM 和执行日志做 RCA 根因分析，"
+                "给出修复和验证步骤。"
+            ),
+        )
+
+        assert result == ["apm-metrics", "troubleshoot"]
 
 
 class FakeSemanticIndex:

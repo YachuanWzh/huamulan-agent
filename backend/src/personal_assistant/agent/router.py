@@ -65,6 +65,20 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
             r"\u524d\u5929|\u4e0b\u5468|\u8fd9\u5468|\u4e0a\u5468)|"
             r"\u73b0\u5728\u51e0\u70b9|\u5f53\u524d\u65f6\u95f4)"
         ),
+        (
+            r"(?:\u519c\u5386|\u9634\u5386|\u65e7\u5386|\u8001\u7687\u5386)"
+            r"|(?:\u6625\u8282|\u9664\u5915|\u5143\u5bb5|\u7aef\u5348|\u4e03\u5915|\u4e2d\u79cb|\u91cd\u9633|\u814a\u516b|\u5c0f\u5e74|"
+            r"\u5927\u5e74(?:\u521d\u4e00|\u4e09\u5341)|\u6e05\u660e\u8282)"
+            r"|(?:\u6b63\u6708|\u4e8c\u6708|\u4e09\u6708|\u56db\u6708|\u4e94\u6708|\u516d\u6708|"
+            r"\u4e03\u6708|\u516b\u6708|\u4e5d\u6708|\u5341\u6708|\u51ac\u6708|\u814a\u6708)"
+            r"(?:\u521d[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]|"
+            r"[\u5341\u4e8c]\u5341[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d]|"
+            r"[\u4e8c\u4e09]\u5341|"
+            r"\u5eff[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]|"
+            r"\u4e09\u5341|"
+            r"[\u4e00\u4e8c\u4e09]\u5341[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d])"
+            r"|(?:lunar(?:\s+calendar|\s+new\s+year))"
+        ),
     ],
     "find-skills": [
         r"\b(find|search|install|add|discover)\s+(?:an?\s+)?skill\b",
@@ -91,15 +105,29 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
             r"\u6545\u969c\u5b9a\u4f4d|\u5f02\u5e38\u8bca\u65ad|RCA)"
         ),
     ],
+    "apm-metrics": [
+        r"\b(Web Vitals|LCP|CLS|INP|TTFB|FID|TBT|Apdex|SLO|error budget|percentile|p50|p75|p95|p99)\b",
+        r"\b(custom metrics?|business metrics?|conversion rate|metric interpretation|alert thresholds?)\b",
+        (
+            r"(\u6307\u6807(?:\u5b9a\u4e49|\u53e3\u5f84|\u542b\u4e49|\u89e3\u8bfb|"
+            r"\u91c7\u96c6|\u9608\u503c)|\u81ea\u5b9a\u4e49\u4e1a\u52a1\u6307\u6807|"
+            r"\u4e1a\u52a1\u6307\u6807|\u4e0b\u5355\u6210\u529f\u7387|"
+            r"\u652f\u4ed8\u8f6c\u5316\u7387|\u8f6c\u5316\u7387|"
+            r"\u767e\u5206\u4f4d\u6570|\u544a\u8b66\u9608\u503c|"
+            r"\u600e\u4e48(?:\u5b9a\u4e49|\u91c7\u96c6).{0,20}\u6307\u6807)"
+        ),
+    ],
     "audit-sop": [
-        r"\b(audit|trace|execution log|tool failure|tool error|tool error rate|retry chain|token usage|approval|security event|security block|shell_command)\b",
+        r"\b(audit|trace|execution log|tool failure|tool error|tool error rate|retry chain|token usage|approval|security event|security block|shell_command|SLA|compliance|compliant)\b",
         r"(?:shell_command|[a-zA-Z_][a-zA-Z0-9_]*\s+\u5de5\u5177).{0,40}(?:\u5931\u8d25|\u8d85\u65f6|\u62a5\u9519|\u9519\u8bef|\u91cd\u8bd5)",
+        r"\b(?:tool_success_rate|approval_response_time|retry_rate|security_block_rate|approval_denial_rate)\b",
         (
             r"(\u5ba1\u8ba1|\u6267\u884c\u65e5\u5fd7|\u8c03\u7528\u94fe|"
             r"\u5de5\u5177(?:\u5931\u8d25|\u8d85\u65f6|\u9519\u8bef|\u8c03\u7528)|"
             r"\u91cd\u8bd5|token|\u5ba1\u6279|\u5b89\u5168(?:\u4e8b\u4ef6|"
             r"\u62e6\u622a|\u963b\u65ad|\u5408\u89c4)|\u62e6\u622a\u8d8b\u52bf|"
-            r"\u6210\u529f\u7387|\u9519\u8bef\u7387)"
+            r"SLA|\u6d3b\u8dc3\u7ebf\u7a0b|\u5408\u89c4(?:\u60c5\u51b5|"
+            r"\u62a5\u544a)?|\u4e0d\u5408\u89c4)"
         ),
     ],
 
@@ -108,6 +136,7 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
 _TOKEN_FALLBACK_STOPWORDS = {
     "a",
     "an",
+    "apm",
     "and",
     "are",
     "for",
@@ -948,6 +977,16 @@ def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
 
 def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
     normalized = user_text.lower()
+    if (
+        "apm-metrics" in registry.skills
+        and _is_apm_metric_knowledge_query(user_text)
+        and any(
+            _regex_match(pattern, user_text)
+            for pattern in _DEFAULT_SKILL_REGEXES.get("apm-metrics", [])
+        )
+    ):
+        return ["apm-metrics"]
+
     patrol_selected = _route_patrol_intent(registry, user_text)
     if patrol_selected:
         return patrol_selected
@@ -960,6 +999,9 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
         if skill.triggers:
             if any(_trigger_match(t, normalized) for t in skill.triggers):
                 matches.append((skill.name, "trigger"))
+            continue
+
+        if skill.name == "find-skills":
             continue
 
         haystack = f"{skill.name}\n{skill.description}".lower()
@@ -978,6 +1020,20 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
             for name, source in matches
             if not (name == "resolve-time" and source == "trigger")
         ]
+    if _is_apm_metric_knowledge_query(user_text) and any(
+        name == "apm-metrics" for name, _source in matches
+    ):
+        matches = [
+            (name, source)
+            for name, source in matches
+            if name not in {"audit-sop", "troubleshoot-runbook"}
+        ]
+    if (
+        any(name == "audit-sop" for name, _source in matches)
+        and any(name == "troubleshoot" for name, _source in matches)
+        and not _is_governance_audit_query(user_text)
+    ):
+        matches = [(name, source) for name, source in matches if name != "audit-sop"]
     return [name for name, _source in matches]
 
 
@@ -987,13 +1043,63 @@ def _route_patrol_intent(registry: SkillRegistry, user_text: str) -> list[str]:
     if not any(_regex_match(pattern, user_text) for pattern in _DEFAULT_SKILL_REGEXES["patrol"]):
         return []
 
+    audit_selected = (
+        "audit-sop" in registry.skills
+        and any(
+            _regex_match(pattern, user_text)
+            for pattern in _DEFAULT_SKILL_REGEXES.get("audit-sop", [])
+        )
+    )
+    if audit_selected and (
+        _is_cross_thread_governance_audit(user_text)
+        or not _regex_match(r"(\u5de1\u68c0|patrol|inspection)", user_text)
+    ):
+        return ["audit-sop"]
+
     selected = ["patrol"]
-    if "troubleshoot" in registry.skills and any(
+    if audit_selected:
+        selected.append("audit-sop")
+    elif "troubleshoot" in registry.skills and any(
         _regex_match(pattern, user_text)
         for pattern in _DEFAULT_SKILL_REGEXES.get("troubleshoot", [])
     ):
         selected.append("troubleshoot")
     return selected
+
+
+def _is_cross_thread_governance_audit(user_text: str) -> bool:
+    return _regex_match(
+        (
+            r"(\u8de8\u7ebf\u7a0b|\u591a\u4e2a\u4f1a\u8bdd|\u6240\u6709\u6d3b\u8dc3\u7ebf\u7a0b)"
+            r".{0,40}(\u4e1a\u52a1\u6cbb\u7406|\u6cbb\u7406\u5de1\u68c0|\u5ba1\u8ba1)"
+        ),
+        user_text,
+    )
+
+
+def _is_governance_audit_query(user_text: str) -> bool:
+    return _regex_match(
+        (
+            r"(\baudit-sop\b|\baudit\b|\bSLA\b|\bcompliance\b|\bapproval\b|"
+            r"\bsecurity\b|\btoken\b|tool_success_rate|approval_response_time|"
+            r"\u5ba1\u8ba1|\u5408\u89c4|\u5ba1\u6279|\u5b89\u5168|"
+            r"\u8de8\u7ebf\u7a0b|\u591a\u4e2a\u4f1a\u8bdd|"
+            r"\u6240\u6709\u6d3b\u8dc3\u7ebf\u7a0b|\u6cbb\u7406)"
+        ),
+        user_text,
+    )
+
+
+def _is_apm_metric_knowledge_query(user_text: str) -> bool:
+    return _regex_match(
+        (
+            r"(\u4ec0\u4e48\u662f|\u89e3\u91ca|\u542b\u4e49|\u600e\u4e48"
+            r"(?:\u5b9a\u4e49|\u91c7\u96c6)|\u600e\u6837.{0,20}\u91c7\u96c6|"
+            r"\u6307\u6807|\u9608\u503c|\bwhat is\b|\bdefine\b|\bdefinition\b|"
+            r"\bcollect(?:ion)?\b|\bmetric interpretation\b)"
+        ),
+        user_text,
+    )
 
 
 async def _llm_route(
