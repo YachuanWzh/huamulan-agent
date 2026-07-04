@@ -1511,24 +1511,16 @@ function EvaluationDiagnosticPanel({ detail }: { detail: CaseEvaluationDetail })
       {routingTrace.length > 0 && (
         <div style={{ marginBottom: '8px' }}>
           <strong>Routing funnel</strong>
-          <div style={{ display: 'grid', gap: '6px', marginTop: '6px' }}>
+          <div className="evaluation-routing-funnel">
             {routingTrace.map((step, index) => (
               <div
                 key={`${String(step.stage)}-${index}`}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '130px 1fr',
-                  gap: '8px',
-                  padding: '8px',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '4px',
-                  background: '#ffffff',
-                }}
+                className="evaluation-routing-step"
               >
-                <span style={{ fontWeight: 700 }}>
+                <span className="evaluation-routing-stage">
                   {String(step.stage ?? `stage-${index + 1}`)}
                 </span>
-                <div>
+                <div className="evaluation-routing-step-body">
                   <span
                     style={{
                       display: 'inline-block',

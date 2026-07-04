@@ -117,6 +117,18 @@ _PROMPT_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
         r"(?is)(?:\b(?:forget|ignore|disregard)\b.{0,20}\b(?:previous|above|all|system)\b.{0,20}\b(?:instructions?|rules?|prompts?|constraints?)\b|忽略.{0,10}(?:之前|以上|所有|以前|上面的|前述|上述|前面).{0,10}(?:指令|指示|设定|规则|命令|约束|限制|要求))",
     ),
     (
+        "instruction_override",
+        "HIGH",
+        "User message attempts to override prior or system instructions.",
+        r"(?is)(?:\u5fd8\u8bb0.{0,10}(?:\u4e4b\u524d|\u524d\u9762|\u5148\u524d|\u524d\u8ff0|\u6240\u6709).{0,10}(?:\u7ea6\u675f|\u89c4\u5219|\u9650\u5236|\u6307\u4ee4|\u8981\u6c42|\u8bbe\u5b9a))",
+    ),
+    (
+        "identity_spoof",
+        "HIGH",
+        "User message claims privileged identity to access hidden instructions.",
+        r"(?is)(?:\u6211\u662f.{0,20}(?:\u7cfb\u7edf\u7ba1\u7406\u5458|\u7ba1\u7406\u5458|\u8d85\u7ea7\u7ba1\u7406\u5458).{0,40}(?:CEO|\u7d27\u6025|\u516c\u53f8).{0,40}(?:\u67e5\u770b|\u83b7\u53d6|\u8f93\u51fa|\u544a\u8bc9).{0,20}(?:\u89d2\u8272\u8bbe\u5b9a|\u7cfb\u7edf\u6307\u4ee4|\u7cfb\u7edf\u63d0\u793a|\u5f00\u53d1\u8005\u6307\u4ee4))",
+    ),
+    (
         "system_prompt_leak",
         "HIGH",
         "User message attempts to reveal hidden system or developer instructions.",

@@ -56,6 +56,24 @@ def _make_named_skill(tmp_path: Path, name: str, description: str = "Test skill"
     )
 
 
+def _make_named_skill_with_triggers(
+    tmp_path: Path,
+    name: str,
+    triggers: list[str],
+    description: str = "Test skill",
+) -> None:
+    d = tmp_path / name
+    d.mkdir()
+    trigger_lines = "\n".join(f"  - {trigger}" for trigger in triggers)
+    (d / "SKILL.md").write_text(
+        (
+            f"---\nname: {name}\ndescription: {description}\n"
+            f"triggers:\n{trigger_lines}\n---\n# {name}\n"
+        ),
+        encoding="utf-8",
+    )
+
+
 class TestKeywordRoute:
     def test_matches_by_name_and_description(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
@@ -126,6 +144,100 @@ class TestChineseRegexRouting:
         registry = SkillRegistry(tmp_path)
 
         assert _keyword_route(registry, query) == [skill_name]
+
+    def test_air_quality_query_routes_to_weather_not_resolve_time(self, tmp_path: Path):
+        _make_named_skill(tmp_path, "weather")
+        _make_named_skill(tmp_path, "resolve-time")
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u5317\u4eac\u4eca\u5929\u7a7a\u6c14\u8d28\u91cfAQI"
+            "\u591a\u5c11\uff1f\u9002\u5408\u8dd1\u6b65\u5417"
+        )
+
+        assert _keyword_route(registry, query) == ["weather"]
+
+    def test_air_quality_query_ignores_resolve_time_relative_day_trigger(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "weather")
+        _make_named_skill_with_triggers(
+            tmp_path,
+            "resolve-time",
+            ["\u4eca\u5929"],
+        )
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u5317\u4eac\u4eca\u5929\u7a7a\u6c14\u8d28\u91cfAQI"
+            "\u591a\u5c11\uff1f\u9002\u5408\u8dd1\u6b65\u5417"
+        )
+
+        assert _keyword_route(registry, query) == ["weather"]
+
+    def test_temperature_swing_query_ignores_resolve_time_relative_day_trigger(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "weather")
+        _make_named_skill_with_triggers(
+            tmp_path,
+            "resolve-time",
+            ["\u660e\u5929"],
+        )
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u54c8\u5c14\u6ee8\u660e\u5929\u65e9\u665a"
+            "\u6e29\u5dee\u5927\u4e0d\u5927\uff1f"
+            "\u65e9\u4e0a\u548c\u665a\u4e0a\u5206\u522b"
+            "\u591a\u5c11\u5ea6"
+        )
+
+        assert _keyword_route(registry, query) == ["weather"]
+
+    def test_date_query_still_routes_to_resolve_time(self, tmp_path: Path):
+        _make_named_skill(tmp_path, "weather")
+        _make_named_skill(tmp_path, "resolve-time")
+        registry = SkillRegistry(tmp_path)
+
+        assert _keyword_route(
+            registry,
+            "\u4eca\u5929\u662f\u51e0\u6708\u51e0\u53f7\uff1f",
+        ) == ["resolve-time"]
+
+    def test_tool_failure_query_routes_to_audit_sop(self, tmp_path: Path):
+        _make_named_skill(tmp_path, "audit-sop")
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u6392\u67e5\u4e00\u4e0b\u4e3a\u4ec0\u4e48shell_command"
+            "\u8fd9\u4e2a\u5de5\u5177\u6700\u8fd1\u603b\u662f\u5931\u8d25"
+        )
+
+        assert _keyword_route(registry, query) == ["audit-sop"]
+
+    def test_security_block_trend_query_ignores_resolve_time_period_trigger(
+        self,
+        tmp_path: Path,
+    ):
+        _make_named_skill(tmp_path, "audit-sop")
+        _make_named_skill_with_triggers(
+            tmp_path,
+            "resolve-time",
+            ["\u4e00\u5468"],
+        )
+        registry = SkillRegistry(tmp_path)
+
+        query = (
+            "\u5206\u6790\u6700\u8fd1\u4e00\u5468\u7684"
+            "\u5b89\u5168\u62e6\u622a\u8d8b\u52bf\uff0c"
+            "\u662f\u8d8a\u6765\u8d8a\u591a\u8fd8\u662f"
+            "\u8d8a\u6765\u8d8a\u5c11"
+        )
+
+        assert _keyword_route(registry, query) == ["audit-sop"]
 
 
 class TestPatrolRouting:

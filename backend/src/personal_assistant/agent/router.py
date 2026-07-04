@@ -38,20 +38,32 @@ _BASE_PROMPT = (
 
 _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
     "weather": [
-        r"\b(weather|forecast|temperature|rain|snow|wind|humid(?:ity)?)\b",
+        r"\b(weather|forecast|temperature|rain|snow|wind|humid(?:ity)?|aqi|air quality|uv index)\b",
         (
             r"(\u5929\u6c14|\u6c14\u6e29|\u6e29\u5ea6|\u4e0b\u96e8|"
             r"\u4e0b\u96ea|\u964d\u96e8|\u964d\u96ea|\u522e\u98ce|"
-            r"\u9884\u62a5|\u51b7\u4e0d\u51b7|\u70ed\u4e0d\u70ed)"
+            r"\u9884\u62a5|\u51b7\u4e0d\u51b7|\u70ed\u4e0d\u70ed|"
+            r"\u6e29\u5dee|\u4f53\u611f\u6e29\u5ea6|\u591a\u5c11\u5ea6|"
+            r"\u7a7a\u6c14\u8d28\u91cf|\u96fe\u973e|\u7d2b\u5916\u7ebf|"
+            r"\u9002\u5408(?:\u8dd1\u6b65|\u51fa\u95e8|\u6237\u5916))"
         ),
     ],
     "resolve-time": [
-        r"\b(today|tomorrow|yesterday|date|time|weekday|next week|this week|last week)\b",
+        r"\b(date|time|weekday)\b",
+        r"\b(today|tomorrow|yesterday|next week|this week|last week).{0,40}\b(date|time|weekday)\b",
+        r"\b(date|time|weekday).{0,40}\b(today|tomorrow|yesterday|next week|this week|last week)\b",
         (
-            r"(\u4eca\u5929|\u660e\u5929|\u540e\u5929|\u6628\u5929|"
+            r"((?:\u4eca\u5929|\u660e\u5929|\u540e\u5929|\u6628\u5929|"
             r"\u524d\u5929|\u4e0b\u5468|\u8fd9\u5468|\u4e0a\u5468|"
-            r"\u661f\u671f|\u5468[\u4e00\u4e8c\u4e09\u56db\u4e94"
-            r"\u516d\u65e5\u5929]?|\u51e0\u70b9|\u65e5\u671f|\u65f6\u95f4)"
+            r"\u5468[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u65e5\u5929])"
+            r".{0,20}(?:\u51e0\u6708|\u51e0\u53f7|\u661f\u671f|"
+            r"\u5468\u51e0|\u65e5\u671f|\u65f6\u95f4|\u51e0\u70b9|"
+            r"\u5de5\u4f5c\u65e5|\u4f11\u606f\u65e5|\u4ec0\u4e48\u65e5\u5b50|"
+            r"\u5565\u65e5\u5b50)|(?:\u51e0\u6708|\u51e0\u53f7|\u661f\u671f|"
+            r"\u5468\u51e0|\u65e5\u671f|\u65f6\u95f4|\u51e0\u70b9)"
+            r".{0,20}(?:\u4eca\u5929|\u660e\u5929|\u540e\u5929|\u6628\u5929|"
+            r"\u524d\u5929|\u4e0b\u5468|\u8fd9\u5468|\u4e0a\u5468)|"
+            r"\u73b0\u5728\u51e0\u70b9|\u5f53\u524d\u65f6\u95f4)"
         ),
     ],
     "find-skills": [
@@ -80,11 +92,14 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
         ),
     ],
     "audit-sop": [
-        r"\b(audit|trace|execution log|tool failure|retry chain|token usage|approval|security event)\b",
+        r"\b(audit|trace|execution log|tool failure|tool error|tool error rate|retry chain|token usage|approval|security event|security block|shell_command)\b",
+        r"(?:shell_command|[a-zA-Z_][a-zA-Z0-9_]*\s+\u5de5\u5177).{0,40}(?:\u5931\u8d25|\u8d85\u65f6|\u62a5\u9519|\u9519\u8bef|\u91cd\u8bd5)",
         (
             r"(\u5ba1\u8ba1|\u6267\u884c\u65e5\u5fd7|\u8c03\u7528\u94fe|"
-            r"\u5de5\u5177\u5931\u8d25|\u91cd\u8bd5|token|\u5ba1\u6279|"
-            r"\u5b89\u5168\u4e8b\u4ef6)"
+            r"\u5de5\u5177(?:\u5931\u8d25|\u8d85\u65f6|\u9519\u8bef|\u8c03\u7528)|"
+            r"\u91cd\u8bd5|token|\u5ba1\u6279|\u5b89\u5168(?:\u4e8b\u4ef6|"
+            r"\u62e6\u622a|\u963b\u65ad|\u5408\u89c4)|\u62e6\u622a\u8d8b\u52bf|"
+            r"\u6210\u529f\u7387|\u9519\u8bef\u7387)"
         ),
     ],
 
@@ -937,14 +952,14 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
     if patrol_selected:
         return patrol_selected
 
-    selected: list[str] = []
+    matches: list[tuple[str, str]] = []
     for skill in registry.skills.values():
         if any(_regex_match(pattern, user_text) for pattern in _DEFAULT_SKILL_REGEXES.get(skill.name, [])):
-            selected.append(skill.name)
+            matches.append((skill.name, "regex"))
             continue
         if skill.triggers:
             if any(_trigger_match(t, normalized) for t in skill.triggers):
-                selected.append(skill.name)
+                matches.append((skill.name, "trigger"))
             continue
 
         haystack = f"{skill.name}\n{skill.description}".lower()
@@ -955,8 +970,15 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
             and stripped.lower() not in _TOKEN_FALLBACK_STOPWORDS
         }
         if any(re.search(rf"\b{re.escape(token)}\b", normalized) for token in tokens):
-            selected.append(skill.name)
-    return selected
+            matches.append((skill.name, "token"))
+    regex_primary_skills = {"weather", "audit-sop"}
+    if any(name in regex_primary_skills and source == "regex" for name, source in matches):
+        matches = [
+            (name, source)
+            for name, source in matches
+            if not (name == "resolve-time" and source == "trigger")
+        ]
+    return [name for name, _source in matches]
 
 
 def _route_patrol_intent(registry: SkillRegistry, user_text: str) -> list[str]:

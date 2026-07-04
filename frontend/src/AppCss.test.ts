@@ -50,6 +50,17 @@ describe('App stylesheet decorations', () => {
     expect(appCss).toMatch(/\.skill-evaluation-card-header p\s*\{[^}]*overflow:\s*hidden/s)
   })
 
+  it('keeps evaluation detail panels from overflowing the sidebar', () => {
+    expect(appCss).toMatch(/\.evaluation-details\s*\{[^}]*min-width:\s*0/s)
+    expect(appCss).toMatch(/\.evaluation-case\s*\{[^}]*min-width:\s*0/s)
+    expect(appCss).toMatch(/\.evaluation-case-body\s*\{[^}]*min-width:\s*0/s)
+    expect(appCss).toMatch(/\.evaluation-detail-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(280px,\s*100%\),\s*1fr\)\)/s)
+    expect(appCss).toMatch(/\.evaluation-json-block pre\s*\{[^}]*max-width:\s*100%/s)
+    expect(appCss).toMatch(/\.evaluation-diagnostic-panel\s*\{[^}]*min-width:\s*0/s)
+    expect(appCss).toMatch(/\.evaluation-routing-step\s*\{[^}]*grid-template-columns:\s*minmax\(96px,\s*130px\) minmax\(0,\s*1fr\)/s)
+    expect(appCss).toMatch(/\.evaluation-diagnostic-panel pre\s*\{[^}]*max-width:\s*100%/s)
+  })
+
   it('animates the e2e evaluation run topology with reduced-motion coverage', () => {
     expect(appCss).toMatch(/\.evaluation-run-topology\s*\{/)
     expect(appCss).toMatch(/\.topology-node\.is-active\s*\{/)
