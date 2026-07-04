@@ -13,6 +13,7 @@ import {
   type SkillEvaluationStreamEvent,
   type SkillInfo,
 } from '../lib/api'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
   panel: 'skills' | 'checkpoint' | 'audit' | 'performance'
@@ -1499,7 +1500,7 @@ function EvaluationDiagnosticPanel({ detail }: { detail: CaseEvaluationDetail })
       {finalAnswer && (
         <div style={{ marginBottom: '8px' }}>
           <strong>Final answer</strong>
-          <pre>{finalAnswer}</pre>
+          <MarkdownRenderer content={finalAnswer} />
         </div>
       )}
       {missingFragments.length > 0 && (
