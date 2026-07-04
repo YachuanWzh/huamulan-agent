@@ -152,6 +152,104 @@ _TOKEN_FALLBACK_STOPWORDS = {
 
 
 @dataclass(frozen=True)
+class SkillRouteRule:
+    skill: str
+    rule_id: str
+    patterns: tuple[str, ...]
+    priority: int = 100
+    source: str = "regex"
+
+
+@dataclass(frozen=True)
+class DeterministicRouteMatch:
+    skill: str
+    rule_id: str
+    source: str
+    priority: int
+    pattern: str
+
+
+_SKILL_ROUTE_RULES: tuple[SkillRouteRule, ...] = (
+    SkillRouteRule(
+        skill="weather",
+        rule_id="weather.basic",
+        patterns=(
+            r"\b(weather|forecast|temperature|rain|snow|wind|humid(?:ity)?)\b",
+            (
+                r"(\u5929\u6c14|\u6c14\u6e29|\u6e29\u5ea6|\u4e0b\u96e8|"
+                r"\u4e0b\u96ea|\u964d\u96e8|\u964d\u96ea|\u522e\u98ce|"
+                r"\u9884\u62a5|\u51b7\u4e0d\u51b7|\u70ed\u4e0d\u70ed)"
+            ),
+        ),
+        priority=20,
+    ),
+    SkillRouteRule(
+        skill="weather",
+        rule_id="weather.air_quality",
+        patterns=(
+            r"\b(aqi|air quality|uv index)\b",
+            r"(\u7a7a\u6c14\u8d28\u91cf|\u96fe\u973e|\u7d2b\u5916\u7ebf)",
+        ),
+        priority=20,
+    ),
+    SkillRouteRule(
+        skill="weather",
+        rule_id="weather.temperature_detail",
+        patterns=(
+            r"(\u6e29\u5dee|\u4f53\u611f\u6e29\u5ea6|\u591a\u5c11\u5ea6)",
+        ),
+        priority=20,
+    ),
+    SkillRouteRule(
+        skill="weather",
+        rule_id="weather.outdoor_suitability",
+        patterns=(r"\u9002\u5408(?:\u8dd1\u6b65|\u51fa\u95e8|\u6237\u5916)",),
+        priority=20,
+    ),
+    SkillRouteRule(
+        skill="resolve-time",
+        rule_id="time.explicit_date_question",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["resolve-time"]),
+        priority=10,
+    ),
+    SkillRouteRule(
+        skill="find-skills",
+        rule_id="find_skills.discovery",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["find-skills"]),
+        priority=50,
+    ),
+    SkillRouteRule(
+        skill="patrol",
+        rule_id="patrol.health_check",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["patrol"]),
+        priority=30,
+    ),
+    SkillRouteRule(
+        skill="troubleshoot",
+        rule_id="troubleshoot.rca",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["troubleshoot"]),
+        priority=30,
+    ),
+    SkillRouteRule(
+        skill="troubleshoot",
+        rule_id="troubleshoot.api_performance",
+        patterns=(
+            r"\b(api|apis|endpoint|latency|performance|p95|timeout|RCA)\b.{0,80}\b(issue|problem|regression|slow|timeout|latency)\b",
+            r"(\u6392\u67e5|\u8bca\u65ad|\u6839\u56e0|\u6027\u80fd\u95ee\u9898|\u6027\u80fd\u5f02\u5e38).{0,80}(API|api|\u63a5\u53e3|\u5ef6\u8fdf|\u8d85\u65f6|\u6027\u80fd)",
+            r"(API|api|\u63a5\u53e3|\u5ef6\u8fdf|\u8d85\u65f6|\u6027\u80fd).{0,80}(\u6392\u67e5|\u8bca\u65ad|\u6839\u56e0|\u6027\u80fd\u95ee\u9898|\u6027\u80fd\u5f02\u5e38)",
+        ),
+        priority=30,
+    ),
+    SkillRouteRule(
+        skill="audit-sop",
+        rule_id="audit.execution",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["audit-sop"]),
+        priority=30,
+    ),
+)
+
+
+@dataclass(frozen=True)
 class SkillSemanticCandidate:
     name: str
     description: str
@@ -690,7 +788,10 @@ async def route_skill_names_with_trace(
 ) -> SkillRoutingResult:
     """Route skills and return a structured funnel trace for diagnostics."""
     trace: list[dict] = []
-    regex_selected = _regex_route(registry, user_text)
+    regex_selected, regex_matches, suppressed_matches = _deterministic_route(
+        registry,
+        user_text,
+    )
     if regex_selected:
         logger.info("Skill routing regex stage selected=%s", ",".join(regex_selected))
         trace.append(
@@ -698,6 +799,8 @@ async def route_skill_names_with_trace(
                 "stage": "regex",
                 "status": "selected",
                 "selected_skills": regex_selected,
+                "matches": _deterministic_match_trace(regex_matches),
+                "suppressed_matches": _deterministic_match_trace(suppressed_matches),
                 "reason": "regex or trigger matched",
             }
         )
@@ -976,6 +1079,14 @@ def _keyword_route(registry: SkillRegistry, user_text: str) -> list[str]:
 
 
 def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
+    selected, _matches, _suppressed = _deterministic_route(registry, user_text)
+    return selected
+
+
+def _deterministic_route(
+    registry: SkillRegistry,
+    user_text: str,
+) -> tuple[list[str], list[DeterministicRouteMatch], list[DeterministicRouteMatch]]:
     normalized = user_text.lower()
     if (
         "apm-metrics" in registry.skills
@@ -989,16 +1100,39 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
 
     patrol_selected = _route_patrol_intent(registry, user_text)
     if patrol_selected:
-        return patrol_selected
+        matches = [
+            DeterministicRouteMatch(
+                skill=name,
+                rule_id="patrol.composite",
+                source="regex",
+                priority=30,
+                pattern="patrol composite rule",
+            )
+            for name in patrol_selected
+        ]
+        return patrol_selected, matches, []
 
-    matches: list[tuple[str, str]] = []
+    matches: list[DeterministicRouteMatch] = []
     for skill in registry.skills.values():
-        if any(_regex_match(pattern, user_text) for pattern in _DEFAULT_SKILL_REGEXES.get(skill.name, [])):
-            matches.append((skill.name, "regex"))
+        regex_match = _match_skill_route_rule(skill.name, user_text)
+        if regex_match is not None:
+            matches.append(regex_match)
             continue
         if skill.triggers:
-            if any(_trigger_match(t, normalized) for t in skill.triggers):
-                matches.append((skill.name, "trigger"))
+            trigger = next(
+                (trigger for trigger in skill.triggers if _trigger_match(trigger, normalized)),
+                None,
+            )
+            if trigger is not None:
+                matches.append(
+                    DeterministicRouteMatch(
+                        skill=skill.name,
+                        rule_id=f"{skill.name}.trigger",
+                        source="trigger",
+                        priority=80,
+                        pattern=trigger,
+                    )
+                )
             continue
 
         if skill.name == "find-skills":
@@ -1011,30 +1145,175 @@ def _regex_route(registry: SkillRegistry, user_text: str) -> list[str]:
             if len(stripped := token.strip(".,:;()[]{}#`*_-/")) >= 3
             and stripped.lower() not in _TOKEN_FALLBACK_STOPWORDS
         }
-        if any(re.search(rf"\b{re.escape(token)}\b", normalized) for token in tokens):
-            matches.append((skill.name, "token"))
-    regex_primary_skills = {"weather", "audit-sop"}
-    if any(name in regex_primary_skills and source == "regex" for name, source in matches):
-        matches = [
-            (name, source)
-            for name, source in matches
-            if not (name == "resolve-time" and source == "trigger")
-        ]
+        token = next(
+            (
+                token
+                for token in tokens
+                if re.search(rf"\b{re.escape(token)}\b", normalized)
+            ),
+            None,
+        )
+        if token is not None:
+            matches.append(
+                DeterministicRouteMatch(
+                    skill=skill.name,
+                    rule_id=f"{skill.name}.token",
+                    source="token",
+                    priority=100,
+                    pattern=token,
+                )
+            )
+
+    if _needs_auxiliary_time_resolution(registry, user_text, matches):
+        matches.append(
+            DeterministicRouteMatch(
+                skill="resolve-time",
+                rule_id="time.relative_date_for_domain",
+                source="auxiliary",
+                priority=10,
+                pattern="relative date used by compound domain query",
+            )
+        )
+
+    suppressed: list[DeterministicRouteMatch] = []
+    regex_primary_skills = {"weather", "audit-sop", "troubleshoot"}
+    if any(match.skill in regex_primary_skills and match.source == "regex" for match in matches):
+        kept: list[DeterministicRouteMatch] = []
+        for match in matches:
+            if match.skill == "resolve-time" and match.source == "trigger":
+                suppressed.append(match)
+                continue
+            kept.append(match)
+        matches = kept
+
     if _is_apm_metric_knowledge_query(user_text) and any(
-        name == "apm-metrics" for name, _source in matches
+        match.skill == "apm-metrics" for match in matches
     ):
-        matches = [
-            (name, source)
-            for name, source in matches
-            if name not in {"audit-sop", "troubleshoot-runbook"}
-        ]
+        kept = []
+        for match in matches:
+            if match.skill in {"audit-sop", "troubleshoot-runbook"}:
+                suppressed.append(match)
+                continue
+            kept.append(match)
+        matches = kept
+
     if (
-        any(name == "audit-sop" for name, _source in matches)
-        and any(name == "troubleshoot" for name, _source in matches)
+        any(match.skill == "audit-sop" for match in matches)
+        and any(match.skill == "troubleshoot" for match in matches)
         and not _is_governance_audit_query(user_text)
     ):
-        matches = [(name, source) for name, source in matches if name != "audit-sop"]
-    return [name for name, _source in matches]
+        kept = []
+        for match in matches:
+            if match.skill == "audit-sop":
+                suppressed.append(match)
+                continue
+            kept.append(match)
+        matches = kept
+
+    return _selected_skills_in_registry_order(registry, matches), matches, suppressed
+
+
+def _match_skill_route_rule(
+    skill_name: str,
+    user_text: str,
+) -> DeterministicRouteMatch | None:
+    for rule in _SKILL_ROUTE_RULES:
+        if rule.skill != skill_name:
+            continue
+        for pattern in rule.patterns:
+            if _regex_match(pattern, user_text):
+                return DeterministicRouteMatch(
+                    skill=rule.skill,
+                    rule_id=rule.rule_id,
+                    source=rule.source,
+                    priority=rule.priority,
+                    pattern=pattern,
+                )
+    return None
+
+
+def _needs_auxiliary_time_resolution(
+    registry: SkillRegistry,
+    user_text: str,
+    matches: list[DeterministicRouteMatch],
+) -> bool:
+    if "resolve-time" not in registry.skills:
+        return False
+    selected = {
+        match.skill
+        for match in matches
+        if not (match.skill == "resolve-time" and match.source == "trigger")
+    }
+    if "resolve-time" in selected:
+        return False
+    if not {"weather", "troubleshoot"}.issubset(selected):
+        return False
+    return _has_relative_future_date(user_text)
+
+
+def _has_relative_future_date(user_text: str) -> bool:
+    return any(
+        _regex_match(pattern, user_text)
+        for pattern in (
+            r"\b(tomorrow|day after tomorrow|next week|this weekend)\b",
+            r"(\u660e\u5929|\u540e\u5929|\u4e0b\u5468|\u5468\u672b|\u8fd9\u5468\u672b)",
+        )
+    )
+
+
+def _selected_skills_in_registry_order(
+    registry: SkillRegistry,
+    matches: list[DeterministicRouteMatch],
+) -> list[str]:
+    registry_order = {skill.name: index for index, skill in enumerate(registry.skills.values())}
+    best_match_by_skill: dict[str, DeterministicRouteMatch] = {}
+    for match in matches:
+        current = best_match_by_skill.get(match.skill)
+        if current is None or match.priority < current.priority:
+            best_match_by_skill[match.skill] = match
+    return [
+        skill
+        for skill, _match in sorted(
+            best_match_by_skill.items(),
+            key=lambda item: (
+                item[1].priority,
+                registry_order.get(item[0], len(registry_order)),
+            ),
+        )
+    ]
+
+
+def _deterministic_match_trace(matches: list[DeterministicRouteMatch]) -> list[dict]:
+    return [
+        {
+            "skill": match.skill,
+            "rule_id": match.rule_id,
+            "source": match.source,
+            "priority": match.priority,
+            "pattern": match.pattern,
+        }
+        for match in matches
+    ]
+
+
+def _is_apm_metric_knowledge_query(user_text: str) -> bool:
+    return any(
+        _regex_match(pattern, user_text)
+        for pattern in (
+            r"\b(?:what is|define|definition|collect|instrument|metric)\b.{0,80}\b(?:apm|lcp|cls|inp|fid|apdex|error rate)\b",
+            r"(?:\u4ec0\u4e48\u662f|\u600e\u4e48\u5b9a\u4e49|\u600e\u4e48\u91c7\u96c6|\u6307\u6807).{0,80}(?:APM|LCP|CLS|INP|FID|Apdex|error rate|\u6210\u529f\u7387|\u8f6c\u5316\u7387)",
+        )
+    )
+
+
+def _is_governance_audit_query(user_text: str) -> bool:
+    return any(
+        _regex_match(pattern, user_text)
+        for pattern in (
+            r"\b(?:governance|cross-thread|systemic risk|business impact)\b",
+            r"(\u8de8\u7ebf\u7a0b|\u6cbb\u7406|\u7cfb\u7edf\u6027\u98ce\u9669|\u4e1a\u52a1\u5f71\u54cd)",
+        )
+    )
 
 
 def _route_patrol_intent(registry: SkillRegistry, user_text: str) -> list[str]:

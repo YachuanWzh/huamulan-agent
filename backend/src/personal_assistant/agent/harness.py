@@ -34,6 +34,16 @@ class GuardMatch:
     reason: str
 
 
+@dataclass(frozen=True)
+class PromptGuardRule:
+    category: str
+    severity: str
+    reason: str
+    pattern: str
+    priority: int
+    order: int
+
+
 class SecurityError(RuntimeError):
     pass
 
@@ -146,6 +156,18 @@ _PROMPT_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
         "User message claims privileged identity to bypass policy.",
         r"(?is)(?:\bi\s+(?:am|have)\b.{0,12}\b(?:root|superuser)\b.{0,12}\b(?:access|privileges?|permissions?)\b|\bi\s+am\s+(?:the\s+)?(?:admin|administrator)\b.{0,12}\b(?:override|bypass|policy|rules?)\b|我是.{0,10}(?:管理员|root|超级用户).{0,10}(?:绕过|无视|覆盖|解除).{0,10}(?:规则|限制|权限|策略))",
     ),
+)
+
+_PROMPT_GUARD_RULES: tuple[PromptGuardRule, ...] = tuple(
+    PromptGuardRule(
+        category=category,
+        severity=severity,
+        reason=reason,
+        pattern=pattern,
+        priority=index * 10,
+        order=index,
+    )
+    for index, (category, severity, reason, pattern) in enumerate(_PROMPT_PATTERNS)
 )
 
 _TOOL_PATTERNS: tuple[tuple[str, str, str, str], ...] = (
@@ -672,9 +694,13 @@ class AgentHarness:
 
 
 def scan_prompt_guard(message: str) -> GuardMatch | None:
-    for category, severity, reason, pattern in _PROMPT_PATTERNS:
-        if re.search(pattern, message):
-            return GuardMatch(category=category, severity=severity, reason=reason)
+    for rule in sorted(_PROMPT_GUARD_RULES, key=lambda item: (item.priority, item.order)):
+        if re.search(rule.pattern, message):
+            return GuardMatch(
+                category=rule.category,
+                severity=rule.severity,
+                reason=rule.reason,
+            )
     return None
 
 
