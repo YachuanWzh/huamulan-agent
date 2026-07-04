@@ -278,6 +278,20 @@ class TestChineseRegexRouting:
             "troubleshoot",
         ]
 
+    def test_multi_005_month_end_date_audit_routes_resolve_time_and_audit(self):
+        """multi-005: \u8fd9\u6708\u5e95\u6700\u540e\u4e00\u5929\u662f\u51e0\u53f7\uff1f\u5e2e\u6211\u5ba1\u8ba1\u90a3\u5929\u7684\u6240\u6709\u6267\u884c\u65e5\u5fd7\u770b\u770b\u6709\u6ca1\u6709\u5f02\u5e38\u3002
+        Should select BOTH resolve-time (date question) and audit-sop (audit logs)."""
+        # Use real registry with actual skills
+        registry = SkillRegistry(
+            Path(__file__).parents[1] / "src" / "personal_assistant" / "skills"
+        )
+
+        query = "\u8fd9\u6708\u5e95\u6700\u540e\u4e00\u5929\u662f\u51e0\u53f7\uff1f\u5e2e\u6211\u5ba1\u8ba1\u90a3\u5929\u7684\u6240\u6709\u6267\u884c\u65e5\u5fd7\u770b\u770b\u6709\u6ca1\u6709\u5f02\u5e38\u3002"
+
+        result = _keyword_route(registry, query)
+        assert "resolve-time" in result, f"resolve-time missing, got: {result}"
+        assert "audit-sop" in result, f"audit-sop missing, got: {result}"
+
     @pytest.mark.asyncio
     async def test_deterministic_route_trace_includes_rule_metadata(
         self,

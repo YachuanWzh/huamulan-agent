@@ -413,10 +413,22 @@ class AgentHarness:
                     payload = _compaction_started_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_started_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_started", node_payload)
                 elif kind == "on_chain_end":
                     payload = _compaction_completed_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_finished_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_finished", node_payload)
+                elif kind == "on_tool_start":
+                    yield _sse_event("tool_started", _tool_started_payload(event))
+                elif kind == "on_tool_end":
+                    yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     reasoning = _extract_reasoning_content(chunk)
@@ -424,6 +436,9 @@ class AgentHarness:
                         yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
+                    elif chunk.tool_call_chunks:
+                        # 工具调用参数生成阶段，避免静默
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
 
             # After streaming, inspect final state
             state = await app.aget_state(config)
@@ -483,10 +498,22 @@ class AgentHarness:
                     payload = _compaction_started_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_started_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_started", node_payload)
                 elif kind == "on_chain_end":
                     payload = _compaction_completed_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_finished_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_finished", node_payload)
+                elif kind == "on_tool_start":
+                    yield _sse_event("tool_started", _tool_started_payload(event))
+                elif kind == "on_tool_end":
+                    yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     reasoning = _extract_reasoning_content(chunk)
@@ -494,8 +521,9 @@ class AgentHarness:
                         yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
-                elif kind == "on_tool_end":
-                    yield _sse_event("tool_result", _tool_result_payload(event))
+                    elif chunk.tool_call_chunks:
+                        # 工具调用参数生成阶段，避免静默
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
 
             state = await app.aget_state(config)
             values = state.values if state.values else {}
@@ -556,10 +584,22 @@ class AgentHarness:
                     payload = _compaction_started_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_started_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_started", node_payload)
                 elif kind == "on_chain_end":
                     payload = _compaction_completed_payload(event)
                     if payload is not None:
                         yield _sse_event("compacting", payload)
+                    else:
+                        node_payload = _node_finished_payload(event)
+                        if node_payload is not None:
+                            yield _sse_event("node_finished", node_payload)
+                elif kind == "on_tool_start":
+                    yield _sse_event("tool_started", _tool_started_payload(event))
+                elif kind == "on_tool_end":
+                    yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     reasoning = _extract_reasoning_content(chunk)
@@ -567,8 +607,9 @@ class AgentHarness:
                         yield _sse_event("reasoning", {"content": reasoning})
                     if chunk.content:
                         yield _sse_event("token", {"content": chunk.content})
-                elif kind == "on_tool_end":
-                    yield _sse_event("tool_result", _tool_result_payload(event))
+                    elif chunk.tool_call_chunks:
+                        # 工具调用参数生成阶段，避免静默
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
 
             state = await app.aget_state(config)
             values = state.values if state.values else {}
@@ -937,6 +978,58 @@ def _compaction_input_should_emit(value: Any) -> bool:
             human_count += 1
         token_estimate += max(1, len(str(content).split()))
     return human_count + max(0, additional_turns) > 20 or token_estimate > 900_000
+
+
+def _node_started_payload(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract payload for graph node start events to show in topology view."""
+    name = event.get("name")
+    # Skip internal/langchain nodes, only show graph node events
+    if not name or name.startswith("langchain") or name.startswith("Runnable"):
+        return None
+    # Only emit events for actual graph nodes (not internal chains)
+    tags = event.get("tags") or []
+    if "langgraph_node" not in tags:
+        return None
+    return {
+        "node": name,
+        "timestamp": time.time(),
+    }
+
+
+def _node_finished_payload(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract payload for graph node finish events to show in topology view."""
+    name = event.get("name")
+    # Skip internal/langchain nodes, only show graph node events
+    if not name or name.startswith("langchain") or name.startswith("Runnable"):
+        return None
+    # Only emit events for actual graph nodes (not internal chains)
+    tags = event.get("tags") or []
+    if "langgraph_node" not in tags:
+        return None
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    duration = None
+    if "input" in data and "output" in data:
+        start = event.get("start_time", 0)
+        end = event.get("end_time", 0)
+        if start and end:
+            duration = round((end - start) * 1000)
+    return {
+        "node": name,
+        "timestamp": time.time(),
+        "duration_ms": duration,
+    }
+
+
+def _tool_started_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """Extract payload for tool start events."""
+    name = event.get("name") or "tool"
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    input_args = data.get("input", {})
+    return {
+        "name": name if isinstance(name, str) else "tool",
+        "args": input_args if isinstance(input_args, dict) else {},
+        "timestamp": time.time(),
+    }
 
 
 async def _pre_tool_security_guard(
