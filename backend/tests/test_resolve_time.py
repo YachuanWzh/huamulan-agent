@@ -166,7 +166,7 @@ class TestResolveTimeFrontmatter:
         assert "今天" in triggers
         assert "tomorrow" in triggers
 
-    def test_declares_four_script_tools(self):
+    def test_declares_five_script_tools(self):
         skill_dir = (
             Path(__file__).resolve().parent.parent
             / "src" / "personal_assistant" / "skills" / "resolve-time"
@@ -178,6 +178,7 @@ class TestResolveTimeFrontmatter:
             "resolve_date_by_offset",
             "resolve_date_by_weekday",
             "resolve_lunar_to_solar",
+            "resolve_solar_to_lunar",
         }
 
     def test_each_script_decl_points_at_resolve_date_py(self):
@@ -215,7 +216,7 @@ class TestSkillLoadingWithFrontmatter:
         assert "resolve_date_by_offset" in skill.instructions
         assert "scripts/resolve_date.py" in skill.instructions
 
-    def test_load_skill_builds_four_script_tools(self):
+    def test_load_skill_builds_five_script_tools(self):
         """The scripts/ declarations become LangChain tools on load."""
         skills_dir = (
             Path(__file__).resolve().parent.parent
@@ -230,6 +231,7 @@ class TestSkillLoadingWithFrontmatter:
             "resolve_date_by_offset",
             "resolve_date_by_weekday",
             "resolve_lunar_to_solar",
+            "resolve_solar_to_lunar",
         ]
 
     def test_tool_map_exposes_resolve_time_tools(self):
@@ -244,6 +246,7 @@ class TestSkillLoadingWithFrontmatter:
         assert "resolve_date_by_weekday" in tool_map
         assert "resolve_current_time" in tool_map
         assert "resolve_lunar_to_solar" in tool_map
+        assert "resolve_solar_to_lunar" in tool_map
 
 
 class TestResolveTimeToolsRunScripts:
@@ -343,3 +346,47 @@ class TestScriptLunarToSolar:
     def test_unsupported_year_raises(self, _):
         with pytest.raises(ValueError, match="not available"):
             _script.calc_lunar_to_solar(8, 15, year=2020)
+
+
+class TestScriptSolarToLunar:
+    """Tests for calc_solar_to_lunar — Gregorian to lunar calendar conversion."""
+
+    def test_mid_autumn_2026_reverse(self):
+        """2026-09-26 → 农历八月十五."""
+        r = _script.calc_solar_to_lunar("2026-09-26")
+        assert r["lunar_month"] == 8
+        assert r["lunar_day"] == 15
+        assert r["lunar_year"] == 2026
+        assert not r["is_leap_month"]
+        assert "八月" in r["lunar_description"]
+        assert "十五" in r["lunar_description"]
+
+    def test_cny_2026_reverse(self):
+        """2026-02-17 → 正月初一 (CNY)."""
+        r = _script.calc_solar_to_lunar("2026-02-17")
+        assert r["lunar_month"] == 1
+        assert r["lunar_day"] == 1
+        assert r["lunar_description"] == "正月初一"
+
+    def test_cny_eve_2027_reverse(self):
+        """2027-02-05 → 腊月廿九 (day before CNY 2027)."""
+        r = _script.calc_solar_to_lunar("2027-02-05")
+        assert r["lunar_month"] == 12
+        assert r["lunar_day"] == 29
+        assert r["lunar_year"] == 2026
+
+    def test_roundtrip(self):
+        """Lunar → solar → lunar should be identity."""
+        solar = _script.calc_lunar_to_solar(8, 15, year=2026)
+        lunar = _script.calc_solar_to_lunar(solar["date"])
+        assert lunar["lunar_month"] == 8
+        assert lunar["lunar_day"] == 15
+        assert lunar["lunar_year"] == 2026
+
+    def test_invalid_date_format(self):
+        with pytest.raises(ValueError, match="Invalid date format"):
+            _script.calc_solar_to_lunar("not-a-date")
+
+    def test_date_outside_supported_range(self):
+        with pytest.raises(ValueError, match="No lunar calendar data"):
+            _script.calc_solar_to_lunar("2020-06-15")

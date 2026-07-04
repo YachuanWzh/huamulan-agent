@@ -88,6 +88,18 @@ scripts:
         type: string
         description: IANA timezone, e.g. Asia/Shanghai.
         default: Asia/Shanghai
+  - name: resolve_solar_to_lunar
+    description: Convert a Gregorian date (YYYY-MM-DD) to 农历/阴历 date. Supports years 2024-2027.
+    command: ["python", "scripts/resolve_date.py", "solar", "{date_str}", "{timezone}"]
+    params:
+      date_str:
+        type: string
+        description: Gregorian date in YYYY-MM-DD format.
+        required: true
+      timezone:
+        type: string
+        description: IANA timezone, e.g. Asia/Shanghai.
+        default: Asia/Shanghai
 ---
 
 # Resolve Time — 日期时间解析
@@ -102,6 +114,7 @@ scripts:
 - `resolve_date_by_offset(day_offset, timezone="Asia/Shanghai")` — 按天数偏移计算日期（今天 ±N 天）。
 - `resolve_date_by_weekday(weekday, week_offset=1, timezone="Asia/Shanghai")` — 按星期几 + 周偏移计算日期。
 - `resolve_lunar_to_solar(lunar_month, lunar_day, year=None, timezone="Asia/Shanghai")` — 农历/阴历日期转公历日期。
+- `resolve_solar_to_lunar(date_str, timezone="Asia/Shanghai")` — 公历日期转农历/阴历日期（YYYY-MM-DD 格式）。
 
 工具返回的 JSON 包含 `date`、`weekday`、偏移量与 `description` 字段。请用人类语言把结果
 转述给用户，而不是直接贴 JSON。
@@ -142,6 +155,14 @@ scripts:
 **注意**：农历月份天数（29或30天）因年而异。各月的实际天数由系统内置的农历数据表确定。
 如果指定 `year` 参数，会直接使用该年份的农历数据；否则从当前日期推断年份。
 
+## 公历转农历
+
+| 用户表达 | 工具 | 参数 |
+|---------|------|------|
+| 2026年9月26日是农历几月几号 | resolve_solar_to_lunar | date_str="2026-09-26" |
+| 我生日10月15日是农历哪天 | resolve_solar_to_lunar | date_str="2026-10-15" (infer year) |
+| 国庆节对应农历什么日子 | resolve_solar_to_lunar | date_str="2026-10-01" |
+
 ## 脚本
 
 核心计算逻辑在 `scripts/resolve_date.py`，可独立运行以便调试：
@@ -152,5 +173,6 @@ python scripts/resolve_date.py weekday Tuesday 1
 python scripts/resolve_date.py lunar 8 15         # 中秋节（当年）
 python scripts/resolve_date.py lunar 1 1           # 春节（当年）
 python scripts/resolve_date.py lunar 8 15 2027     # 2027年中秋节
+python scripts/resolve_date.py solar 2026-09-26    # 公历→农历
 python scripts/resolve_date.py now
 ```

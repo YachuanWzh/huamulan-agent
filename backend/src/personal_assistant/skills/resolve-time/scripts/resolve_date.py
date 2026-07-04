@@ -162,6 +162,107 @@ def calc_lunar_to_solar(
     }
 
 
+def calc_solar_to_lunar(
+    date_str: str,
+    timezone: str = "Asia/Shanghai",
+) -> dict[str, str]:
+    """Convert a Gregorian date (YYYY-MM-DD) to lunar calendar date.
+
+    Returns the lunar month, day, and year, plus weekday and description.
+    Supported years: 2024–2027 (derived from lunar data range).
+    """
+    try:
+        parts = date_str.split("-")
+        year = int(parts[0])
+        month = int(parts[1])
+        day = int(parts[2])
+    except (ValueError, IndexError):
+        raise ValueError(f"Invalid date format: {date_str!r}. Expected YYYY-MM-DD.")
+
+    target = datetime(year, month, day)
+
+    # Find which lunar year covers this Gregorian date
+    lunar_year = _find_lunar_year_for_solar(target)
+    if lunar_year is None:
+        raise ValueError(
+            f"No lunar calendar data for {date_str}. Supported years: "
+            f"{min(LUNAR_DATA)}–{max(LUNAR_DATA)}."
+        )
+
+    cny_month, cny_day, month_lengths, leap_idx = LUNAR_DATA[lunar_year]
+    cny = datetime(lunar_year, cny_month, cny_day)
+    offset = (target - cny).days
+
+    if offset < 0:
+        raise ValueError(
+            f"{date_str} is before Chinese New Year {lunar_year} "
+            f"({cny.strftime('%Y-%m-%d')})"
+        )
+
+    # Walk through months to find which lunar month and day
+    remaining = offset
+    lunar_month = 1
+    physical_idx = 0
+    found = False
+    is_leap = False
+
+    for i, month_len in enumerate(month_lengths):
+        if remaining < month_len:
+            lunar_day = remaining + 1
+            physical_idx = i
+            found = True
+            # Convert physical index back to logical lunar month
+            if leap_idx > 0:
+                if i == leap_idx:
+                    # This is the leap month entry itself
+                    is_leap = True
+                    lunar_month = leap_idx
+                elif i > leap_idx:
+                    lunar_month = i  # skip leap: physical i → logical i
+                else:
+                    lunar_month = i + 1
+            else:
+                lunar_month = i + 1
+            break
+        remaining -= month_len
+
+    if not found:
+        raise ValueError(
+            f"Date {date_str} falls outside lunar year {lunar_year} range"
+        )
+
+    month_name = LUNAR_MONTH_NAMES[lunar_month]
+    day_name = LUNAR_DAY_NAMES[lunar_day] if lunar_day <= 30 else f"{lunar_day}日"
+    lunar_desc = f"闰{month_name}{day_name}" if is_leap else f"{month_name}{day_name}"
+
+    return {
+        "date": date_str,
+        "weekday": WEEKDAY_NAMES[target.weekday()],
+        "lunar_month": lunar_month,
+        "lunar_day": lunar_day,
+        "lunar_year": lunar_year,
+        "is_leap_month": is_leap,
+        "lunar_description": lunar_desc,
+        "description": (
+            f"{date_str} ({WEEKDAY_NAMES[target.weekday()]}) is "
+            f"{lunar_desc} in lunar year {lunar_year}"
+        ),
+    }
+
+
+def _find_lunar_year_for_solar(target: datetime) -> int | None:
+    """Find which lunar year (Gregorian year) a given Gregorian date belongs to."""
+    for year in sorted(LUNAR_DATA):
+        cny_m, cny_d, month_lengths, leap_idx = LUNAR_DATA[year]
+        cny = datetime(year, cny_m, cny_d)
+        # Calculate the last day of this lunar year
+        total_days = sum(month_lengths)
+        end_of_lunar_year = cny + timedelta(days=total_days - 1)
+        if cny <= target <= end_of_lunar_year:
+            return year
+    return None
+
+
 def _infer_lunar_year(
     current: datetime,
     lunar_month: int,
@@ -226,7 +327,7 @@ def _week_desc(weekday: str, week_offset: int) -> str:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(
-            "Usage: resolve_date.py [offset N | weekday NAME OFFSET | lunar M D [YEAR] | now]",
+            "Usage: resolve_date.py [offset N | weekday NAME OFFSET | lunar M D [YEAR] | solar YYYY-MM-DD | now]",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -250,6 +351,11 @@ if __name__ == "__main__":
         yr = int(sys.argv[4]) if len(sys.argv) > 4 else None
         tz = sys.argv[5] if len(sys.argv) > 5 else "Asia/Shanghai"
         result = calc_lunar_to_solar(lunar_month, lunar_day, yr, tz)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif cmd == "solar":
+        date_str = sys.argv[2]
+        tz = sys.argv[3] if len(sys.argv) > 3 else "Asia/Shanghai"
+        result = calc_solar_to_lunar(date_str, tz)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)
