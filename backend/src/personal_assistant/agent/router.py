@@ -87,16 +87,7 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
             r"\u5b89\u5168\u4e8b\u4ef6)"
         ),
     ],
-    "akshare-stock": [
-        r"\b(stock|stocks|market|kline|k-line|finance|trading|share price)\b",
-        (
-            r"(A\u80a1|\u80a1\u7968|\u884c\u60c5|\u5927\u76d8|"
-            r"K\u7ebf|\u5206\u65f6|\u6da8\u505c|\u8dcc\u505c|"
-            r"\u8d44\u91d1\u6d41|\u8d22\u62a5|\u677f\u5757|"
-            r"\u6e2f\u80a1|\u7f8e\u80a1|\u57fa\u91d1|\u53ef\u8f6c\u503a)"
-        ),
-        r"\b\d{6}\b",
-    ],
+
 }
 
 _TOKEN_FALLBACK_STOPWORDS = {

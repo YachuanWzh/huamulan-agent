@@ -42,7 +42,7 @@ class TestShellCommandTool:
             {
                 "command": (
                     "python -c \"import sys; "
-                    "sys.stdout.buffer.write(b'\\xe2\\x94\\x94 stock-result')\""
+                    "sys.stdout.buffer.write(b'\\xe2\\x94\\x94 test-result')\""
                 ),
                 "cwd": ".",
                 "timeout_seconds": 5,
@@ -50,7 +50,7 @@ class TestShellCommandTool:
         )
 
         assert "exit_code=0" in result
-        assert "└ stock-result" in result
+        assert "└ test-result" in result
 
     def test_shell_command_rejects_cwd_outside_workspace(self, tmp_path: Path):
         tools = _tool_map(tmp_path)

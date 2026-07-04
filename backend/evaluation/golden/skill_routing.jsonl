@@ -43,7 +43,6 @@
 {"id": "w-018", "query": "厦门天气冷不冷？湿度大不大？", "expected_skills": ["weather"]}
 {"id": "w-019", "query": "乌鲁木齐降雪量有多大？", "expected_skills": ["weather"]}
 {"id": "w-020", "query": "北海道最近天气冷不冷？", "expected_skills": ["weather"]}
-{"id": "fs-001", "query": "有没有股票分析的技能？", "expected_skills": ["find-skills"]}
 {"id": "fs-002", "query": "帮我找一个天气相关的技能", "expected_skills": ["find-skills"]}
 {"id": "fs-003", "query": "怎么安装新的技能？", "expected_skills": ["find-skills"]}
 {"id": "fs-004", "query": "搜索一下有哪些技能可以用？", "expected_skills": ["find-skills"]}
@@ -121,7 +120,6 @@
 {"id": "hard-009", "query": "帮我看看审批有没有被拒绝的记录", "expected_skills": ["audit-sop"]}
 {"id": "hard-010", "query": "安装一个能生成周报的技能", "expected_skills": ["find-skills"]}
 {"id": "e2e-001", "query": "我下周一出差去深圳，下周三回来。帮我查一下深圳下周一到周三的天气情况，对了下周一是几月几号？", "expected_skills": ["resolve-time", "weather"], "expected_tool": "resolve_date_by_weekday", "expected_args": {"weekday": "Monday", "week_offset": 1}}
-{"id": "e2e-003", "query": "我想做可转债投资，帮我搜一下公开技能市场里有没有可转债分析相关的技能，有的话帮我看看哪个安装量高、作者靠谱，推荐一个最好的", "expected_skills": ["find-skills"], "expected_tool": "search_public_skills", "expected_args": {"query": "可转债"}}
 {"id": "e2e-004", "query": "刚才那个线程的工具调用好像出了点问题，帮我审计一下完整执行链路：看看失败的工具调用是哪个、原因是什么、有没有重试、token消耗了多少、有没有触发安全拦截", "expected_skills": ["audit-sop"]}
 {"id": "e2e-005", "query": "这周五是我妈生日，帮我看看这周五是几号星期几，那天北京天气适不适合出门吃饭庆祝，顺便帮我搜一下有没有能做电子生日贺卡的技能", "expected_skills": ["resolve-time", "weather", "find-skills"], "expected_tool": "resolve_date_by_weekday", "expected_args": {"weekday": "Friday", "week_offset": 0}}
 {"id": "rt-026", "query": "今年春节是几月几号？", "expected_skills": ["resolve-time"]}

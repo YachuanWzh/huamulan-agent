@@ -76,36 +76,24 @@ def test_find_skills_loads_project_install_tool() -> None:
     assert "search_public_skills" in tool_map
 
 
-def test_searcher_falls_back_to_known_stock_skills_when_cli_is_empty() -> None:
-    module = _load_searcher_module()
-
-    result = module.search_skills("stock", run_cli=lambda _query: "")
-
-    packages = [item["package"] for item in result["results"]]
-    assert result["source"] == "fallback"
-    assert "gracefullight/stock-checker@stock-analysis" in packages
-    assert "molezzz/openclaw-stock-skill@akshare-stock" in packages
-    assert "sugarforever/01coder-agent-skills@china-stock-analysis" not in packages
-
-
 def test_searcher_parses_cli_package_results() -> None:
     module = _load_searcher_module()
 
     result = module.search_skills(
-        "stock",
+        "weather",
         run_cli=lambda _query: (
             "Install with npx skills add <owner/repo@skill>\n"
-            "molezzz/openclaw-stock-skill@akshare-stock 10.3K installs\n"
-            "└ https://skills.sh/molezzz/openclaw-stock-skill/akshare-stock\n"
+            "example-org/demo-skills@weather 10.3K installs\n"
+            "└ https://skills.sh/example-org/demo-skills/weather\n"
         ),
     )
 
     assert result["source"] == "skills-cli"
     assert result["results"] == [
         {
-            "package": "molezzz/openclaw-stock-skill@akshare-stock",
+            "package": "example-org/demo-skills@weather",
             "installs": "10.3K installs",
-            "url": "https://skills.sh/molezzz/openclaw-stock-skill/akshare-stock",
+            "url": "https://skills.sh/example-org/demo-skills/weather",
         }
     ]
 
@@ -114,18 +102,15 @@ def test_searcher_filters_known_uninstallable_package() -> None:
     module = _load_searcher_module()
 
     result = module.search_skills(
-        "stock",
+        "weather",
         run_cli=lambda _query: (
-            "sugarforever/01coder-agent-skills@china-stock-analysis 12.6K installs\n"
-            "└ https://skills.sh/sugarforever/01coder-agent-skills/china-stock-analysis\n"
-            "molezzz/openclaw-stock-skill@akshare-stock 10.3K installs\n"
-            "└ https://skills.sh/molezzz/openclaw-stock-skill/akshare-stock\n"
+            "example-org/demo-skills@weather 12.6K installs\n"
+            "└ https://skills.sh/example-org/demo-skills/weather\n"
         ),
     )
 
     packages = [item["package"] for item in result["results"]]
-    assert "sugarforever/01coder-agent-skills@china-stock-analysis" not in packages
-    assert "molezzz/openclaw-stock-skill@akshare-stock" in packages
+    assert "example-org/demo-skills@weather" in packages
 
 
 def test_searcher_uses_npx_cmd_when_windows_has_only_cmd_shim(monkeypatch) -> None:
@@ -138,12 +123,12 @@ def test_searcher_uses_npx_cmd_when_windows_has_only_cmd_shim(monkeypatch) -> No
         lambda name: "C:/Program Files/nodejs/npx.cmd" if name == "npx.cmd" else None,
     )
 
-    assert module.skills_cli_command("stock") == [
+    assert module.skills_cli_command("weather") == [
         "C:/Program Files/nodejs/npx.cmd",
         "--yes",
         "skills",
         "find",
-        "stock",
+        "weather",
     ]
 
 
@@ -162,7 +147,7 @@ def test_searcher_decodes_cli_output_as_utf8_with_replacement(monkeypatch) -> No
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
-    module.run_skills_cli("stock")
+    module.run_skills_cli("weather")
 
     assert captured["kwargs"]["encoding"] == "utf-8"
     assert captured["kwargs"]["errors"] == "replace"
@@ -172,32 +157,32 @@ def test_searcher_decodes_cli_output_as_utf8_with_replacement(monkeypatch) -> No
 def test_installer_parses_owner_repo_and_skill_name() -> None:
     module = _load_installer_module()
 
-    package = module.parse_package_spec("sugarforever/01coder-agent-skills@china-stock-analysis")
+    package = module.parse_package_spec("example-org/demo-skills@weather")
 
-    assert package.owner == "sugarforever"
-    assert package.repo == "01coder-agent-skills"
-    assert package.skill == "china-stock-analysis"
+    assert package.owner == "example-org"
+    assert package.repo == "demo-skills"
+    assert package.skill == "weather"
 
 
 def test_installer_copies_matching_skill_directory(tmp_path: Path) -> None:
     module = _load_installer_module()
     repo = tmp_path / "repo"
-    source_skill = repo / "skills" / "finance" / "china-stock-analysis"
+    source_skill = repo / "skills" / "productivity" / "weather"
     source_skill.mkdir(parents=True)
     (source_skill / "SKILL.md").write_text(
-        "---\nname: china-stock-analysis\n---\n# China Stock Analysis\n",
+        "---\nname: weather\n---\n# Weather Lookup\n",
         encoding="utf-8",
     )
-    (source_skill / "notes.txt").write_text("stock notes", encoding="utf-8")
+    (source_skill / "notes.txt").write_text("weather notes", encoding="utf-8")
     target = tmp_path / "project-skills"
     target.mkdir()
 
-    result = module.copy_skill_from_repo(repo, "china-stock-analysis", target)
+    result = module.copy_skill_from_repo(repo, "weather", target)
 
-    installed = target / "china-stock-analysis"
+    installed = target / "weather"
     assert result == installed
     assert (installed / "SKILL.md").exists()
-    assert (installed / "notes.txt").read_text(encoding="utf-8") == "stock notes"
+    assert (installed / "notes.txt").read_text(encoding="utf-8") == "weather notes"
 
 
 def test_installer_finds_skill_by_frontmatter_name_when_directory_differs(
@@ -205,16 +190,16 @@ def test_installer_finds_skill_by_frontmatter_name_when_directory_differs(
 ) -> None:
     module = _load_installer_module()
     repo = tmp_path / "repo"
-    source_skill = repo / "skills" / "market-tools"
+    source_skill = repo / "skills" / "weather-tools"
     source_skill.mkdir(parents=True)
     (source_skill / "SKILL.md").write_text(
-        "---\nname: stock-analysis\n---\n# Stock Analysis\n",
+        "---\nname: weather\n---\n# Weather Lookup\n",
         encoding="utf-8",
     )
 
-    result = module.copy_skill_from_repo(repo, "stock-analysis", tmp_path / "target")
+    result = module.copy_skill_from_repo(repo, "weather", tmp_path / "target")
 
-    assert result == tmp_path / "target" / "stock-analysis"
+    assert result == tmp_path / "target" / "weather"
     assert (result / "SKILL.md").exists()
 
 

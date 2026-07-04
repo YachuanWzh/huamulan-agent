@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Search public skills with structured fallback candidates."""
+"""Search public skills with structured output."""
 
 from __future__ import annotations
 
@@ -17,38 +17,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PACKAGE_RE = re.compile(r"(?P<package>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+)")
 INSTALLS_RE = re.compile(r"(?P<installs>[0-9.]+[KMB]?\s+installs)", re.IGNORECASE)
 URL_RE = re.compile(r"https://skills\.sh/\S+")
-KNOWN_UNINSTALLABLE_PACKAGES = {
-    # Present in skills.sh search output, but not present in the current GitHub repo's SKILL.md list.
-    "sugarforever/01coder-agent-skills@china-stock-analysis",
-}
-
-STOCK_FALLBACKS = [
-    {
-        "package": "gracefullight/stock-checker@stock-analysis",
-        "installs": "10.7K installs",
-        "url": "https://skills.sh/gracefullight/stock-checker/stock-analysis",
-    },
-    {
-        "package": "molezzz/openclaw-stock-skill@akshare-stock",
-        "installs": "10.3K installs",
-        "url": "https://skills.sh/molezzz/openclaw-stock-skill/akshare-stock",
-    },
-    {
-        "package": "claude-office-skills/skills@stock-analysis",
-        "installs": "4.7K installs",
-        "url": "https://skills.sh/claude-office-skills/skills/stock-analysis",
-    },
-    {
-        "package": "gracefullight/stock-checker@yahoo-finance",
-        "installs": "4.2K installs",
-        "url": "https://skills.sh/gracefullight/stock-checker/yahoo-finance",
-    },
-    {
-        "package": "sundial-org/awesome-openclaw-skills@stock-market-pro",
-        "installs": "3.9K installs",
-        "url": "https://skills.sh/sundial-org/awesome-openclaw-skills/stock-market-pro",
-    },
-]
+KNOWN_UNINSTALLABLE_PACKAGES: set[str] = set()
 
 
 def run_skills_cli(query: str) -> str:
@@ -91,24 +60,11 @@ def search_skills(
             "note": "Parsed package specs from Skills CLI output.",
         }
 
-    fallback = fallback_results(query)
-    if fallback:
-        return {
-            "query": query,
-            "source": "fallback",
-            "results": fallback,
-            "note": (
-                "Skills CLI produced no parseable output in this non-interactive "
-                "environment, so known stock/finance candidates were returned."
-            ),
-            "cli_error": cli_error,
-        }
-
     return {
         "query": query,
         "source": "none",
         "results": [],
-        "note": "No CLI results or fallback candidates matched this query.",
+        "note": "Skills CLI produced no parseable output.",
         "cli_error": cli_error,
     }
 
@@ -142,14 +98,6 @@ def _nearest_url(lines: list[str], index: int) -> str:
         if url_match:
             return url_match.group(0)
     return ""
-
-
-def fallback_results(query: str) -> list[dict[str, str]]:
-    normalized = query.lower()
-    stock_terms = ["stock", "finance", "trading", "china stock", "股票"]
-    if any(term in normalized for term in stock_terms):
-        return STOCK_FALLBACKS
-    return []
 
 
 def main(argv: list[str]) -> int:

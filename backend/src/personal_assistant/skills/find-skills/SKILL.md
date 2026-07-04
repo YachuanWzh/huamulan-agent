@@ -3,12 +3,12 @@ name: find-skills
 description: Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities. This skill should be used when the user is looking for functionality that might exist as an installable skill.
 scripts:
   - name: search_public_skills
-    description: Search public skills and return structured candidates, with stock/finance fallback when the CLI emits no output.
+    description: Search public skills and return structured candidates.
     command: ["python", "scripts/search_public_skills.py", "{query}"]
     params:
       query:
         type: string
-        description: Search query, for example stock, china stock, finance, or trading.
+        description: Search query, for example weather, calendar, or email.
         required: true
   - name: install_project_skill_from_github
     description: Install one GitHub skill into this project's personal_assistant skills directory.
@@ -16,7 +16,7 @@ scripts:
     params:
       package_spec:
         type: string
-        description: Skill package in owner/repo@skill-name form, for example sugarforever/01coder-agent-skills@china-stock-analysis.
+        description: Skill package in owner/repo@skill-name form, for example example-org/demo-skills@weather.
         required: true
       target_dir:
         type: string
@@ -59,7 +59,7 @@ owner/repo@skill-name
 Example:
 
 ```text
-sugarforever/01coder-agent-skills@china-stock-analysis
+example-org/demo-skills@weather
 ```
 
 Do not use `npx skills add -g -y` for project installs. It installs into a
@@ -77,21 +77,18 @@ not call `npx skills find` through the generic shell tool unless the structured
 search tool itself reports an unexpected failure.
 
 ```text
-search_public_skills(query="stock")
+search_public_skills(query="weather")
 ```
 
 Search notes:
 
-- For Chinese domain terms, also search English keywords. For stock requests,
-  try `stock`, `china stock`, `finance`, and `trading`; the Chinese query
-  `股票` may return no results.
 - `npx skills find` does not support `--json`; do not add that flag.
 - Do not pipe through Unix-only tools such as `head` on Windows.
 - Prefer direct commands with `--yes` so `npx` does not wait for package
   installation prompts.
 - If a CLI search returns exit 0 with no output, do not conclude "no matches".
   Some CLI/TUI output is suppressed in non-interactive shell captures. Use the
-  structured tool result and its fallback candidates.
+  structured tool result.
 
 ## Quality Checks Before Installing
 
@@ -100,15 +97,6 @@ Do not install a skill based solely on a name. Check:
 1. Install count: prefer skills with 1K+ installs.
 2. Source reputation: known organizations are safer than unknown authors.
 3. Repository quality: inspect the GitHub repository when network access allows.
-
-For stock-related requests, good first searches are:
-
-```text
-search_public_skills(query="stock")
-search_public_skills(query="china stock")
-search_public_skills(query="finance")
-search_public_skills(query="trading")
-```
 
 After choosing a candidate, install it with:
 

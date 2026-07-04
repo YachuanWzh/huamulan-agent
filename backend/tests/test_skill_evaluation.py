@@ -54,7 +54,7 @@ async def test_routing_metrics_measure_selection_accuracy_and_false_positives(
     tmp_path: Path,
 ) -> None:
     _write_skill(tmp_path, "weather", "Weather forecast lookup.", ["weather", "rain"])
-    _write_skill(tmp_path, "stock", "Stock market lookup.", ["stock", "price"])
+    _write_skill(tmp_path, "calendar", "Calendar event lookup.", ["calendar", "event"])
     registry = SkillRegistry(tmp_path)
     cases = [
         GoldenSkillCase(
@@ -63,8 +63,8 @@ async def test_routing_metrics_measure_selection_accuracy_and_false_positives(
             expected_skills=["weather"],
         ),
         GoldenSkillCase(
-            id="stock-miss",
-            query="stock price for 000001",
+            id="calendar-miss",
+            query="calendar event for tomorrow",
             expected_skills=["weather"],
         ),
         GoldenSkillCase(
@@ -539,13 +539,13 @@ async def test_quick_skill_evaluation_stream_emits_case_progress_and_per_skill_s
     tmp_path: Path,
 ) -> None:
     _write_skill(tmp_path, "weather", "Weather forecast lookup.", ["weather"])
-    _write_skill(tmp_path, "stock", "Stock market lookup.", ["stock"])
+    _write_skill(tmp_path, "calendar", "Calendar event lookup.", ["calendar"])
     golden = tmp_path / "golden.jsonl"
     golden.write_text(
         "\n".join(
             [
                 '{"id":"weather-hit","query":"weather today","expected_skills":["weather"]}',
-                '{"id":"stock-miss","query":"weather price","expected_skills":["stock"]}',
+                '{"id":"calendar-miss","query":"weather price","expected_skills":["calendar"]}',
             ]
         )
         + "\n",
@@ -568,7 +568,7 @@ async def test_quick_skill_evaluation_stream_emits_case_progress_and_per_skill_s
     assert events[0]["total"] == 2
     progress_events = [event for event in events if event["type"] == "case_progress"]
     assert [event["completed"] for event in progress_events] == [1, 2]
-    assert [event["case_id"] for event in progress_events] == ["weather-hit", "stock-miss"]
+    assert [event["case_id"] for event in progress_events] == ["weather-hit", "calendar-miss"]
     assert progress_events[0]["detail"]["case_id"] == "weather-hit"
     assert progress_events[0]["detail"]["diagnosis"]["stage"] == "passed"
     assert progress_events[-1]["percent"] == 100
@@ -576,16 +576,16 @@ async def test_quick_skill_evaluation_stream_emits_case_progress_and_per_skill_s
     assert events[-1]["source"] == f"golden:{golden}"
     assert [item["case_id"] for item in events[-1]["report"]["case_details"]] == [
         "weather-hit",
-        "stock-miss",
+        "calendar-miss",
     ]
     assert memory.recorded is not None
     assert [item.case_id for item in memory.recorded.case_details] == [
         "weather-hit",
-        "stock-miss",
+        "calendar-miss",
     ]
     results = {item.skill_name: item for item in memory.recorded.skills}
     assert results["weather"].score_components["routing"] == 1.0
-    assert results["stock"].score_components["routing"] == 0.0
+    assert results["calendar"].score_components["routing"] == 0.0
 
 
 class _FakeE2EHarness:
@@ -617,13 +617,13 @@ class _FakeE2EHarness:
                 "event_type": "llm",
                 "status": "completed",
                 "name": "agent",
-                "metadata": {"selected_skills": ["stock"]},
+                "metadata": {"selected_skills": ["calendar"]},
             },
             {
                 "event_type": "tool",
                 "status": "failed",
-                "name": "stock_lookup",
-                "metadata": {"tool_call_id": "stock-call"},
+                "name": "calendar_lookup",
+                "metadata": {"tool_call_id": "calendar-call"},
             },
         ]
 
@@ -633,13 +633,13 @@ async def test_e2e_skill_evaluation_runs_agent_turns_and_scores_runtime_per_skil
     tmp_path: Path,
 ) -> None:
     _write_skill(tmp_path, "weather", "Weather forecast lookup.", ["weather"])
-    _write_skill(tmp_path, "stock", "Stock market lookup.", ["stock"])
+    _write_skill(tmp_path, "calendar", "Calendar event lookup.", ["calendar"])
     golden = tmp_path / "golden.jsonl"
     golden.write_text(
         "\n".join(
             [
                 '{"id":"weather-e2e","query":"weather today","expected_skills":["weather"]}',
-                '{"id":"stock-e2e","query":"stock price","expected_skills":["stock"]}',
+                '{"id":"calendar-e2e","query":"calendar event","expected_skills":["calendar"]}',
             ]
         )
         + "\n",
@@ -663,15 +663,15 @@ async def test_e2e_skill_evaluation_runs_agent_turns_and_scores_runtime_per_skil
     assert len(harness.calls) == 2
     assert events[0]["mode"] == "e2e"
     progress_events = [event for event in events if event["type"] == "case_progress"]
-    assert [event["case_id"] for event in progress_events] == ["weather-e2e", "stock-e2e"]
+    assert [event["case_id"] for event in progress_events] == ["weather-e2e", "calendar-e2e"]
     assert progress_events[0]["selected_skills"] == ["weather"]
     assert progress_events[1]["tool_failed"] is True
     results = {item.skill_name: item for item in memory.recorded.skills}
     assert results["weather"].score_components["routing"] == 1.0
     assert results["weather"].score_components["runtime"] == 1.0
-    assert results["stock"].score_components["routing"] == 1.0
-    assert results["stock"].score_components["runtime"] == 0.0
-    assert results["weather"].overall_score > results["stock"].overall_score
+    assert results["calendar"].score_components["routing"] == 1.0
+    assert results["calendar"].score_components["runtime"] == 0.0
+    assert results["weather"].overall_score > results["calendar"].overall_score
 
 
 class _FakeSecurityHarness:

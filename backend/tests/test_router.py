@@ -113,9 +113,7 @@ class TestChineseRegexRouting:
         [
             ("weather", "北京明天会下雨吗"),
             ("resolve-time", "今天是几号"),
-            ("find-skills", "帮我找一个股票分析技能"),
             ("audit-sop", "审计一下这个线程的执行日志"),
-            ("akshare-stock", "看一下600519的K线和资金流"),
         ],
     )
     def test_current_skill_regexes_match_chinese_queries(
