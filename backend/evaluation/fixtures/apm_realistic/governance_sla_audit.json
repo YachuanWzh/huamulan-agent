@@ -1,0 +1,23 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-009",
+    "service": "langgraph-assistant",
+    "audit_window": "2026-07-04T00:00:00+08:00/2026-07-04T23:59:59+08:00",
+    "sla": {"tool_success_rate_min": 0.95, "approval_response_time_max_s": 30, "token_growth_max_ratio": 0.4}
+  },
+  "rum_events": [],
+  "execution_logs": [
+    {"id":901,"created_at":"2026-07-04T09:00:01+08:00","thread_id":"thread-audit-001","run_id":"run-audit-001","parent_id":null,"event_type":"tool","status":"completed","name":"run_patrol_checks","input":{"checks":4},"output":{"findings":4},"error":{},"duration_ms":900,"token_usage":{"prompt_tokens":1200,"completion_tokens":340,"total_tokens":1540},"metadata":{"tool_call_id":"tc-audit-patrol-001"}},
+    {"id":902,"created_at":"2026-07-04T09:02:10+08:00","thread_id":"thread-audit-002","run_id":"run-audit-002","parent_id":null,"event_type":"tool","status":"failed","name":"analyze_apm_incident","input":{"fixture":"orders_api_slow_dependency"},"output":{},"error":{"error_type":"TimeoutError","error_message":"analysis tool exceeded 15000ms"},"duration_ms":15000,"token_usage":{"prompt_tokens":1800,"completion_tokens":120,"total_tokens":1920},"metadata":{"tool_call_id":"tc-audit-rca-002"}},
+    {"id":903,"created_at":"2026-07-04T09:02:26+08:00","thread_id":"thread-audit-002","run_id":"run-audit-002","parent_id":null,"event_type":"tool_retry","status":"retrying","name":"analyze_apm_incident","input":{"fixture":"orders_api_slow_dependency"},"output":{},"error":{"error_type":"TimeoutError","error_message":"analysis tool exceeded 15000ms"},"duration_ms":14980,"token_usage":{},"metadata":{"tool_call_id":"tc-audit-rca-002","attempt":2,"max_attempts":3}},
+    {"id":904,"created_at":"2026-07-04T09:05:00+08:00","thread_id":"thread-audit-003","run_id":"run-audit-003","parent_id":null,"event_type":"approval","status":"denied","name":"rollback_payment_worker","input":{"target":"payment-callback-worker@2026.07.03.4"},"output":{"approved":false},"error":{},"duration_ms":42000,"token_usage":{},"metadata":{"approval_id":"appr-pay-rollback-001","approval_response_time_s":42}},
+    {"id":905,"created_at":"2026-07-04T09:06:18+08:00","thread_id":"thread-audit-004","run_id":"run-audit-004","parent_id":null,"event_type":"security","status":"blocked","name":"prompt_injection","input":{"source":"user_message"},"output":{},"error":{"reason":"request attempted to reveal system prompt"},"duration_ms":120,"token_usage":{"prompt_tokens":950,"completion_tokens":80,"total_tokens":1030},"metadata":{"severity":"HIGH"}},
+    {"id":906,"created_at":"2026-07-04T09:07:30+08:00","thread_id":"thread-audit-005","run_id":"run-audit-005","parent_id":null,"event_type":"llm","status":"completed","name":"agent","input":{"turn":"large RCA report"},"output":{"message":"report"},"error":{},"duration_ms":2800,"token_usage":{"prompt_tokens":4200,"completion_tokens":2100,"total_tokens":6300},"metadata":{"token_growth_ratio":0.58}}
+  ],
+  "checks": [
+    {"metric":"tool_success_rate","operator":"<","value":0.92,"threshold":0.95,"duration":"24h"},
+    {"metric":"approval_response_time","operator":">","value":42,"threshold":30,"duration":"24h"},
+    {"metric":"security_block_rate","operator":">","value":0.031,"threshold":0.02,"duration":"24h"},
+    {"metric":"token_growth_ratio","operator":">","value":0.58,"threshold":0.4,"duration":"24h"}
+  ]
+}

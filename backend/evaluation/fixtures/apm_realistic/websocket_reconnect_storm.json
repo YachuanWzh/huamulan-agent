@@ -1,0 +1,20 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-006",
+    "service": "support-chat-gateway",
+    "route": "/support/chat",
+    "time_window": "2026-07-04T16:10:00+08:00/2026-07-04T16:20:00+08:00",
+    "gateway_cluster": "ws-gw-sha-02",
+    "impact": {"disconnect_rate": 0.18, "affected_sessions": 312}
+  },
+  "rum_events": [
+    {"type":"custom_timing","name":"websocket_disconnect_rate","value":0.18,"url":"/support/chat","session_id":"ops-ws-001","trace_id":"trace-ws-ops","timestamp":"2026-07-04T16:12:00+08:00","metadata":{"region":"cn-east-1","gateway":"ws-gw-sha-02"}},
+    {"type":"custom_timing","name":"reconnect_attempts","value":7,"url":"/support/chat","session_id":"sess-ws-001","trace_id":"trace-ws-001","timestamp":"2026-07-04T16:12:10+08:00","metadata":{"network":"wifi","gateway":"ws-gw-sha-02"}},
+    {"type":"custom_timing","name":"reconnect_attempts","value":9,"url":"/support/chat","session_id":"sess-ws-002","trace_id":"trace-ws-002","timestamp":"2026-07-04T16:12:20+08:00","metadata":{"network":"4g","gateway":"ws-gw-sha-02"}},
+    {"type":"resource_error","name":"websocket_close_1011","value":1,"url":"wss://api.example.com/ws/support","session_id":"sess-ws-001","trace_id":"trace-ws-001","timestamp":"2026-07-04T16:12:11+08:00","metadata":{"close_code":1011,"gateway":"ws-gw-sha-02","region":"cn-east-1"}},
+    {"type":"custom_timing","name":"message_delivery_latency","value":4200,"url":"/support/chat","session_id":"sess-ws-002","trace_id":"trace-ws-002","timestamp":"2026-07-04T16:13:00+08:00","metadata":{"p95_window":"10m"}}
+  ],
+  "execution_logs": [
+    {"id":601,"created_at":"2026-07-04T16:13:10+08:00","thread_id":"thread-ws-001","run_id":"run-ws-001","parent_id":null,"event_type":"tool","status":"completed","name":"inspect_gateway_errors","input":{"cluster":"ws-gw-sha-02"},"output":{"upstream_5xx_rate":0.21,"recent_deploy":"gateway@2026.07.04.2","pod_restarts":4},"error":{},"duration_ms":980,"token_usage":{},"metadata":{"tool_call_id":"tc-ws-gateway"}}
+  ]
+}

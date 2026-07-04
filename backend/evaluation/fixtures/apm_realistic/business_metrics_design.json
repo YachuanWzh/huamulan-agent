@@ -1,0 +1,15 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-008",
+    "service": "growth-analytics",
+    "purpose": "metric_definition",
+    "candidate_metrics": ["order_success_rate", "payment_conversion_rate", "coupon_usage_rate"]
+  },
+  "rum_events": [
+    {"type":"custom_timing","name":"checkout_step_view","value":1,"url":"/checkout","session_id":"sess-metric-001","trace_id":"trace-metric-001","timestamp":"2026-07-04T12:00:01+08:00","metadata":{"step":"cart_review","user_id_hash":"u_91ab","cart_id":"cart_441"}},
+    {"type":"custom_timing","name":"checkout_step_view","value":1,"url":"/checkout/payment","session_id":"sess-metric-001","trace_id":"trace-metric-001","timestamp":"2026-07-04T12:00:41+08:00","metadata":{"step":"payment_submit","dedupe_key":"cart_441:payment_submit"}},
+    {"type":"custom_timing","name":"order_success","value":1,"url":"/payment/result","session_id":"sess-metric-001","trace_id":"trace-metric-001","timestamp":"2026-07-04T12:01:02+08:00","metadata":{"order_id":"ord_441","dedupe_key":"ord_441:success","coupon_id":"summer-20","amount_cents":12900}},
+    {"type":"custom_timing","name":"payment_retry","value":1,"url":"/checkout/payment","session_id":"sess-metric-002","trace_id":"trace-metric-002","timestamp":"2026-07-04T12:02:10+08:00","metadata":{"order_id":"ord_442","attempt":2,"exclude_from_denominator":true}}
+  ],
+  "execution_logs": []
+}

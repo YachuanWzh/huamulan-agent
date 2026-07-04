@@ -1,0 +1,22 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-002",
+    "service": "web-checkout",
+    "release_id": "2026.07.04-rc.3",
+    "route": "/checkout",
+    "asset": "/assets/checkout.chunk.8f32a1.js",
+    "cdn_region": "cn-east-1",
+    "manifest_version": "manifest-20260704-0951",
+    "impact": {"white_screen_rate": 0.137, "affected_sessions": 96}
+  },
+  "rum_events": [
+    {"type":"resource_error","name":"script_load_error","value":1,"url":"/assets/checkout.chunk.8f32a1.js","session_id":"sess-cdn-001","trace_id":"trace-cdn-001","timestamp":"2026-07-04T10:02:13+08:00","metadata":{"status_code":404,"cdn_region":"cn-east-1","release_id":"2026.07.04-rc.3","referer":"/checkout"}},
+    {"type":"resource_error","name":"script_load_error","value":1,"url":"/assets/checkout.chunk.8f32a1.js","session_id":"sess-cdn-002","trace_id":"trace-cdn-002","timestamp":"2026-07-04T10:02:41+08:00","metadata":{"status_code":404,"cdn_region":"cn-east-1","release_id":"2026.07.04-rc.3","referer":"/checkout"}},
+    {"type":"resource_error","name":"script_load_error","value":1,"url":"/assets/checkout.chunk.8f32a1.js","session_id":"sess-cdn-003","trace_id":"trace-cdn-003","timestamp":"2026-07-04T10:03:02+08:00","metadata":{"status_code":404,"cdn_region":"cn-east-1","release_id":"2026.07.04-rc.3","referer":"/checkout"}},
+    {"type":"web_vital","name":"LCP","value":9800,"url":"/checkout","session_id":"sess-cdn-001","trace_id":"trace-cdn-001","timestamp":"2026-07-04T10:02:14+08:00","metadata":{"render_state":"white_screen","cdn_region":"cn-east-1"}},
+    {"type":"custom_timing","name":"asset_manifest_age_seconds","value":1840,"url":"/checkout","session_id":"sess-cdn-ops","trace_id":"trace-cdn-ops","timestamp":"2026-07-04T10:03:10+08:00","metadata":{"edge_pop":"sha-pudong-03","origin_manifest":"manifest-20260704-1000","edge_manifest":"manifest-20260704-0951"}}
+  ],
+  "execution_logs": [
+    {"id":201,"created_at":"2026-07-04T10:03:20+08:00","thread_id":"thread-cdn-001","run_id":"run-cdn-001","parent_id":null,"event_type":"tool","status":"completed","name":"check_cdn_asset","input":{"asset":"/assets/checkout.chunk.8f32a1.js","region":"cn-east-1"},"output":{"edge_status":404,"origin_status":200,"cache_control":"max-age=31536000, immutable"},"error":{},"duration_ms":820,"token_usage":{},"metadata":{"tool_call_id":"tc-cdn-asset","release_id":"2026.07.04-rc.3"}}
+  ]
+}

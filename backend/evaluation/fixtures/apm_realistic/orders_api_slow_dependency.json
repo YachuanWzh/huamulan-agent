@@ -1,0 +1,24 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-003",
+    "service": "orders-api",
+    "route": "/orders/detail",
+    "endpoint": "/api/orders/detail",
+    "time_window": "2026-07-04T14:05:00+08:00/2026-07-04T14:25:00+08:00",
+    "baseline": {"ttfb_p95_ms": 420, "api_p95_ms": 620, "redis_hit_rate": 0.94},
+    "current": {"ttfb_p95_ms": 2800, "api_p95_ms": 4600, "redis_hit_rate": 0.61}
+  },
+  "rum_events": [
+    {"type":"web_vital","name":"TTFB","value":390,"url":"/orders/detail","session_id":"sess-ord-base-1","trace_id":"trace-ord-base-1","timestamp":"2026-07-04T14:00:05+08:00","metadata":{"release_id":"2026.07.04-api.12"}},
+    {"type":"web_vital","name":"TTFB","value":450,"url":"/orders/detail","session_id":"sess-ord-base-2","trace_id":"trace-ord-base-2","timestamp":"2026-07-04T14:01:05+08:00","metadata":{"release_id":"2026.07.04-api.12"}},
+    {"type":"web_vital","name":"TTFB","value":2720,"url":"/orders/detail","session_id":"sess-ord-101","trace_id":"trace-ord-101","timestamp":"2026-07-04T14:09:11+08:00","metadata":{"endpoint":"/api/orders/detail","region":"cn-north-1"}},
+    {"type":"web_vital","name":"TTFB","value":3010,"url":"/orders/detail","session_id":"sess-ord-102","trace_id":"trace-ord-102","timestamp":"2026-07-04T14:09:54+08:00","metadata":{"endpoint":"/api/orders/detail","region":"cn-north-1"}},
+    {"type":"custom_timing","name":"api_orders_detail_duration","value":4620,"url":"/orders/detail","session_id":"sess-ord-101","trace_id":"trace-ord-101","timestamp":"2026-07-04T14:09:12+08:00","metadata":{"db_query":"query_order_detail","cache_hit":false,"status_code":200}},
+    {"type":"custom_timing","name":"redis_hit_rate","value":0.61,"url":"/orders/detail","session_id":"ops-window-1409","trace_id":"trace-ops-1409","timestamp":"2026-07-04T14:09:30+08:00","metadata":{"cluster":"redis-orders-primary"}}
+  ],
+  "execution_logs": [
+    {"id":301,"created_at":"2026-07-04T14:09:12+08:00","thread_id":"thread-orders-101","run_id":"run-orders-101","parent_id":null,"event_type":"tool","status":"failed","name":"query_order_detail","input":{"order_id":"ord_90318","include_items":true},"output":{},"error":{"error_type":"TimeoutError","error_message":"DB query exceeded 4000ms; missing index orders_items(order_id, deleted_at)"},"duration_ms":4510,"token_usage":{},"metadata":{"tool_call_id":"tc-order-detail-101","trace_id":"trace-ord-101","db":"orders-primary","cache_hit":false}},
+    {"id":302,"created_at":"2026-07-04T14:09:17+08:00","thread_id":"thread-orders-101","run_id":"run-orders-101","parent_id":null,"event_type":"tool_retry","status":"retrying","name":"query_order_detail","input":{"order_id":"ord_90318"},"output":{},"error":{"error_type":"TimeoutError","error_message":"DB query exceeded 4000ms"},"duration_ms":4680,"token_usage":{},"metadata":{"tool_call_id":"tc-order-detail-101","attempt":2,"max_attempts":3}},
+    {"id":303,"created_at":"2026-07-04T14:09:22+08:00","thread_id":"thread-orders-101","run_id":"run-orders-101","parent_id":null,"event_type":"tool","status":"completed","name":"explain_query_plan","input":{"query":"query_order_detail"},"output":{"plan":"Seq Scan on order_items","estimated_rows":2800000},"error":{},"duration_ms":760,"token_usage":{},"metadata":{"tool_call_id":"tc-explain-101"}}
+  ]
+}

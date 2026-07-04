@@ -1,0 +1,20 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-004",
+    "service": "payment-callback",
+    "provider": "paygate-x",
+    "time_window": "2026-07-04T15:30:00+08:00/2026-07-04T15:50:00+08:00",
+    "impact": {"inconsistent_orders": 43, "timeout_rate": 0.128},
+    "rollback_candidate": "payment-callback-worker@2026.07.03.4"
+  },
+  "rum_events": [
+    {"type":"custom_timing","name":"payment_callback_duration","value":30200,"url":"/payment/result","session_id":"sess-pay-001","trace_id":"trace-pay-001","timestamp":"2026-07-04T15:33:02+08:00","metadata":{"provider":"paygate-x","order_id":"pay_7712","state":"paid_pending"}},
+    {"type":"custom_timing","name":"payment_callback_duration","value":31800,"url":"/payment/result","session_id":"sess-pay-002","trace_id":"trace-pay-002","timestamp":"2026-07-04T15:34:11+08:00","metadata":{"provider":"paygate-x","order_id":"pay_7719","state":"paid_pending"}},
+    {"type":"resource_error","name":"payment_status_poll_failed","value":1,"url":"/api/payment/status","session_id":"sess-pay-002","trace_id":"trace-pay-002","timestamp":"2026-07-04T15:34:12+08:00","metadata":{"status_code":504,"provider":"paygate-x"}}
+  ],
+  "execution_logs": [
+    {"id":401,"created_at":"2026-07-04T15:33:01+08:00","thread_id":"thread-pay-001","run_id":"run-pay-001","parent_id":null,"event_type":"tool","status":"failed","name":"confirm_payment_callback","input":{"provider":"paygate-x","order_id":"pay_7712"},"output":{},"error":{"error_type":"TimeoutError","error_message":"provider callback timed out after 30000ms"},"duration_ms":30000,"token_usage":{},"metadata":{"tool_call_id":"tc-pay-001","idempotency_key":"pay_7712:callback"}},
+    {"id":402,"created_at":"2026-07-04T15:33:32+08:00","thread_id":"thread-pay-001","run_id":"run-pay-001","parent_id":null,"event_type":"tool_retry","status":"retrying","name":"confirm_payment_callback","input":{"provider":"paygate-x","order_id":"pay_7712"},"output":{},"error":{"error_type":"TimeoutError","error_message":"provider callback timed out after 30000ms"},"duration_ms":30000,"token_usage":{},"metadata":{"tool_call_id":"tc-pay-001","attempt":2,"max_attempts":2}},
+    {"id":403,"created_at":"2026-07-04T15:34:00+08:00","thread_id":"thread-pay-ops","run_id":"run-pay-ops","parent_id":null,"event_type":"approval","status":"approved","name":"rollback_payment_worker","input":{"target":"payment-callback-worker@2026.07.03.4"},"output":{"approved_by":"oncall-payments"},"error":{},"duration_ms":18000,"token_usage":{},"metadata":{"approval_id":"appr-pay-rollback-001"}}
+  ]
+}

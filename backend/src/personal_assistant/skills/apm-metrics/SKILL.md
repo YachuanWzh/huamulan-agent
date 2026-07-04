@@ -1,6 +1,6 @@
 ---
 name: apm-metrics
-description: APM metric knowledge base for Web Vitals, error rate, Apdex, frontend custom timings, alert thresholds, and metric interpretation.
+description: APM metric knowledge base for metric definitions, collection schemas, Web Vitals, error rate, Apdex, frontend custom timings, custom business metrics, conversion metrics, SLO/error budget, alert thresholds, and metric interpretation. Use for explaining or designing metrics; do not run patrol checks or audit agent execution logs.
 triggers:
   - Web Vitals
   - LCP
@@ -8,6 +8,10 @@ triggers:
   - INP
   - error rate
   - Apdex
+  - custom metrics
+  - business metrics
+  - conversion rate
+  - error budget
 ---
 
 # APM Metrics Knowledge Base
@@ -29,6 +33,10 @@ triggers:
 - Apdex = (satisfied + tolerating / 2) / total.
 - Custom timing should include name, value, route, session, and trace id when
   available.
+- Custom business metrics should include a stable event name, numerator,
+  denominator, business dimension, sampling window, owner, and alert threshold.
+- Conversion metrics such as order success rate or payment conversion rate
+  should define funnel steps and exclude duplicate retries from the denominator.
 
 ## Alert Guidance
 

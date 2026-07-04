@@ -1,0 +1,21 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-005",
+    "service": "web-dashboard",
+    "route": "/dashboard",
+    "suspected_component": "RealtimeWidget",
+    "baseline": {"heap_used_mb_after_20m": 180, "inp_p95_ms": 160},
+    "current": {"heap_used_mb_after_20m": 642, "inp_p95_ms": 680}
+  },
+  "rum_events": [
+    {"type":"custom_timing","name":"heap_used_mb","value":174,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:00:00+08:00","metadata":{"route_transition_count":1,"component":"RealtimeWidget"}},
+    {"type":"custom_timing","name":"heap_used_mb","value":251,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:05:00+08:00","metadata":{"route_transition_count":12,"component":"RealtimeWidget"}},
+    {"type":"custom_timing","name":"heap_used_mb","value":388,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:10:00+08:00","metadata":{"route_transition_count":25,"component":"RealtimeWidget"}},
+    {"type":"custom_timing","name":"heap_used_mb","value":642,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:20:00+08:00","metadata":{"route_transition_count":51,"component":"RealtimeWidget","detached_dom_nodes":921}},
+    {"type":"web_vital","name":"INP","value":680,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:20:03+08:00","metadata":{"long_tasks":17,"max_task_ms":940}},
+    {"type":"js_error","name":"RangeError","value":1,"url":"/dashboard","session_id":"sess-mem-001","trace_id":"trace-mem-001","timestamp":"2026-07-04T11:20:04+08:00","metadata":{"message":"Maximum call stack size exceeded in subscription flush","stack":"RealtimeWidget.useEffect cleanup (dashboard.chunk.js:612:11)"}}
+  ],
+  "execution_logs": [
+    {"id":501,"created_at":"2026-07-04T11:21:00+08:00","thread_id":"thread-mem-001","run_id":"run-mem-001","parent_id":null,"event_type":"tool","status":"completed","name":"collect_heap_snapshot","input":{"session_id":"sess-mem-001"},"output":{"retained_listeners":184,"interval_timers":37,"largest_retainer":"RealtimeWidget.subscribers"},"error":{},"duration_ms":2200,"token_usage":{},"metadata":{"tool_call_id":"tc-heap-001"}}
+  ]
+}

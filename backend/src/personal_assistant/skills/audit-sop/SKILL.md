@@ -1,12 +1,12 @@
 ---
 name: audit-sop
-description: Audit and business governance SOP skill. Use when the user asks to analyze agent audit logs, inspect one thread execution trace, diagnose tool failures or retry chains, review token usage, explain security or approval events, aggregate cross-thread governance signals, identify systemic reliability issues, or generate an audit/patrol report for LangGraph Assistant conversations.
+description: Agent execution audit and governance SOP. Use for LangGraph Assistant thread logs, execution traces, tool failures or retry chains, token usage, approval/security events, SLA or compliance reports, and cross-thread reliability governance. Do not use for generic APM metric definitions or business conversion metric collection unless agent execution logs or governance audit are requested.
 ---
 
 # Audit SOP
 
-Use this SOP to analyze execution logs for one conversation thread or to perform
-cross-thread business governance patrol.
+Use this SOP to analyze agent execution logs for one conversation thread or to
+perform cross-thread governance audit across LangGraph Assistant conversations.
 
 ## Procedure
 

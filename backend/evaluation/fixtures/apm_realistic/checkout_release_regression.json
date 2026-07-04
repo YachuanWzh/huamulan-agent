@@ -1,0 +1,30 @@
+{
+  "incident_meta": {
+    "scenario": "apm-real-001",
+    "service": "web-checkout",
+    "release_id": "2026.07.04-rc.3",
+    "deploy_started_at": "2026-07-04T09:52:00+08:00",
+    "time_window": "2026-07-04T10:00:00+08:00/2026-07-04T10:20:00+08:00",
+    "route": "/checkout",
+    "feature_flag": "cart_v2",
+    "flag_rollout": "30%",
+    "baseline": {"lcp_p95_ms": 2400, "js_error_rate": 0.004},
+    "current": {"lcp_p95_ms": 6700, "js_error_rate": 0.091, "affected_sessions": 184}
+  },
+  "rum_events": [
+    {"type":"web_vital","name":"LCP","value":2310,"url":"/checkout","session_id":"sess-co-001","trace_id":"trace-co-001","timestamp":"2026-07-04T09:58:10+08:00","metadata":{"release_id":"2026.07.04-rc.2","device":"desktop","region":"cn-east-1"}},
+    {"type":"web_vital","name":"LCP","value":2440,"url":"/checkout","session_id":"sess-co-002","trace_id":"trace-co-002","timestamp":"2026-07-04T09:58:22+08:00","metadata":{"release_id":"2026.07.04-rc.2","device":"mobile","region":"cn-east-1"}},
+    {"type":"web_vital","name":"LCP","value":2580,"url":"/checkout","session_id":"sess-co-003","trace_id":"trace-co-003","timestamp":"2026-07-04T09:58:51+08:00","metadata":{"release_id":"2026.07.04-rc.2","device":"mobile","region":"cn-north-1"}},
+    {"type":"web_vital","name":"LCP","value":6410,"url":"/checkout","session_id":"sess-co-101","trace_id":"trace-co-101","timestamp":"2026-07-04T10:04:08+08:00","metadata":{"release_id":"2026.07.04-rc.3","feature_flag":"cart_v2","device":"mobile","region":"cn-east-1"}},
+    {"type":"web_vital","name":"LCP","value":6880,"url":"/checkout","session_id":"sess-co-102","trace_id":"trace-co-102","timestamp":"2026-07-04T10:04:31+08:00","metadata":{"release_id":"2026.07.04-rc.3","feature_flag":"cart_v2","device":"mobile","region":"cn-east-1"}},
+    {"type":"web_vital","name":"LCP","value":7210,"url":"/checkout","session_id":"sess-co-103","trace_id":"trace-co-103","timestamp":"2026-07-04T10:05:02+08:00","metadata":{"release_id":"2026.07.04-rc.3","feature_flag":"cart_v2","device":"desktop","region":"cn-east-1"}},
+    {"type":"js_error","name":"TypeError","value":1,"url":"/checkout","session_id":"sess-co-101","trace_id":"trace-co-101","timestamp":"2026-07-04T10:04:09+08:00","metadata":{"release_id":"2026.07.04-rc.3","feature_flag":"cart_v2","message":"Cannot read properties of undefined (reading 'price')","stack":"CartSummary.render (checkout.chunk.8f32a1.js:847:19)","component":"CartSummary"}},
+    {"type":"js_error","name":"TypeError","value":1,"url":"/checkout","session_id":"sess-co-102","trace_id":"trace-co-102","timestamp":"2026-07-04T10:04:32+08:00","metadata":{"release_id":"2026.07.04-rc.3","feature_flag":"cart_v2","message":"Cannot read properties of undefined (reading 'price')","stack":"CartSummary.render (checkout.chunk.8f32a1.js:847:19)","component":"CartSummary"}},
+    {"type":"custom_timing","name":"cart_api_duration","value":1420,"url":"/checkout","session_id":"sess-co-102","trace_id":"trace-co-102","timestamp":"2026-07-04T10:04:31+08:00","metadata":{"endpoint":"/api/cart/items","status_code":200,"payload_shape":"missing_discount_price"}}
+  ],
+  "execution_logs": [
+    {"id":101,"created_at":"2026-07-04T10:04:07+08:00","thread_id":"thread-checkout-101","run_id":"run-checkout-101","parent_id":null,"event_type":"skill_route","status":"completed","name":"route_skills","input":{"query":"checkout RCA"},"output":{"selected_skills":["troubleshoot","apm-metrics"]},"error":{},"duration_ms":42,"token_usage":{},"metadata":{"selected_skills":["troubleshoot","apm-metrics"]}},
+    {"id":102,"created_at":"2026-07-04T10:04:08+08:00","thread_id":"thread-checkout-101","run_id":"run-checkout-101","parent_id":null,"event_type":"tool","status":"failed","name":"get_cart_items","input":{"cart_id":"cart_781","release_id":"2026.07.04-rc.3"},"output":{},"error":{"error_type":"SchemaMismatch","error_message":"discount.price missing for cart_v2 response"},"duration_ms":1180,"token_usage":{},"metadata":{"tool_call_id":"tc-cart-101","trace_id":"trace-co-101"}},
+    {"id":103,"created_at":"2026-07-04T10:04:09+08:00","thread_id":"thread-checkout-101","run_id":"run-checkout-101","parent_id":null,"event_type":"tool_retry","status":"retrying","name":"get_cart_items","input":{"cart_id":"cart_781"},"output":{},"error":{"error_type":"SchemaMismatch","error_message":"discount.price missing for cart_v2 response"},"duration_ms":1240,"token_usage":{},"metadata":{"tool_call_id":"tc-cart-101","attempt":2,"max_attempts":3}}
+  ]
+}
