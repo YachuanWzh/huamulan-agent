@@ -246,6 +246,12 @@ _SKILL_ROUTE_RULES: tuple[SkillRouteRule, ...] = (
         patterns=tuple(_DEFAULT_SKILL_REGEXES["audit-sop"]),
         priority=30,
     ),
+    SkillRouteRule(
+        skill="apm-metrics",
+        rule_id="apm.metrics",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["apm-metrics"]),
+        priority=30,
+    ),
 )
 
 
@@ -1096,7 +1102,16 @@ def _deterministic_route(
             for pattern in _DEFAULT_SKILL_REGEXES.get("apm-metrics", [])
         )
     ):
-        return ["apm-metrics"]
+        matches = [
+            DeterministicRouteMatch(
+                skill="apm-metrics",
+                rule_id="apm.knowledge_query",
+                source="regex",
+                priority=30,
+                pattern="apm metric knowledge query",
+            )
+        ]
+        return ["apm-metrics"], matches, []
 
     patrol_selected = _route_patrol_intent(registry, user_text)
     if patrol_selected:
@@ -1301,17 +1316,7 @@ def _is_apm_metric_knowledge_query(user_text: str) -> bool:
         _regex_match(pattern, user_text)
         for pattern in (
             r"\b(?:what is|define|definition|collect|instrument|metric)\b.{0,80}\b(?:apm|lcp|cls|inp|fid|apdex|error rate)\b",
-            r"(?:\u4ec0\u4e48\u662f|\u600e\u4e48\u5b9a\u4e49|\u600e\u4e48\u91c7\u96c6|\u6307\u6807).{0,80}(?:APM|LCP|CLS|INP|FID|Apdex|error rate|\u6210\u529f\u7387|\u8f6c\u5316\u7387)",
-        )
-    )
-
-
-def _is_governance_audit_query(user_text: str) -> bool:
-    return any(
-        _regex_match(pattern, user_text)
-        for pattern in (
-            r"\b(?:governance|cross-thread|systemic risk|business impact)\b",
-            r"(\u8de8\u7ebf\u7a0b|\u6cbb\u7406|\u7cfb\u7edf\u6027\u98ce\u9669|\u4e1a\u52a1\u5f71\u54cd)",
+            r"(?:什么是|怎么定义|怎么采集|指标).{0,80}(?:APM|LCP|CLS|INP|FID|Apdex|error rate|成功率|转化率)",
         )
     )
 
@@ -1364,18 +1369,6 @@ def _is_governance_audit_query(user_text: str) -> bool:
             r"\u5ba1\u8ba1|\u5408\u89c4|\u5ba1\u6279|\u5b89\u5168|"
             r"\u8de8\u7ebf\u7a0b|\u591a\u4e2a\u4f1a\u8bdd|"
             r"\u6240\u6709\u6d3b\u8dc3\u7ebf\u7a0b|\u6cbb\u7406)"
-        ),
-        user_text,
-    )
-
-
-def _is_apm_metric_knowledge_query(user_text: str) -> bool:
-    return _regex_match(
-        (
-            r"(\u4ec0\u4e48\u662f|\u89e3\u91ca|\u542b\u4e49|\u600e\u4e48"
-            r"(?:\u5b9a\u4e49|\u91c7\u96c6)|\u600e\u6837.{0,20}\u91c7\u96c6|"
-            r"\u6307\u6807|\u9608\u503c|\bwhat is\b|\bdefine\b|\bdefinition\b|"
-            r"\bcollect(?:ion)?\b|\bmetric interpretation\b)"
         ),
         user_text,
     )

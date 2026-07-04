@@ -11,8 +11,6 @@ from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.agent import (
     build_skill_router_components,
-    build_skill_vector_index,
-    warmup_skill_routing,
 )
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.agent.harness import scan_prompt_guard, scan_tool_guard
@@ -182,9 +180,10 @@ harness = AgentHarness(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize full three-layer routing components for quick evaluation mode
-# 只保留route_skill_names_with_trace支持的参数，去掉build_skill_router专用的long_term_memory/cache
-quick_eval_semantic_index = build_skill_vector_index(settings) if getattr(settings, "skill_routing_semantic_enabled", False) else None
+# Quick evaluation uses full three-layer routing funnel: regex → vector retrieval (Qdrant/in-memory) → rerank → LLM judge
+# We intentionally skip STARTUP-TIME Qdrant warmup/sync to make eval boot faster.
+# Qdrant index will lazily perform necessary sync on first search automatically, so vector comparison and LLM judge work normally.
+# Full end-to-end routing with long-term memory/cache is tested in e2e mode.
 _full_router_kwargs = build_skill_router_components(
     settings,
     long_term_memory=None,
@@ -200,7 +199,8 @@ quick_eval_router_kwargs = {
 async def lifespan(_: FastAPI):
     await postgres_memory.start()
     registry.start_watching()
-    await warmup_skill_routing(settings, registry, semantic_index=quick_eval_semantic_index)
+    # Production agent harness initializes its own routing components internally, no extra warmup needed here.
+    # Quick eval skips startup Qdrant sync intentionally; sync happens lazily on first semantic search if needed.
     try:
         yield
     finally:
