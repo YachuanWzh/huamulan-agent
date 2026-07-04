@@ -13,7 +13,7 @@ from personal_assistant.agent.agent import (
     build_skill_router_components,
 )
 from personal_assistant.agent.harness import AgentHarness
-from personal_assistant.agent.harness import scan_prompt_guard, scan_tool_guard
+from personal_assistant.agent.harness import scan_prompt_guard, scan_prompt_guard_with_llm, scan_tool_guard
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import route_skill_names_with_trace
 from personal_assistant.apm import (
@@ -479,13 +479,27 @@ async def _iter_skill_evaluation_events(
     case_results = []
     case_details = []
     run_id = f"skill-eval-{mode}-{uuid4().hex[:8]}"
+    # 快检模式构建LLM安全判定实例
+    quick_guard_llm = None
+    if mode == "quick" and settings.prompt_guard_llm_enabled:
+        try:
+            from personal_assistant.agent.llm import build_llm
+            quick_guard_llm = build_llm(
+                settings,
+                LLMConfig(
+                    model=settings.prompt_guard_llm_model,
+                    temperature=0.0,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Failed to build LLM prompt guard for quick evaluation: %s", exc, exc_info=True)
     for index, case in enumerate(cases, start=1):
         if mode == "e2e":
             if harness is None:
                 raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
             outcome = await _run_e2e_case(harness, case, run_id)
         else:
-            outcome = await _run_quick_case(registry, case)
+            outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm)
         case_results.append(outcome)
         judge = None
         if mode == "e2e" and judge_client is not None:
@@ -569,11 +583,14 @@ def _build_evaluation_judge(settings):
     )
 
 
-async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dict:
+async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase, guard_llm=None) -> dict:
     query = _case_query(case)
     logs: list[dict] = []
-    # 快检模式也先过Prompt Guard检测（输入层第一道防线）
+    # Layer 1: 正则快速拦截
     guard_match = scan_prompt_guard(query)
+    # Layer 2: LLM语义安全判定
+    if not guard_match and guard_llm is not None:
+        guard_match = await scan_prompt_guard_with_llm(query, guard_llm)
     if guard_match:
         logs.append({
             "event_type": "security",
@@ -581,7 +598,7 @@ async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase) -> dic
             "name": guard_match.category,
             "input": {"message": query[:200]},
             "error": {"reason": guard_match.reason},
-            "metadata": {"severity": guard_match.severity, "source": "prompt_guard"},
+            "metadata": {"severity": guard_match.severity, "source": f"{guard_match.source}_prompt_guard"},
         })
         # Prompt Guard命中时直接拦截，不进入路由
         return {

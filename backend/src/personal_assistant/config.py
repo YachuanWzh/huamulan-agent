@@ -147,6 +147,18 @@ class Settings(BaseSettings):
         default=None,
         alias="EVALUATION_JUDGE_API_KEY",
     )
+    prompt_guard_llm_enabled: bool = Field(
+        default=True,
+        alias="PROMPT_GUARD_LLM_ENABLED",
+    )
+    prompt_guard_llm_model: str = Field(
+        default="deepseek-v4-flash",
+        alias="PROMPT_GUARD_LLM_MODEL",
+    )
+    prompt_guard_llm_confidence_threshold: float = Field(
+        default=0.8,
+        alias="PROMPT_GUARD_LLM_CONFIDENCE_THRESHOLD",
+    )
 
     @field_validator("redis_url")
     @classmethod
