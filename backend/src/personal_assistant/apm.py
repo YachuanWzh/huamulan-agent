@@ -389,7 +389,35 @@ def from_prometheus_metric(
     """
     logs: list[ExecutionLog] = []
     data = prometheus_result.get("data", {}) if isinstance(prometheus_result, dict) else {}
-    results: list[dict[str, Any]] = data.get("result", []) or []
+    raw_results = data.get("result", []) or []
+
+    # Handle scalar/string result types: result is [timestamp, "value"]
+    # (vector/matrix results are lists of {metric: ..., value/values: ...} objects)
+    if isinstance(raw_results, list) and len(raw_results) == 2 and not isinstance(raw_results[0], dict):
+        try:
+            scalar_value = float(raw_results[1])
+        except (ValueError, TypeError):
+            scalar_value = 0.0
+        return [
+            ExecutionLog(
+                id=0,
+                created_at=datetime.now(timezone.utc),  # type: ignore[arg-type]
+                thread_id="otel-prometheus",
+                run_id=None,
+                parent_id=None,
+                event_type="tool",  # type: ignore[arg-type]
+                status="completed",
+                name=str(metric_name_hint),
+                input={"metric_name": metric_name_hint, "labels": {}},
+                output={"value": scalar_value},
+                error={},
+                duration_ms=None,
+                token_usage={},
+                metadata={"metric_name": metric_name_hint, "result_type": "scalar"},
+            )
+        ]
+
+    results: list[dict[str, Any]] = raw_results
 
     for idx, result in enumerate(results):
         metric_labels = result.get("metric", {}) if isinstance(result, dict) else {}

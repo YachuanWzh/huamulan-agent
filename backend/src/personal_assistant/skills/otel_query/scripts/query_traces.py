@@ -75,8 +75,8 @@ def main() -> int:
         operation=payload.get("operation"),
         lookback=str(payload.get("lookback", "15m")),
         limit=int(payload.get("limit", 10)),
-        min_duration_ms=payload.get("min_duration_ms"),
-        max_duration_ms=payload.get("max_duration_ms"),
+        min_duration_ms=int(payload["min_duration_ms"]) if payload.get("min_duration_ms") is not None else None,
+        max_duration_ms=int(payload["max_duration_ms"]) if payload.get("max_duration_ms") is not None else None,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if "error" not in result else 1

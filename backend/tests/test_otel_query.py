@@ -382,7 +382,6 @@ class TestQueryMetricsScript:
     def test_accepts_promql_and_returns_json(self) -> None:
         input_data = json.dumps({
             "query": "up",
-            "time_range": "5m",
         })
         completed = subprocess.run(
             [sys.executable, str(QUERY_METRICS_SCRIPT)],
@@ -395,7 +394,7 @@ class TestQueryMetricsScript:
         assert "status" in result or "error" in result
 
     def test_reports_missing_query_parameter(self) -> None:
-        input_data = json.dumps({"time_range": "5m"})
+        input_data = json.dumps({})
         completed = subprocess.run(
             [sys.executable, str(QUERY_METRICS_SCRIPT)],
             input=input_data,
@@ -505,7 +504,6 @@ class TestQueryMetricsFunction:
 
             result = query_metrics(
                 promql="up",
-                time_range="5m",
                 proxy_url="http://test:8080/grafana/api/datasources/proxy/uid/test/api/v1",
             )
 

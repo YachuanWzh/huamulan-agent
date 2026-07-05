@@ -5,10 +5,14 @@ Grafana datasource proxy, and prints the result as JSON to stdout.
 
 Input format::
 
-    {"query": "histogram_quantile(0.95, ...)", "time_range": "15m"}
+    {"query": "histogram_quantile(0.95, sum(rate(...)))"}
 
 Output format: Prometheus API JSON response (``{"status": "success", "data": {...}}``)
 or ``{"error": "..."}`` on failure.
+
+Note: This queries Prometheus instant API (current time). Use PromQL functions
+like ``rate(...[5m])`` or ``[5m]`` range selectors within the query string
+to specify time windows.
 """
 
 from __future__ import annotations
@@ -29,7 +33,6 @@ DEFAULT_PROMETHEUS_PROXY_URL = (
 def query_metrics(
     *,
     promql: str,
-    time_range: str | None = None,
     proxy_url: str | None = None,
 ) -> dict[str, Any]:
     """Query Prometheus via the Grafana datasource proxy.
@@ -44,11 +47,6 @@ def query_metrics(
     ).rstrip("/")
 
     params: dict[str, str] = {"query": promql}
-    if time_range:
-        # Prometheus doesn't have a time_range param directly; use `time` if provided
-        # or `start`/`end` for range queries. For simplicity, we just pass the query
-        # and let Prometheus handle the default (instant vector at current time).
-        pass
 
     url = f"{base}/query?{urllib.parse.urlencode(params)}"
     try:
@@ -69,7 +67,6 @@ def main() -> int:
         return 1
     result = query_metrics(
         promql=str(payload["query"]),
-        time_range=payload.get("time_range"),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if "error" not in result else 1

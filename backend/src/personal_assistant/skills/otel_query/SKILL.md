@@ -51,8 +51,7 @@ Query Prometheus via PromQL. Input JSON:
 
 ```json
 {
-  "query": "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket[5m])) by (le, http_route))",
-  "time_range": "15m"
+  "query": "histogram_quantile(0.95, sum(rate(http_server_duration_milliseconds_bucket[5m])) by (le, http_route))"
 }
 ```
 
