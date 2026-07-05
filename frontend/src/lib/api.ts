@@ -533,6 +533,10 @@ export interface OtelAlert {
   description: string
   starts_at: string
   status: string
+  // RCA tracking fields (populated by backend auto-RCA)
+  rca_status?: 'pending' | 'running' | 'completed' | 'blocked' | 'failed'
+  rca_thread_id?: string | null
+  rca_pending_approvals?: ToolCallApproval[] | null
 }
 
 // ── API client ────────────────────────────────────────────────────
@@ -688,4 +692,20 @@ export const api = {
 
     return controller
   },
+
+  /** Get RCA status for a specific alert. */
+  getOtelRcaStatus: (alertId: string) =>
+    request<{
+      alert_id: string
+      rca_status: string
+      rca_thread_id: string | null
+      rca_pending_approvals: ToolCallApproval[] | null
+    }>(`/api/otel/alerts/${alertId}/rca/status`),
+
+  /** Approve or deny a dangerous tool during P0 RCA. */
+  approveOtelRca: (alertId: string, body: { thread_id: string; approval_id: string; approved: boolean }) =>
+    request<ChatResponse>(`/api/otel/alerts/${alertId}/rca/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }

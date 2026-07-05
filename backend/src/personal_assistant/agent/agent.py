@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from pathlib import Path
 from typing import Any
 
-from personal_assistant.agent.approval import ApprovalGate, requires_tool_approval
+from personal_assistant.agent.approval import ApprovalGate, RequiresApproval, requires_tool_approval
 from personal_assistant.agent.harness import (
     _approval_route,
     _entry_route,
@@ -120,9 +120,11 @@ def compile_agent(
     hook_manager: AgentHookManager | None = None,
     enable_memory_reflection: bool = True,
     cache=None,
+    requires_approval: RequiresApproval | None = None,
 ):
     llm = build_llm(settings, llm_config)
-    approval_gate = ApprovalGate(decisions, requires_approval=requires_tool_approval)
+    approval_callback: RequiresApproval = requires_approval or requires_tool_approval
+    approval_gate = ApprovalGate(decisions, requires_approval=approval_callback)
     hooks = hook_manager or AgentHookManager()
     workspace = Path(getattr(settings, "assistant_workspace_dir", Path.cwd()))
     long_term_dir = getattr(settings, "long_term_memory_dir", None)

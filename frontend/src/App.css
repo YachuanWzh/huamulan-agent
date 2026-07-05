@@ -3149,6 +3149,68 @@ button {
   gap: 4px;
 }
 
+/* ── RCA need_approve state ──────────────────────────────────── */
+
+.alert-approval-needed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+}
+
+.alert-warning-icon {
+  font-size: 1.1em;
+}
+
+.alert-approval-text {
+  font-size: 0.85em;
+  color: #92400e;
+}
+
+.alert-approval-text code {
+  background: #fef3c7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.alert-approval-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.alert-approve-btn {
+  padding: 3px 10px;
+  font-size: 0.82em;
+  border: 1px solid #16a34a;
+  border-radius: 4px;
+  background: #f0fdf4;
+  color: #15803d;
+  cursor: pointer;
+}
+
+.alert-approve-btn:hover {
+  background: #dcfce7;
+}
+
+.alert-deny-btn {
+  padding: 3px 10px;
+  font-size: 0.82em;
+  border: 1px solid #dc2626;
+  border-radius: 4px;
+  background: #fef2f2;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.alert-deny-btn:hover {
+  background: #fee2e2;
+}
+
 .alert-thread-id {
   font-family: monospace;
   font-size: 0.78em;

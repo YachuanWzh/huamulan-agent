@@ -180,6 +180,7 @@ frontend_rum_events: list[FrontendRumEvent] = []
 # ── OTEL Push: in-memory alert store + SSE broadcast ──────────────
 _otel_alerts: deque[dict] = deque(maxlen=200)
 _otel_alert_subscribers: list[asyncio.Queue] = []
+_active_rca_tasks: set[asyncio.Task] = set()  # Track background RCA tasks to prevent GC warnings
 
 
 async def _broadcast_otel_alert(alert_data: dict) -> None:
@@ -195,6 +196,99 @@ async def _broadcast_otel_alert(alert_data: dict) -> None:
             _otel_alert_subscribers.remove(queue)
         except ValueError:
             pass
+
+
+def _find_alert_by_thread_id(thread_id: str) -> dict | None:
+    """Find an alert in the in-memory store by its RCA thread ID."""
+    for alert_data in _otel_alerts:
+        if alert_data.get("rca_thread_id") == thread_id:
+            return alert_data
+    return None
+
+
+def _update_alert_rca_status(alert_data: dict, **fields) -> None:
+    """Update RCA tracking fields on an alert dict in-place."""
+    for key, value in fields.items():
+        alert_data[key] = value
+
+
+def _build_rca_prompt(alert_data: dict) -> str:
+    """Build the RCA prompt matching the frontend buildRcaPrompt format.
+
+    References e2e golden cases in evaluation/golden/otel_push.jsonl
+    (otel-push-001 through otel-push-005).
+    """
+    parts = [
+        f"\U0001f6a8 {alert_data['level']} Alert received from OTEL push: **{alert_data['alert_name']}**",
+        f"- Service: **{alert_data['service_name']}**",
+        f"- Severity: {alert_data['severity']}",
+        f"- Summary: {alert_data['summary']}",
+    ]
+    if alert_data.get("description"):
+        parts.append(f"- Details: {alert_data['description']}")
+    if alert_data.get("starts_at"):
+        parts.append(f"- Alert started: {alert_data['starts_at']}")
+    parts.extend([
+        "",
+        "Please run root cause analysis using the otel-query skill:",
+        "1. Pull Jaeger traces for the affected service",
+        "2. Query Prometheus for correlated metrics",
+        "3. Identify the root cause and recommend fixes",
+    ])
+    return "\n".join(parts)
+
+
+async def _trigger_rca_background(alert_data: dict) -> None:
+    """Run RCA in background for a P0 alert with auto-approval for safe tools.
+
+    Uses :func:`requires_rca_tool_approval` so that only dangerous
+    operations (matching ``_TOOL_PATTERNS``) require human approval.
+    All routine tools — query_traces, query_metrics, grep, safe bash
+    commands — are auto-approved so RCA completes autonomously.
+    """
+    from personal_assistant.agent.harness import requires_rca_tool_approval
+
+    alert_id = alert_data["id"]
+    thread_id = f"rca-{alert_id}"
+    _update_alert_rca_status(
+        alert_data,
+        rca_status="running",
+        rca_thread_id=thread_id,
+    )
+    await _broadcast_otel_alert(alert_data)
+
+    try:
+        prompt = _build_rca_prompt(alert_data)
+        response = await harness.run_user_turn(
+            thread_id,
+            prompt,
+            agent_mode="single",
+            requires_approval=requires_rca_tool_approval,
+        )
+
+        if response.status == "requires_approval":
+            _update_alert_rca_status(
+                alert_data,
+                rca_status="blocked",
+                rca_pending_approvals=[
+                    a.model_dump() for a in response.approvals
+                ],
+            )
+        else:
+            _update_alert_rca_status(
+                alert_data,
+                rca_status="completed",
+                rca_pending_approvals=None,
+            )
+    except Exception:
+        logger.exception("RCA failed for alert %s", alert_id)
+        _update_alert_rca_status(
+            alert_data,
+            rca_status="failed",
+            rca_pending_approvals=None,
+        )
+    finally:
+        await _broadcast_otel_alert(alert_data)
 
 
 harness = AgentHarness(
@@ -276,11 +370,30 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
 @app.post("/api/approve", response_model=ChatResponse)
 async def approve(request: ApprovalDecision) -> ChatResponse:
-    return await harness.resume_after_approval(
+    response = await harness.resume_after_approval(
         request.thread_id,
         request.approval_id,
         request.approved,
     )
+
+    # Sync RCA alert status if this thread is an RCA thread
+    alert_data = _find_alert_by_thread_id(request.thread_id)
+    if alert_data is not None:
+        if not request.approved:
+            _update_alert_rca_status(alert_data, rca_status="failed", rca_pending_approvals=None)
+        elif response.status == "requires_approval":
+            _update_alert_rca_status(
+                alert_data,
+                rca_status="blocked",
+                rca_pending_approvals=[
+                    a.model_dump() for a in response.approvals
+                ],
+            )
+        else:
+            _update_alert_rca_status(alert_data, rca_status="completed", rca_pending_approvals=None)
+        await _broadcast_otel_alert(alert_data)
+
+    return response
 
 
 @app.post("/api/approve/stream")
@@ -420,9 +533,19 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
             "description": alert.annotations.get("description", ""),
             "starts_at": starts_at,
             "status": alert.status,
+            # RCA tracking fields — populated by background task for P0
+            "rca_status": "pending",
+            "rca_thread_id": None,
+            "rca_pending_approvals": None,
         }
         _otel_alerts.appendleft(alert_data)
         await _broadcast_otel_alert(alert_data)
+
+        # P0 (critical): auto-trigger RCA in background with auto-approval
+        if severity == "critical":
+            task = asyncio.create_task(_trigger_rca_background(alert_data))
+            _active_rca_tasks.add(task)
+            task.add_done_callback(_active_rca_tasks.discard)
 
         processed += 1
 
@@ -466,6 +589,75 @@ async def stream_otel_alerts():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── OTEL RCA endpoints ───────────────────────────────────────────
+
+
+@app.get("/api/otel/alerts/{alert_id}/rca/status")
+async def get_otel_rca_status(alert_id: str):
+    """Query RCA status for a specific alert.
+
+    Returns ``rca_status``, ``rca_thread_id``, and ``rca_pending_approvals``
+    for the given alert, or 404 if the alert is not found.
+    """
+    for alert_data in _otel_alerts:
+        if alert_data.get("id") == alert_id:
+            return {
+                "alert_id": alert_id,
+                "rca_status": alert_data.get("rca_status", "pending"),
+                "rca_thread_id": alert_data.get("rca_thread_id"),
+                "rca_pending_approvals": alert_data.get("rca_pending_approvals"),
+            }
+    raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
+
+
+@app.post("/api/otel/alerts/{alert_id}/rca/approve")
+async def approve_otel_rca(alert_id: str, request: ApprovalDecision):
+    """Approve or deny a dangerous tool during P0 RCA.
+
+    Resumes the RCA thread after the user's decision and broadcasts
+    the updated alert status via SSE.
+    """
+    alert_data = None
+    for item in _otel_alerts:
+        if item.get("id") == alert_id:
+            alert_data = item
+            break
+
+    if alert_data is None:
+        raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
+
+    rca_thread_id = alert_data.get("rca_thread_id")
+    if not rca_thread_id:
+        raise HTTPException(status_code=400, detail="Alert has no RCA thread")
+
+    # Update approval decision in harness
+    harness.decisions[request.approval_id] = request.approved
+
+    # Resume the RCA thread
+    response = await harness.resume_after_approval(
+        rca_thread_id,
+        request.approval_id,
+        request.approved,
+    )
+
+    # Sync alert RCA status
+    if not request.approved:
+        _update_alert_rca_status(alert_data, rca_status="failed", rca_pending_approvals=None)
+    elif response.status == "requires_approval":
+        _update_alert_rca_status(
+            alert_data,
+            rca_status="blocked",
+            rca_pending_approvals=[
+                a.model_dump() for a in response.approvals
+            ],
+        )
+    else:
+        _update_alert_rca_status(alert_data, rca_status="completed", rca_pending_approvals=None)
+
+    await _broadcast_otel_alert(alert_data)
+    return response
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

@@ -1,11 +1,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { api, type OtelAlert, type AgentMode } from '../lib/api'
 
-type RcaStatus = 'idle' | 'analyzing' | 'completed' | 'failed'
+type RcaStatus = 'idle' | 'analyzing' | 'completed' | 'failed' | 'need_approve'
 
 interface RcaEntry {
   threadId: string
   status: RcaStatus
+  pendingApprovals?: ToolCallApproval[]
+}
+
+interface ToolCallApproval {
+  approval_id: string
+  tool_call_id: string
+  name: string
+  args: Record<string, unknown>
 }
 
 interface Props {
@@ -62,12 +70,28 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     return () => clearInterval(pollInterval)
   }, [])
 
-  // SSE subscription
+  // SSE subscription — backend drives RCA for P0; frontend observes status
   useEffect(() => {
     setConnected(true)
     const controller = api.streamOtelAlerts((alert) => {
-      setAlerts((prev) => [alert, ...prev.slice(0, 199)])
-      if (alert.level === 'P0') {
+      setAlerts((prev) => {
+        // Update existing alert if it's a status update, otherwise prepend
+        const existingIdx = prev.findIndex((a) => a.id === alert.id)
+        if (existingIdx >= 0) {
+          const updated = [...prev]
+          updated[existingIdx] = alert
+          return updated
+        }
+        return [alert, ...prev.slice(0, 199)]
+      })
+
+      // Sync RCA state from backend alert status
+      if (alert.rca_status && alert.id) {
+        syncRcaFromBackend(alert)
+      }
+
+      // P0 fallback: if backend hasn't triggered RCA yet, do it from frontend
+      if (alert.level === 'P0' && !alert.rca_status) {
         triggerRca(alert)
       }
     })
@@ -120,6 +144,59 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     }
   }, [agentMode])
 
+  /** Sync RCA state from backend alert's rca_status field */
+  const syncRcaFromBackend = useCallback((alert: OtelAlert) => {
+    if (!alert.rca_status || !alert.id) return
+
+    const statusMap: Record<string, RcaStatus> = {
+      pending: 'idle',
+      running: 'analyzing',
+      completed: 'completed',
+      blocked: 'need_approve',
+      failed: 'failed',
+    }
+    const mappedStatus = statusMap[alert.rca_status] || 'idle'
+
+    setRcaStates((prev) => ({
+      ...prev,
+      [alert.id]: {
+        threadId: alert.rca_thread_id || prev[alert.id]?.threadId || '',
+        status: mappedStatus,
+        pendingApprovals: alert.rca_pending_approvals || undefined,
+      },
+    }))
+  }, [])
+
+  /** Approve or deny a dangerous tool during P0 RCA */
+  const handleApprove = useCallback(async (
+    alertId: string,
+    approvalId: string,
+    approved: boolean,
+  ) => {
+    const entry = rcaStates[alertId]
+    if (!entry?.threadId) return
+
+    setRcaStates((prev) => ({
+      ...prev,
+      [alertId]: { ...prev[alertId], status: 'analyzing' },
+    }))
+
+    try {
+      await api.approveOtelRca(alertId, {
+        thread_id: entry.threadId,
+        approval_id: approvalId,
+        approved,
+      })
+      // Status will be updated via SSE when backend re-broadcasts
+    } catch (err) {
+      console.error('RCA approval failed:', err)
+      setRcaStates((prev) => ({
+        ...prev,
+        [alertId]: { ...prev[alertId], status: 'failed' },
+      }))
+    }
+  }, [rcaStates])
+
   /** Open an existing thread in chat view */
   const handleViewAnalysis = useCallback((tid: string) => {
     if (onViewAnalysis) {
@@ -168,6 +245,7 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
               rca={rcaStates[alert.id] ?? null}
               onAnalyze={() => triggerRca(alert)}
               onViewAnalysis={handleViewAnalysis}
+              onApprove={(approvalId, approved) => handleApprove(alert.id, approvalId, approved)}
             />
           ))}
         </div>
@@ -181,11 +259,13 @@ function AlertCard({
   rca,
   onAnalyze,
   onViewAnalysis,
+  onApprove,
 }: {
   alert: OtelAlert
   rca: RcaEntry | null
   onAnalyze: () => void
   onViewAnalysis: (threadId: string) => void
+  onApprove: (approvalId: string, approved: boolean) => void
 }) {
   const isP0 = alert.level === 'P0'
   const severityClass = isP0 ? 'alert-critical' : 'alert-warning'
@@ -240,6 +320,7 @@ function AlertCard({
           rca={rca}
           onAnalyze={onAnalyze}
           onViewAnalysis={onViewAnalysis}
+          onApprove={onApprove}
         />
       </div>
     </article>
@@ -251,11 +332,13 @@ function RcaAction({
   rca,
   onAnalyze,
   onViewAnalysis,
+  onApprove,
 }: {
   isP0: boolean
   rca: RcaEntry | null
   onAnalyze: () => void
   onViewAnalysis: (threadId: string) => void
+  onApprove: (approvalId: string, approved: boolean) => void
 }) {
   if (!rca) {
     // No RCA triggered yet
@@ -301,6 +384,39 @@ function RcaAction({
           Retry
         </button>
       </span>
+    )
+  }
+
+  if (rca.status === 'need_approve') {
+    const pendingApproval = rca.pendingApprovals?.[0]
+    const toolName = pendingApproval?.name || 'unknown tool'
+    return (
+      <div className="alert-approval-needed">
+        <span className="alert-warning-icon">⚠️</span>
+        <span className="alert-approval-text">
+          Blocked: <code>{toolName}</code> needs approval
+        </span>
+        <div className="alert-approval-actions">
+          {pendingApproval && (
+            <>
+              <button
+                type="button"
+                className="alert-approve-btn"
+                onClick={() => onApprove(pendingApproval.approval_id, true)}
+              >
+                ✓ Approve
+              </button>
+              <button
+                type="button"
+                className="alert-deny-btn"
+                onClick={() => onApprove(pendingApproval.approval_id, false)}
+              >
+                ✗ Deny
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     )
   }
 

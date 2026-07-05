@@ -323,6 +323,7 @@ class AgentHarness:
         llm_config: LLMConfig | None = None,
         callbacks: list[Any] | None = None,
         agent_mode: str = "single",
+        requires_approval=None,
     ) -> ChatResponse:
         # Layer 1: 正则快速拦截
         match = scan_prompt_guard(message)
@@ -345,9 +346,9 @@ class AgentHarness:
                 )
                 return await self._handle_prompt_guard_block(thread_id, message, match)
         app = (
-            self._compile_multi_agent(llm_config)
+            self._compile_multi_agent(llm_config, requires_approval=requires_approval)
             if agent_mode == "multi"
-            else self._compile_without_memory_reflection(llm_config)
+            else self._compile_without_memory_reflection(llm_config, requires_approval=requires_approval)
         )
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
@@ -450,6 +451,7 @@ class AgentHarness:
         llm_config: LLMConfig | None = None,
         callbacks: list[Any] | None = None,
         agent_mode: str = "single",
+        requires_approval=None,
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
         try:
@@ -470,9 +472,9 @@ class AgentHarness:
                 yield "data: [DONE]\n\n"
                 return
             app = (
-                self._compile_multi_agent(llm_config)
+                self._compile_multi_agent(llm_config, requires_approval=requires_approval)
                 if agent_mode == "multi"
-                else self._compile_without_memory_reflection(llm_config)
+                else self._compile_without_memory_reflection(llm_config, requires_approval=requires_approval)
             )
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
@@ -715,6 +717,7 @@ class AgentHarness:
         llm_config: LLMConfig | None,
         *,
         enable_memory_reflection: bool = True,
+        requires_approval=None,
     ):
         from personal_assistant.agent import agent as agent_module
         kwargs = {}
@@ -722,6 +725,8 @@ class AgentHarness:
             kwargs["enable_memory_reflection"] = enable_memory_reflection
         if self.cache is not None:
             kwargs["cache"] = self.cache
+        if requires_approval is not None:
+            kwargs["requires_approval"] = requires_approval
 
         if self.hook_manager is None:
             return agent_module.compile_agent(
@@ -742,7 +747,7 @@ class AgentHarness:
             **kwargs,
         )
 
-    def _compile_multi_agent(self, llm_config: LLMConfig | None):
+    def _compile_multi_agent(self, llm_config: LLMConfig | None, *, requires_approval=None):
         from personal_assistant.agent import multi_agent as multi_agent_module
         from personal_assistant.agent.intent_router import IntentEmbeddingIndex
         from personal_assistant.agent.llm import build_llm as _build_llm
@@ -847,13 +852,13 @@ class AgentHarness:
                 return pending
         return []
 
-    def _compile_without_memory_reflection(self, llm_config: LLMConfig | None):
+    def _compile_without_memory_reflection(self, llm_config: LLMConfig | None, *, requires_approval=None):
         try:
-            return self._compile(llm_config, enable_memory_reflection=False)
+            return self._compile(llm_config, enable_memory_reflection=False, requires_approval=requires_approval)
         except TypeError as exc:
             if "enable_memory_reflection" not in str(exc):
                 raise
-            return self._compile(llm_config)
+            return self._compile(llm_config, requires_approval=requires_approval)
 
 
 def scan_prompt_guard(message: str) -> GuardMatch | None:
@@ -939,6 +944,23 @@ def guard_tool_call(tool_name: str, args: Any) -> None:
     match = scan_tool_guard(tool_name, args)
     if match:
         raise SecurityError(f"{match.category}: {match.reason}")
+
+
+def requires_rca_tool_approval(tool_name: str, args: Any) -> bool:
+    """Auto-approve safe tools for P0 RCA threads.
+
+    Only require human approval when the tool call matches dangerous
+    patterns (``_TOOL_PATTERNS`` in :func:`scan_tool_guard`). All other
+    tools — query_traces, query_metrics, grep, safe bash commands, etc.
+    — are auto-approved so RCA can run autonomously.
+
+    Used by the P0 auto-RCA flow to avoid blocking the investigation
+    on routine read-only operations while still gating destructive
+    actions behind explicit human approval.
+    """
+    if tool_name in _READ_ONLY_TOOL_NAMES:
+        return False
+    return scan_tool_guard(tool_name, args) is not None
 
 
 def build_default_tool_middlewares() -> list[ToolMiddleware]:
