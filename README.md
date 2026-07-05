@@ -231,22 +231,157 @@ Prometheus JSON   ──→  from_prometheus_metric()     → ExecutionLog[]
            建议检查支付网关 + 增加 gRPC timeout + 添加断路器。"
 ```
 
-### 3. 未来规划：遥测数据推送与自动分析
+### 3. 智能告警分析与自动 RCA（已实现）
 
-| 阶段 | 规划 | 说明 |
-|------|------|------|
-| **短期** | SLO 基线配置 | 为关键服务配置 P95/错误率/吞吐量 SLO 基线 |
-| **短期** | PromQL 模板库 | 预置常用查询模板，降低 Agent PromQL 错误率 |
-| **短期** | Trace 可视化 | 前端增加 Jaeger span 瀑布图视图 |
-| **中期** | AlertManager 集成 | Prometheus 告警 → Webhook 推送 → 自动 RCA |
-| **中期** | OTel Collector 直推 | Collector 配置 otlp_http exporter → 准实时推送 |
-| **中期** | 异常分级响应 | L1 记录 / L2 自动排障 / L3 通知 + Runbook |
-| **长期** | 零人工智能排障 | 系统检测 → Agent 自动分析 → 推送结论 |
-| **长期** | 跨服务拓扑感知 | 利用 trace parent-child span 自动构建依赖图 |
-| **长期** | 历史基线自学习 | 基于 Prometheus 历史数据学习季节性模式 |
-| **长期** | 修复建议闭环 | 诊断 → 修复 → 验证 反馈闭环 |
+两条数据通道并行：**AlertManager Webhook** 处理 P0/P1 实时告警，**Kafka 批量消费** 处理 P2/P3 定时巡检。
 
-> 详细技术方案、数据流架构、Mermaid 图表和代码级设计见 **[技术方案报告.md §OTEL 远程遥测数据集成](./技术方案报告.md#otel-远程遥测数据集成)**。
+```mermaid
+flowchart TB
+    subgraph 远端["远端 OTEL Demo（15+ 微服务）"]
+        SVC[微服务集群<br/>frontend/cart/checkout/…]
+        OTELCOL[OTel Collector]
+        PROM[Prometheus]
+        JAEGER[Jaeger]
+    end
+
+    subgraph 告警["告警出口"]
+        AM[AlertManager<br/>告警规则 → 分级路由]
+        KAFKA[(Kafka<br/>otlp_spans / otlp_metrics / otlp_logs)]
+    end
+
+    subgraph 后端["langgraph-claw 后端"]
+        WEBHOOK["POST /api/otel/alerts<br/>━━━━━━━━━━━━━━<br/>v4 webhook 接收<br/>解析 severity → P0/P1<br/>入队 _otel_alerts deque"]
+        SSE["SSE /api/otel/alerts/stream<br/>━━━━━━━━━━━━━━<br/>每客户端独立 asyncio.Queue<br/>30s heartbeat 保活"]
+        RCA["_trigger_rca_background<br/>━━━━━━━━━━━━━━<br/>asyncio.create_task 后台执行<br/>requires_rca_tool_approval<br/>安全工具自动批 / 危险操作阻塞"]
+        CONSUMER["OtelKafkaConsumer<br/>━━━━━━━━━━━━━━<br/>cron 定时拉起<br/>OTLP protobuf/JSON 双解码<br/>→ Jaeger 兼容格式"]
+    end
+
+    subgraph 前端["前端"]
+        PANEL["OTEL Alerts Panel<br/>━━━━━━━━━━━━━━<br/>SSE 实时订阅<br/>P0 自动 / P1 手动 / need_approve"]
+    end
+
+    SVC -->|OTLP gRPC| OTELCOL
+    OTELCOL -->|traces| JAEGER
+    OTELCOL -->|metrics| PROM
+    OTELCOL -->|全量 OTLP| KAFKA
+    PROM -->|告警规则触发| AM
+
+    AM -->|"severity=critical"| WEBHOOK
+    AM -->|"severity=warning"| WEBHOOK
+    WEBHOOK -->|"P0 → 自动"| RCA
+    WEBHOOK -->|"P0+P1"| SSE
+
+    KAFKA -->|"P2/P3 定时拉取"| CONSUMER
+    CONSUMER -->|ObservabilitySnapshot| PANEL
+
+    RCA -->|"状态变更"| SSE
+    SSE -->|"EventSource"| PANEL
+```
+
+#### Webhook 通道（P0/P1 实时告警）
+
+**接入方式**：远端 Prometheus 配置 AlertManager，告警规则触发后通过 HTTP POST 推送到本项目的 `/api/otel/alerts`，payload 为 AlertManager v4 标准格式。
+
+```json
+// AlertManager → POST /api/otel/alerts
+{
+  "receiver": "langgraph-claw-p0",
+  "status": "firing",
+  "alerts": [{
+    "status": "firing",
+    "labels": {
+      "alertname": "ServiceDown",         // 告警名称
+      "severity": "critical",             // ← 决定 P0/P1 分级的核心字段
+      "service_name": "frontend"          // 受影响服务
+    },
+    "annotations": {
+      "summary": "frontend is DOWN",
+      "description": "Health check 返回 connection refused"
+    },
+    "startsAt": "2026-07-06T10:00:00Z"
+  }],
+  "version": "4"
+}
+```
+
+**服务端处理流程**（`handle_otel_alert`）：
+
+```
+1. 遍历 payload.alerts，读 labels.severity
+2. severity ∉ {"critical","warning"} → 丢弃（P2/P3 走 Kafka）
+3. 构造 alert_data dict（含 rca_status/rca_thread_id/rca_pending_approvals）
+4. 写入 _otel_alerts deque（maxlen=200，内存存储）
+5. _broadcast_otel_alert() → 遍历 _otel_alert_subscribers 逐个 queue.put_nowait()
+6. severity=="critical" → asyncio.create_task(_trigger_rca_background)
+```
+
+**SSE 实时推送**（`GET /api/otel/alerts/stream`）：
+- 每个前端连接分配独立 `asyncio.Queue(maxsize=64)`
+- 新告警通过 `_broadcast_otel_alert()` 推入所有 subscriber 队列
+- 满队列自动清理，30s 无消息发 heartbeat ping
+- `X-Accel-Buffering: no` 兼容 nginx 反向代理
+
+#### Kafka 通道（P2/P3 定时巡检）
+
+**为什么 Kafka 而不是 Webhook**：P2（info）和 P3（none）告警量大但紧急度低，不适合逐条触发 RCA。OTel Collector 将全量 OTLP 数据（span/metric/log）持续写入 Kafka，本项目的 `OtelKafkaConsumer` 按 cron 节奏批量拉取分析。
+
+**OTel Collector → Kafka 的链路**：
+
+```
+微服务 OTel SDK
+  → OTLP gRPC
+    → OTel Collector (Receivers: otlp)
+      → kafka exporter (encoding: otlp_json 或 otlp_protobuf)
+        → Kafka Topic: otlp_spans / otlp_metrics / otlp_logs
+```
+
+**消费者解码双模**：Kafka 消息可能是 JSON 或 Protobuf，消费者自动尝试两种解码：
+
+```
+Kafka 消息 (bytes)
+  ├─ 尝试 json.loads → ExportTraceServiceRequest JSON
+  │   └─ otlp_spans_to_jaeger_trace() → Jaeger 格式
+  └─ JSON 失败 → _decode_otlp_spans() protobuf 解码
+      └─ opentelemetry.proto.collector.trace.v1 解析
+          → Jaeger 格式
+```
+
+**Jaeger 格式 → 分析快照**：
+
+```
+Jaeger trace {traceID, spans[{operationName, duration, tags, ...}]}
+  ├─ from_jaeger_trace() → FrontendRumEvent[]（每个 span 一个事件）
+  ├─ from_jaeger_trace_to_logs() → ExecutionLog[]（结构化日志）
+  │
+  └─ build_observability_snapshot(rum_events, execution_logs)
+      ├─ detect_anomalies() → IQR + Z-score 异常检测
+      ├─ infer_root_cause() → JS Error → Resource → Vitals → Retry 链
+      └─ ObservabilitySnapshot → patrol / audit agent 消费
+```
+
+**定时运行**：
+
+```bash
+# 消费最近 5 分钟的 span → 巡检异常趋势
+python -m personal_assistant.consumers.kafka_consumer --window 5m
+
+# 消费 metrics topic → SLA 合规审计
+python -m personal_assistant.consumers.kafka_consumer --topic otlp_metrics --window 30m --output report.json
+```
+
+#### Webhook vs Kafka 对比
+
+| 维度 | Webhook 通道 | Kafka 通道 |
+|------|-------------|-----------|
+| **告警级别** | P0 (critical) + P1 (warning) | P2 (info) + P3 (none) |
+| **触发方式** | AlertManager 主动推送 | cron 定时拉取 |
+| **延迟** | 秒级（实时） | 分钟级（取决于 cron 间隔） |
+| **处理模式** | 逐条 → 独立 Agent 线程 RCA | 批量 → 聚合快照 → 巡检/审计 |
+| **数据内容** | AlertManager 告警元数据（service/severity/summary） | 原始 OTLP 遥测（span/metric/log 全量） |
+| **核心代码** | `server.py:handle_otel_alert` + `_trigger_rca_background` | `kafka_consumer.py:OtelKafkaConsumer.consume_and_analyze` |
+| **审批策略** | `requires_rca_tool_approval`（仅危险操作需批） | 无需审批（纯分析消费） |
+
+> 详细代码级设计见 **[技术方案报告.md §OTEL](./技术方案报告.md#otel-远程遥测数据集成)**。
 
 ## 技术栈
 
