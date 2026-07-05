@@ -7,6 +7,7 @@ from personal_assistant.skills.evaluation.models import (
     GoldenSkillCase,
     HallucinationEvaluationMetrics,
     JudgeEvaluation,
+    MultiAgentRoutingMetrics,
     RoutingMetrics,
     RuntimeSkillMetrics,
     SafetyEvaluationMetrics,

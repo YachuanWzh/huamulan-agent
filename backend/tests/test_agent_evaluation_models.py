@@ -1,4 +1,56 @@
-from personal_assistant.skills.evaluation import AgentEvaluationCase, GoldenSkillCase
+from personal_assistant.skills.evaluation import AgentEvaluationCase, GoldenSkillCase, MultiAgentRoutingMetrics
+
+
+def test_golden_skill_case_accepts_multi_agent_fields() -> None:
+    """GoldenSkillCase should accept expected_intent, expected_metrics, expected_entities."""
+    case = GoldenSkillCase.model_validate(
+        {
+            "id": "ma-001",
+            "query": "排查 checkout API p95 超时",
+            "expected_skills": ["troubleshoot"],
+            "expected_intent": "troubleshoot",
+            "expected_metrics": ["p95"],
+            "expected_entities": ["checkout", "api"],
+        }
+    )
+
+    assert case.expected_intent == "troubleshoot"
+    assert case.expected_metrics == ["p95"]
+    assert case.expected_entities == ["checkout", "api"]
+
+
+def test_golden_skill_case_multi_agent_fields_have_sensible_defaults() -> None:
+    """Existing golden data without multi-agent fields should get sensible defaults."""
+    case = GoldenSkillCase.model_validate(
+        {
+            "id": "old-001",
+            "query": "今天天气怎么样",
+            "expected_skills": ["weather"],
+        }
+    )
+
+    assert case.expected_intent is None
+    assert case.expected_metrics == []
+    assert case.expected_entities == []
+
+
+def test_multi_agent_routing_metrics_creation() -> None:
+    """MultiAgentRoutingMetrics should track intent and slot extraction metrics."""
+    metrics = MultiAgentRoutingMetrics(
+        total_cases=10,
+        intent_accuracy=0.8,
+        intent_precision=0.85,
+        intent_recall=0.75,
+        intent_f1=0.8,
+        metric_extraction_recall=0.9,
+        entity_extraction_recall=0.7,
+    )
+
+    assert metrics.total_cases == 10
+    assert metrics.intent_accuracy == 0.8
+    assert metrics.intent_f1 == 0.8
+    assert metrics.metric_extraction_recall == 0.9
+    assert metrics.entity_extraction_recall == 0.7
 
 
 def test_golden_skill_case_accepts_agent_evaluation_fields() -> None:

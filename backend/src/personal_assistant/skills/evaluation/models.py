@@ -19,6 +19,9 @@ class GoldenSkillCase(BaseModel):
     forbidden_answer_contains: list[str] = Field(default_factory=list)
     expected_security_event: str | None = None
     judge_rubric: str | None = None
+    expected_intent: str | None = None
+    expected_metrics: list[str] = Field(default_factory=list)
+    expected_entities: list[str] = Field(default_factory=list)
 
 
 class ToolCallExpectation(BaseModel):
@@ -41,6 +44,16 @@ class RoutingMetrics(BaseModel):
     skill_selection_f1: float | None = None
     skill_over_selection_rate: float | None = None
     skill_under_selection_rate: float | None = None
+
+
+class MultiAgentRoutingMetrics(BaseModel):
+    total_cases: int
+    intent_accuracy: float | None = None
+    intent_precision: float | None = None
+    intent_recall: float | None = None
+    intent_f1: float | None = None
+    metric_extraction_recall: float | None = None
+    entity_extraction_recall: float | None = None
 
 
 class StaticSkillMetrics(BaseModel):
