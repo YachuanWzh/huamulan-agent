@@ -343,32 +343,23 @@ class TestQueryTracesScript:
             pytest.skip("query_traces.py not yet created")
 
     def test_accepts_service_query_and_returns_json(self) -> None:
-        input_data = json.dumps({
-            "service": "frontend",
-            "limit": 1,
-            "lookback": "15m",
-        })
         completed = subprocess.run(
-            [sys.executable, str(QUERY_TRACES_SCRIPT)],
-            input=input_data,
+            [sys.executable, str(QUERY_TRACES_SCRIPT),
+             "--service", "frontend", "--limit", "1", "--lookback", "15m"],
             text=True,
             capture_output=True,
         )
-        # May return error (network unreachable) or data (real call succeeds) —
-        # both are valid JSON responses from the script.
+        # May return error (network unreachable) or data (real call succeeds)
         result = json.loads(completed.stdout)
         assert "data" in result or "error" in result
 
-    def test_reports_missing_service_parameter(self) -> None:
-        input_data = json.dumps({"limit": 5})
+    def test_missing_service_exits_nonzero(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(QUERY_TRACES_SCRIPT)],
-            input=input_data,
             text=True,
             capture_output=True,
         )
-        # Should exit non-zero or return an error field
-        assert completed.returncode != 0 or "error" in json.loads(completed.stdout)
+        assert completed.returncode != 0
 
 
 class TestQueryMetricsScript:
@@ -380,28 +371,21 @@ class TestQueryMetricsScript:
             pytest.skip("query_metrics.py not yet created")
 
     def test_accepts_promql_and_returns_json(self) -> None:
-        input_data = json.dumps({
-            "query": "up",
-        })
         completed = subprocess.run(
-            [sys.executable, str(QUERY_METRICS_SCRIPT)],
-            input=input_data,
+            [sys.executable, str(QUERY_METRICS_SCRIPT), "--query", "up"],
             text=True,
             capture_output=True,
-            check=True,
         )
         result = json.loads(completed.stdout)
         assert "status" in result or "error" in result
 
-    def test_reports_missing_query_parameter(self) -> None:
-        input_data = json.dumps({})
+    def test_missing_query_exits_nonzero(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(QUERY_METRICS_SCRIPT)],
-            input=input_data,
             text=True,
             capture_output=True,
         )
-        assert completed.returncode != 0 or "error" in json.loads(completed.stdout)
+        assert completed.returncode != 0
 
 
 # ── Tests: query function unit tests (mocked HTTP) ────────────────────────

@@ -15,10 +15,28 @@ triggers:
 scripts:
   - name: query_traces
     description: Search Jaeger for traces by service name, operation, and lookback window. Returns structured trace data for APM analysis.
-    command: ["python", "scripts/query_traces.py"]
+    command: ["python", "scripts/query_traces.py", "--service", "{service}", "--lookback", "{lookback}", "--limit", "{limit}"]
+    params:
+      service:
+        type: string
+        description: Service name to search (e.g. frontend, checkout, cart).
+        required: true
+      lookback:
+        type: string
+        description: Lookback time window (e.g. 15m, 1h, 30m).
+        default: "15m"
+      limit:
+        type: integer
+        description: Maximum number of traces to return.
+        default: 10
   - name: query_metrics
     description: Query Prometheus metrics via PromQL through the Grafana proxy. Returns structured metric data for APM analysis.
-    command: ["python", "scripts/query_metrics.py"]
+    command: ["python", "scripts/query_metrics.py", "--query", "{query}"]
+    params:
+      query:
+        type: string
+        description: PromQL query string (e.g. 'up', 'histogram_quantile(0.95, ...)').
+        required: true
 ---
 
 # OTEL Query Skill

@@ -1,22 +1,14 @@
-"""Query Prometheus metrics via Grafana proxy.
+"""Query Prometheus metrics via Grafana proxy — CLI tool for otel-query skill.
 
-Reads JSON query parameters from stdin, calls the Prometheus API through the
-Grafana datasource proxy, and prints the result as JSON to stdout.
+Usage::
 
-Input format::
-
-    {"query": "histogram_quantile(0.95, sum(rate(...)))"}
-
-Output format: Prometheus API JSON response (``{"status": "success", "data": {...}}``)
-or ``{"error": "..."}`` on failure.
-
-Note: This queries Prometheus instant API (current time). Use PromQL functions
-like ``rate(...[5m])`` or ``[5m]`` range selectors within the query string
-to specify time windows.
+    python query_metrics.py --query 'histogram_quantile(0.95, sum(rate(...)))'
+    python query_metrics.py --query 'up'
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -35,11 +27,7 @@ def query_metrics(
     promql: str,
     proxy_url: str | None = None,
 ) -> dict[str, Any]:
-    """Query Prometheus via the Grafana datasource proxy.
-
-    Returns the parsed JSON response from Prometheus, or a dict with an
-    ``"error"`` key on failure.
-    """
+    """Query Prometheus via the Grafana datasource proxy."""
     base = (
         proxy_url
         or os.getenv("OTEL_PROMETHEUS_PROXY_URL")
@@ -47,7 +35,6 @@ def query_metrics(
     ).rstrip("/")
 
     params: dict[str, str] = {"query": promql}
-
     url = f"{base}/query?{urllib.parse.urlencode(params)}"
     try:
         request = urllib.request.Request(url, method="GET")
@@ -61,13 +48,11 @@ def query_metrics(
 
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
-    payload = json.loads(sys.stdin.read() or "{}")
-    if not payload.get("query"):
-        print(json.dumps({"error": "Missing required parameter: query"}))
-        return 1
-    result = query_metrics(
-        promql=str(payload["query"]),
-    )
+    parser = argparse.ArgumentParser(description="Query Prometheus metrics via Grafana proxy")
+    parser.add_argument("--query", required=True, help="PromQL query string")
+
+    args = parser.parse_args()
+    result = query_metrics(promql=args.query)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if "error" not in result else 1
 
