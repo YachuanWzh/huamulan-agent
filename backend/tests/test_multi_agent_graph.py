@@ -29,8 +29,8 @@ def test_harness_dispatches_multi_agent_mode_to_multi_graph(monkeypatch) -> None
     async def fake_record_log(*_args, **_kwargs):
         return None
 
-    def fake_compile_multi_agent(settings, registry, memory, llm_config=None, hook_manager=None, cache=None):
-        calls.append((settings, registry, memory, llm_config, hook_manager, cache))
+    def fake_compile_multi_agent(settings, registry, memory, llm_config=None, hook_manager=None, cache=None, **kwargs):
+        calls.append((settings, registry, memory, llm_config, hook_manager, cache, kwargs))
         return FakeApp()
 
     monkeypatch.setattr(multi_agent_module, "compile_multi_agent", fake_compile_multi_agent)
@@ -43,7 +43,9 @@ def test_harness_dispatches_multi_agent_mode_to_multi_graph(monkeypatch) -> None
     response = asyncio.run(harness.run_user_turn("thread-1", "排查 p95", agent_mode="multi"))
 
     assert response.message == "multi answer"
-    assert calls[0] == ("settings", "registry", "memory", None, None, None)
+    # calls[0] is the compile_multi_agent call (with intent_index/intent_llm kwargs)
+    assert calls[0][:6] == ("settings", "registry", "memory", None, None, None)
+    assert "intent_index" in calls[0][6]
     assert calls[1][0]["messages"][0].content == "排查 p95"
 
 
