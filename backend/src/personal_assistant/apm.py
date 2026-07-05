@@ -483,3 +483,95 @@ def from_prometheus_metric(
         )
 
     return logs
+
+
+# ── OTEL telemetry query helpers ─────────────────────────────────────────
+
+
+DEFAULT_JAEGER_API_URL = "http://192.168.5.7:32801/jaeger/ui/api"
+DEFAULT_PROMETHEUS_PROXY_URL = (
+    "http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1"
+)
+
+
+def query_jaeger_traces(
+    *,
+    service: str,
+    operation: str | None = None,
+    lookback: str = "15m",
+    limit: int = 10,
+    min_duration_ms: int | None = None,
+    max_duration_ms: int | None = None,
+    api_url: str | None = None,
+) -> dict[str, Any]:
+    """Search Jaeger for traces matching the given criteria.
+
+    Returns the parsed JSON response from the Jaeger API, or a dict with an
+    ``"error"`` key on failure.
+    """
+    import os as _os
+    import json as _json
+    import urllib.error as _urllib_error
+    import urllib.parse as _urllib_parse
+    import urllib.request as _urllib_request
+
+    base = (api_url or _os.getenv("OTEL_JAEGER_API_URL") or DEFAULT_JAEGER_API_URL).rstrip("/")
+    params: dict[str, str] = {
+        "service": service,
+        "limit": str(max(1, limit)),
+        "lookback": lookback or "15m",
+    }
+    if operation:
+        params["operation"] = operation
+    if min_duration_ms is not None:
+        params["minDuration"] = f"{min_duration_ms}ms"
+    if max_duration_ms is not None:
+        params["maxDuration"] = f"{max_duration_ms}ms"
+
+    url = f"{base}/traces?{_urllib_parse.urlencode(params)}"
+    try:
+        request = _urllib_request.Request(url, method="GET")
+        request.add_header("Accept", "application/json")
+        with _urllib_request.urlopen(request, timeout=15.0) as response:
+            body = response.read().decode("utf-8")
+            return _json.loads(body)
+    except (OSError, _urllib_error.URLError) as exc:
+        return {"error": str(exc), "url": url}
+    except Exception as exc:
+        return {"error": str(exc), "url": url}
+
+
+def query_prometheus_metrics(
+    *,
+    promql: str,
+    proxy_url: str | None = None,
+) -> dict[str, Any]:
+    """Query Prometheus via the Grafana datasource proxy.
+
+    Returns the parsed JSON response from Prometheus, or a dict with an
+    ``"error"`` key on failure.
+    """
+    import os as _os
+    import json as _json
+    import urllib.error as _urllib_error
+    import urllib.parse as _urllib_parse
+    import urllib.request as _urllib_request
+
+    base = (
+        proxy_url
+        or _os.getenv("OTEL_PROMETHEUS_PROXY_URL")
+        or DEFAULT_PROMETHEUS_PROXY_URL
+    ).rstrip("/")
+
+    params: dict[str, str] = {"query": promql}
+    url = f"{base}/query?{_urllib_parse.urlencode(params)}"
+    try:
+        request = _urllib_request.Request(url, method="GET")
+        request.add_header("Accept", "application/json")
+        with _urllib_request.urlopen(request, timeout=15.0) as response:
+            body = response.read().decode("utf-8")
+            return _json.loads(body)
+    except (OSError, _urllib_error.URLError) as exc:
+        return {"error": str(exc), "url": url}
+    except Exception as exc:
+        return {"error": str(exc), "url": url}

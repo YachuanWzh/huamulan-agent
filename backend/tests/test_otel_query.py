@@ -328,7 +328,7 @@ class TestOtelToObservabilitySnapshot:
 
 SCRIPT_DIR = (
     Path(__file__).resolve().parents[1]
-    / "src" / "personal_assistant" / "skills" / "otel_query" / "scripts"
+    / "src" / "personal_assistant" / "skills" / "otel-query" / "scripts"
 )
 QUERY_TRACES_SCRIPT = SCRIPT_DIR / "query_traces.py"
 QUERY_METRICS_SCRIPT = SCRIPT_DIR / "query_metrics.py"
@@ -449,9 +449,7 @@ class TestQueryTracesFunction:
     """Test the query_traces function with mocked HTTP."""
 
     def test_returns_structured_trace_data(self) -> None:
-        from personal_assistant.skills.otel_query.scripts.query_traces import (
-            query_traces,
-        )
+        from personal_assistant.apm import query_jaeger_traces as query_traces
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_response = MagicMock()
@@ -472,9 +470,7 @@ class TestQueryTracesFunction:
         assert result["data"][0]["traceID"] == "abc123"
 
     def test_handles_http_error_gracefully(self) -> None:
-        from personal_assistant.skills.otel_query.scripts.query_traces import (
-            query_traces,
-        )
+        from personal_assistant.apm import query_jaeger_traces as query_traces
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = OSError("Connection refused")
@@ -491,9 +487,7 @@ class TestQueryMetricsFunction:
     """Test the query_metrics function with mocked HTTP."""
 
     def test_returns_structured_metric_data(self) -> None:
-        from personal_assistant.skills.otel_query.scripts.query_metrics import (
-            query_metrics,
-        )
+        from personal_assistant.apm import query_prometheus_metrics as query_metrics
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_response = MagicMock()
@@ -510,9 +504,7 @@ class TestQueryMetricsFunction:
         assert result["status"] == "success"
 
     def test_handles_http_error_gracefully(self) -> None:
-        from personal_assistant.skills.otel_query.scripts.query_metrics import (
-            query_metrics,
-        )
+        from personal_assistant.apm import query_prometheus_metrics as query_metrics
 
         with patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.side_effect = OSError("Connection refused")
