@@ -1,3 +1,4 @@
+import httpx
 from langchain_deepseek import ChatDeepSeek
 
 from personal_assistant.api.schemas import LLMConfig
@@ -15,4 +16,6 @@ def build_llm(settings: Settings, config: LLMConfig | None = None) -> ChatDeepSe
             if config.temperature is None
             else config.temperature
         ),
+        timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=10.0),
+        max_retries=3,
     )

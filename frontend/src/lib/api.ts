@@ -256,6 +256,12 @@ export type SkillEvaluationStreamEvent =
       results: SkillEvaluationSnapshot[]
       report?: SkillEvaluationReport
     }
+  | {
+      type: 'case_error'
+      mode: 'quick' | 'e2e'
+      case_id: string
+      message: string
+    }
 
 export interface ReplayMessage {
   role: 'user' | 'assistant' | 'tool_call'

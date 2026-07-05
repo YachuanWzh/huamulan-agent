@@ -91,6 +91,7 @@ export function WorkspacePanel({
   const [evaluationHistory, setEvaluationHistory] = useState<
     Record<string, SkillEvaluationSnapshot[]>
   >({})
+  const [toasts, setToasts] = useState<Array<{id: string; message: string}>>([])
 
   const loadReplay = useCallback(async () => {
     if (!threadId) {
@@ -214,6 +215,14 @@ export function WorkspacePanel({
   }
 
   const applyEvaluationEvent = (event: SkillEvaluationStreamEvent) => {
+    if (event.type === 'case_error') {
+      const toastId = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      setToasts(prev => [...prev, {id: toastId, message: event.message}])
+      setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== toastId))
+      }, 5000)
+      return
+    }
     setEvaluationProgress({
       mode: event.mode,
       source: event.source,
@@ -740,6 +749,15 @@ export function WorkspacePanel({
               ))}
             </ol>
           )}
+        </div>
+      )}
+      {toasts.length > 0 && (
+        <div className="toast-container" aria-live="polite">
+          {toasts.map(toast => (
+            <div key={toast.id} className="toast-item toast-error">
+              {toast.message}
+            </div>
+          ))}
         </div>
       )}
     </section>

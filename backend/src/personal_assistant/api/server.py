@@ -509,12 +509,22 @@ async def _iter_skill_evaluation_events(
         except Exception as exc:
             logger.warning("Failed to build LLM prompt guard for quick evaluation: %s", exc, exc_info=True)
     for index, case in enumerate(cases, start=1):
-        if mode == "e2e":
-            if harness is None:
-                raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
-            outcome = await _run_e2e_case(harness, case, run_id, agent_mode=agent_mode)
-        else:
-            outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm, agent_mode=agent_mode)
+        try:
+            if mode == "e2e":
+                if harness is None:
+                    raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
+                outcome = await _run_e2e_case(harness, case, run_id, agent_mode=agent_mode)
+            else:
+                outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm, agent_mode=agent_mode)
+        except Exception as exc:
+            logger.error("Case %s evaluation failed: %s", case.id, exc)
+            yield {
+                "type": "case_error",
+                "mode": mode,
+                "case_id": case.id,
+                "message": f"id:{case.id}评测失败，请稍后重试",
+            }
+            continue
         case_results.append(outcome)
         judge = None
         if mode == "e2e" and judge_client is not None:
