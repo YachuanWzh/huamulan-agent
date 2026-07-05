@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-DEFAULT_JAEGER_API_URL = "http://192.168.5.7:32801/jaeger/ui/api"
+DEFAULT_JAEGER_API_URL = ""
 
 
 def query_traces(

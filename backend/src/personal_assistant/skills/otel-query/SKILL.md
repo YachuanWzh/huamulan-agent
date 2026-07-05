@@ -87,5 +87,5 @@ Use `query_metrics` to fetch Prometheus metrics, then pass results through
 ## Configuration
 
 The scripts read service URLs from environment variables:
-- `OTEL_JAEGER_API_URL` — Jaeger API base URL (default: `http://192.168.5.7:32801/jaeger/ui/api`)
-- `OTEL_PROMETHEUS_PROXY_URL` — Prometheus API via Grafana proxy (default: `http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1`)
+- `OTEL_JAEGER_API_URL` — Jaeger API base URL (configure in `.env`)
+- `OTEL_PROMETHEUS_PROXY_URL` — Prometheus API via Grafana proxy (configure in `.env`)

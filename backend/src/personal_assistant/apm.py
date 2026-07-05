@@ -488,10 +488,8 @@ def from_prometheus_metric(
 # ── OTEL telemetry query helpers ─────────────────────────────────────────
 
 
-DEFAULT_JAEGER_API_URL = "http://192.168.5.7:32801/jaeger/ui/api"
-DEFAULT_PROMETHEUS_PROXY_URL = (
-    "http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1"
-)
+DEFAULT_JAEGER_API_URL = ""
+DEFAULT_PROMETHEUS_PROXY_URL = ""
 
 
 def query_jaeger_traces(

@@ -1,0 +1,65 @@
+{"id": "otel-rt-001", "query": "帮我查一下 frontend 的 trace 数据", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-002", "query": "从 Jaeger 拉取 checkout 服务的调用链", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-003", "query": "查一下 Prometheus 中 http_server_duration 的 p95", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-004", "query": "OTEL trace 里有没有错误 span？", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-005", "query": "用 OpenTelemetry 查一下 span 数据", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-006", "query": "jaeger 里面搜一下 cart 服务的慢调用", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-007", "query": "PromQL 查 latency p99", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-008", "query": "通过 OTEL 看看 throughput 有没有变化", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-009", "query": "查下 prometheus 最近 30 分钟的 error rate", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-010", "query": "用 Jaeger API 查 trace", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-011", "query": "otel 指标查询：adservice 的 gRPC 调用耗时", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-012", "query": "拉取 OpenTelemetry demo 的 span 数据", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-013", "query": "查一下服务的 trace latency 分布", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-014", "query": "Prometheus metrics 里面 payment 的计数指标", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-015", "query": "帮我从 trace 数据里找慢请求", "expected_skills": ["otel-query"]}
+
+{"id": "otel-rt-016", "query": "从 Jaeger trace 和 Prometheus metrics 综合分析 frontend 服务的健康状态", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-017", "query": "对比 OTEL trace 中的 error span 和 Prometheus 的 error rate 指标是否一致", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-018", "query": "查 trace 看哪个 span 最慢，再查 metric 验证是不是 DB 的问题", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-019", "query": "用 Jaeger 和 Prometheus 交叉验证 cart 服务的异常", "expected_skills": ["otel-query"]}
+
+{"id": "otel-rt-020", "query": "APM 面板报警了，帮我通过 OTEL trace 做根因分析", "expected_skills": ["otel-query", "troubleshoot"]}
+{"id": "otel-rt-021", "query": "先跑 OTEL 巡检指标，发现问题后用 jaeger trace 定位根因", "expected_skills": ["otel-query", "patrol"]}
+{"id": "otel-rt-022", "query": "审计报告需要包含 Prometheus 采集的 SLA 指标数据", "expected_skills": ["otel-query", "audit-sop"]}
+{"id": "otel-rt-023", "query": "LCP p95 从 2s 涨到 7s，帮我查 OTEL trace 和 metric 做智能排障", "expected_skills": ["otel-query", "troubleshoot"]}
+{"id": "otel-rt-024", "query": "跑巡检发现 error rate 异常，用 trace 数据做 RCA", "expected_skills": ["otel-query", "patrol", "troubleshoot"]}
+{"id": "otel-rt-025", "query": "release 发布后需要验证，先查 OTEL metrics 对比发布前后指标，再做合规审计", "expected_skills": ["otel-query", "audit-sop"]}
+{"id": "otel-rt-026", "query": "多个微服务同时异常，启动多 agent（metrics、troubleshoot、patrol、audit）联合分析 OTEL 数据", "expected_skills": ["otel-query", "troubleshoot", "patrol", "audit-sop"]}
+{"id": "otel-rt-027", "query": "帮我从 OTEL 数据中提取业务指标，metrics agent 做 PromQL 定义，audit agent 做合规评估", "expected_skills": ["otel-query", "audit-sop"]}
+{"id": "otel-rt-028", "query": "查 Jaeger trace 发现 retry chain，结合 Prometheus retry rate 指标评估 SLA 影响", "expected_skills": ["otel-query", "audit-sop"]}
+
+{"id": "otel-rt-029", "query": "帮我查一下 servicename 是 frontend 的 trace，只看最近 5 分钟", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-030", "query": "用 PromQL 写一个 rate() 查询，按 service_name 分组统计 QPS", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-031", "query": "jaeger trace 里面 operation_name 是 POST 的 span 都拉出来", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-032", "query": "histogram_quantile(0.99, ...) 查支付接口的 p99 延迟", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-033", "query": "查下所有 trace 中 duration > 1s 的慢调用", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-034", "query": "从 Prometheus 查过去 1 小时所有服务的 uptime 和 health", "expected_skills": ["otel-query"]}
+
+{"id": "otel-rt-035", "query": "API 超时了，帮我排查一下原因", "expected_skills": ["troubleshoot"]}
+{"id": "otel-rt-036", "query": "页面白屏怎么办？前端报错了", "expected_skills": ["troubleshoot"]}
+{"id": "otel-rt-037", "query": "帮我做一次系统健康检查", "expected_skills": ["patrol"]}
+{"id": "otel-rt-038", "query": "解释一下 LCP 和 INP 的含义", "expected_skills": ["apm-metrics"]}
+{"id": "otel-rt-039", "query": "给我一份慢 SQL 的排查 runbook", "expected_skills": ["troubleshoot-runbook"]}
+{"id": "otel-rt-040", "query": "审计最近工具调用的 token 消耗", "expected_skills": ["audit-sop"]}
+{"id": "otel-rt-041", "query": "日志里有什么错误？帮我分析", "expected_skills": []}
+{"id": "otel-rt-042", "query": "trace 一下这个函数的执行流程", "expected_skills": []}
+{"id": "otel-rt-043", "query": "Python traceback 报错了，帮我看看", "expected_skills": []}
+{"id": "otel-rt-044", "query": "监控大盘上 CPU usage 高了", "expected_skills": []}
+{"id": "otel-rt-045", "query": "帮我 debug 一下这段代码的 error", "expected_skills": []}
+{"id": "otel-rt-046", "query": "数据上报的 throughput 不够怎么办", "expected_skills": []}
+{"id": "otel-rt-047", "query": "网络 latency 高怎么排查", "expected_skills": []}
+{"id": "otel-rt-048", "query": "帮我分析一下这个 metric 的含义", "expected_skills": []}
+{"id": "otel-rt-049", "query": "能不能追踪一下 api 调用的参数", "expected_skills": []}
+{"id": "otel-rt-050", "query": "北京天气怎么样？有 trace 到冷空气吗", "expected_skills": ["weather"]}
+{"id": "otel-rt-051", "query": "今天几号？帮我 span 一下日历", "expected_skills": ["resolve-time"]}
+{"id": "otel-rt-052", "query": "有没有 trace 相关的技能可以安装？", "expected_skills": ["find-skills"]}
+{"id": "otel-rt-053", "query": "我 git trace 提交记录找不到了", "expected_skills": []}
+{"id": "otel-rt-054", "query": "stack trace 里面哪一行报错了", "expected_skills": []}
+
+{"id": "otel-rt-055", "query": "WebSocket 连接频繁断开，帮我查 OTEL 的 trace 和 metric 定位问题", "expected_skills": ["otel-query", "troubleshoot"]}
+{"id": "otel-rt-056", "query": "巡检发现 Redis 命中率下降，用 jaeger 查一下是不是下游依赖的问题", "expected_skills": ["otel-query", "patrol", "troubleshoot"]}
+{"id": "otel-rt-057", "query": "OpenTelemetry 配置有问题，jaeger 和 prometheus 的 endpoint 应该怎么设？", "expected_skills": ["otel-query"]}
+{"id": "otel-rt-058", "query": "OTEL 数据怎么和 APM 排障流程集成？给我一个端到端的例子", "expected_skills": ["otel-query", "troubleshoot"]}
+{"id": "otel-rt-059", "query": "能不能自动从 prometheus 拉指标数据做巡检？发现异常自动触发 trace 分析", "expected_skills": ["otel-query", "patrol"]}
+{"id": "otel-rt-060", "query": "帮我分析这段 jaeger trace JSON，找出最慢的 span 和错误节点", "expected_skills": ["otel-query", "troubleshoot"]}

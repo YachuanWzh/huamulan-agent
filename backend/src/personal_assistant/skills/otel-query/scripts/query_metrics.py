@@ -17,9 +17,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-DEFAULT_PROMETHEUS_PROXY_URL = (
-    "http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1"
-)
+DEFAULT_PROMETHEUS_PROXY_URL = ""
 
 
 def query_metrics(

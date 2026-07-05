@@ -146,6 +146,108 @@ flowchart LR
 
 这套能力目前定位为本地原型和评测闭环：RUM 数据保存在服务端内存中；RCA 以确定性规则为主，便于测试和复现；`patrol` 已有规则执行脚本和 Skill SOP，但还没有接真实 Cron、Issue 创建、PR 生成和部署自动化。生产化时建议补充持久化存储、调度器、告警通道、权限隔离、瀑布图和 Session Replay。
 
+## OTEL 远程遥测数据集成
+
+项目对接了远端 [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo)（Astronomy Shop 微服务应用，**15+ 服务 × 8 种语言**），部署在远端服务器上。通过 `otel-query` Skill 直连 Jaeger 和 Prometheus API，结合 `apm.py` 分析引擎完成"**数据产生 → 数据获取 → APM 分析**"闭环。
+
+### 1. 数据产生：OpenTelemetry Demo
+
+OpenTelemetry Demo（Astronomy Shop）是 OTel 官方微服务演示项目，使用 OTel Collector 统一采集所有微服务的 traces、metrics、logs：
+
+```
+微服务集群 (frontend/cart/checkout/product-catalog/currency/payment/shipping/...)
+    │  OTel SDK 自动埋点 (JS/Go/Python/Java/.NET/Rust/Ruby/PHP/C++/Kotlin)
+    │  otel-config.yml → OTLP gRPC → OTel Collector
+    ▼
+OTel Collector (Receivers: OTLP/Docker/Host/Redis/PostgreSQL/Nginx/Prometheus scrape)
+    │  Processors: resource detection / span sanitize / memory limiter
+    │  Exporters → Jaeger (traces) / Prometheus (metrics) / OpenSearch (logs)
+    ▼
+Jaeger :16686  │  Prometheus :9090  │  Grafana :3000
+  追踪查询       时序指标存储           可视化面板
+```
+
+**关键配置文件**：
+- `otel-config.yml` — 服务级 OTel SDK 配置（tracer/meter/logger provider）
+- `src/otel-collector/otelcol-config.yml` — Collector 基础 pipeline 配置
+- `src/otel-collector/otelcol-config-observability.yml` — 可观测后端 exporter 配置
+
+### 2. 数据获取 → APM 分析
+
+langgraph-claw 通过两个核心模块完成从"原始遥测"到"分析洞察"的转换：
+
+#### otel-query Skill
+
+```
+backend/src/personal_assistant/skills/otel-query/
+├── SKILL.md              # 触发词：otel / trace / span / metric / prometheus / jaeger / latency
+└── scripts/
+    ├── query_traces.py   # Jaeger REST API → trace JSON (按 service/operation/lookback 查询)
+    └── query_metrics.py  # Grafana Proxy → PromQL → metric JSON
+```
+
+**环境变量配置**：
+
+| 变量 | 默认值 |
+|------|--------|
+| `OTEL_JAEGER_API_URL` | Jaeger REST API 地址（需在 `.env` 中配置） |
+| `OTEL_PROMETHEUS_PROXY_URL` | Prometheus Grafana 代理地址（需在 `.env` 中配置） |
+
+#### apm.py 分析引擎
+
+```
+Jaeger trace JSON  ──→  from_jaeger_trace()         → FrontendRumEvent[]
+                        from_jaeger_trace_to_logs()  → ExecutionLog[]
+Prometheus JSON   ──→  from_prometheus_metric()     → ExecutionLog[]
+                                      │
+                                      ▼
+                         build_observability_snapshot()
+                                      │
+                    ┌─────────────────┼─────────────────┐
+                    ▼                 ▼                  ▼
+              detect_anomalies()  infer_root_cause()  聚合摘要
+              (IQR + Z-score)    (规则证据链)
+                    │                 │                  │
+                    └─────────────────┼──────────────────┘
+                                      ▼
+                         ObservabilitySnapshot
+                                      │
+                                      ▼
+                    APM Multi-Agent 分析报告
+                    (metrics / troubleshoot / patrol / audit)
+```
+
+#### 端到端排障示例
+
+```
+👤 用户: checkout 服务最近 30 分钟出现大量超时，帮我分析原因
+
+🔧 Agent 执行:
+  1. query_traces --service checkout --lookback 30m --min-duration-ms 1000
+  2. query_metrics --query "rate(http_server_duration_milliseconds_count{...}[5m])"
+  3. apm.from_jaeger_trace() → payment/Charge gRPC span 耗时 2s+
+  4. apm.infer_root_cause() → "backend_retry"
+  5. 输出: "payment 服务 gRPC Charge 调用耗时超 2 秒，导致 checkout 超时。
+           建议检查支付网关 + 增加 gRPC timeout + 添加断路器。"
+```
+
+### 3. 未来规划：遥测数据推送与自动分析
+
+| 阶段 | 规划 | 说明 |
+|------|------|------|
+| **短期** | SLO 基线配置 | 为关键服务配置 P95/错误率/吞吐量 SLO 基线 |
+| **短期** | PromQL 模板库 | 预置常用查询模板，降低 Agent PromQL 错误率 |
+| **短期** | Trace 可视化 | 前端增加 Jaeger span 瀑布图视图 |
+| **中期** | AlertManager 集成 | Prometheus 告警 → Webhook 推送 → 自动 RCA |
+| **中期** | OTel Collector 直推 | Collector 配置 otlp_http exporter → 准实时推送 |
+| **中期** | 异常分级响应 | L1 记录 / L2 自动排障 / L3 通知 + Runbook |
+| **长期** | 零人工智能排障 | 系统检测 → Agent 自动分析 → 推送结论 |
+| **长期** | 跨服务拓扑感知 | 利用 trace parent-child span 自动构建依赖图 |
+| **长期** | 历史基线自学习 | 基于 Prometheus 历史数据学习季节性模式 |
+| **长期** | 修复建议闭环 | 诊断 → 修复 → 验证 反馈闭环 |
+
+> 详细技术方案、数据流架构、Mermaid 图表和代码级设计见 **[技术方案报告.md §OTEL 远程遥测数据集成](./技术方案报告.md#otel-远程遥测数据集成)**。
+
 ## 技术栈
 
 | 层 | 技术 |

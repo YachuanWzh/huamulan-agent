@@ -3,7 +3,7 @@
 **目标:** 使 langgraph-claw 的 APM agent 能直接从 OpenTelemetry Demo 拉取真实遥测数据 (traces/metrics) 并进行分析。
 
 **假设:**
-- OTEL demo 服务地址: Jaeger `192.168.5.7:32801`, Prometheus(by Grafana) `192.168.5.7:32807`
+- OTEL demo 服务地址: 通过 `OTEL_JAEGER_API_URL` 和 `OTEL_PROMETHEUS_PROXY_URL` 环境变量配置，详见 `.env.example`
 - Jaeger API 路径前缀: `/jaeger/ui/api/`
 - Prometheus 通过 Grafana 代理: `/api/datasources/proxy/uid/webstore-metrics/api/v1/`
 - 新 Skill 名: `otel-query`
@@ -98,11 +98,11 @@ scripts:
 
 新增 OTEL demo 服务地址配置：
 ```ini
-OTEL_JAEGER_API_URL=http://192.168.5.7:32801/jaeger/ui/api
-OTEL_PROMETHEUS_PROXY_URL=http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1
+OTEL_JAEGER_API_URL=
+OTEL_PROMETHEUS_PROXY_URL=
 ```
 
-在 `config.py` 中添加对应 Settings 字段。
+在 `.env.example` 中添加对应配置项，在 `config.py` 中添加对应 Settings 字段。
 
 **TDD 步骤:**
 1. RED: 写测试验证配置默认值和环境变量覆盖
