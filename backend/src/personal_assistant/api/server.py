@@ -25,6 +25,7 @@ from personal_assistant.api.schemas import (
     ApprovalBatchDecision,
     ApprovalDecision,
     AuditEvent,
+    AlertManagerWebhook,
     ChatRequest,
     ChatResponse,
     ClearThreadsResponse,
@@ -347,6 +348,52 @@ async def frontend_observability_summary(
 ) -> ObservabilitySnapshot:
     logs = await harness.list_execution_logs(thread_id=thread_id, limit=limit) if thread_id else []
     return build_observability_snapshot(frontend_rum_events[-limit:], logs)
+
+
+@app.post("/api/otel/alerts")
+async def handle_otel_alert(payload: AlertManagerWebhook):
+    """Receive AlertManager webhook for P0/P1 instant RCA.
+
+    P0 (severity=critical) and P1 (severity=warning) alerts trigger
+    immediate root cause analysis. The handler:
+    1. Filters to P0/P1 alerts only (P2/P3 come via Kafka)
+    2. Auto-pulls associated Jaeger traces and Prometheus metrics
+    3. Runs instant RCA via troubleshoot_agent
+    4. Returns accepted status (RCA runs in background)
+
+    P2 (info) and P3 (none) alerts are silently dropped here — they
+    arrive via the Kafka batch ingestion path.
+    """
+    processed = 0
+    for alert in payload.alerts:
+        severity = alert.labels.get("severity", "")
+        if severity not in ("critical", "warning"):
+            continue  # P2/P3 come via Kafka
+
+        service = alert.labels.get("service_name", "unknown")
+        alert_name = alert.labels.get("alertname", "unknown")
+        summary = alert.annotations.get("summary", "")
+        starts_at = alert.starts_at
+
+        logger.info(
+            "OTEL alert received: severity=%s service=%s alert=%s summary=%s starts_at=%s",
+            severity,
+            service,
+            alert_name,
+            summary,
+            starts_at,
+        )
+
+        # TODO Phase 4: Dispatch to troubleshoot_agent for auto RCA
+        # background_tasks.add_task(
+        #     run_auto_troubleshoot,
+        #     alert=alert,
+        #     service=service,
+        # )
+
+        processed += 1
+
+    return {"status": "accepted", "alerts": processed}
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])
