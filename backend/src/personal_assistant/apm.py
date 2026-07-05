@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from statistics import mean, pstdev
 from typing import Any, Literal
 
@@ -241,3 +242,216 @@ def _percentile(sorted_values: list[float], percentile: float) -> float:
 
     rank = max(1, math.ceil(percentile / 100 * len(sorted_values)))
     return sorted_values[min(rank - 1, len(sorted_values) - 1)]
+
+
+# ── OTEL telemetry converters ─────────────────────────────────────────────
+
+
+def _jaeger_tag(span: dict[str, Any], key: str) -> Any | None:
+    """Extract a tag value from a Jaeger span by key name."""
+    for tag in span.get("tags", []) or []:
+        if isinstance(tag, dict) and tag.get("key") == key:
+            return tag.get("value")
+    return None
+
+
+def _jaeger_has_tag(span: dict[str, Any], key: str, value: Any = None) -> bool:
+    """Check if a Jaeger span has a tag with an optional value."""
+    actual = _jaeger_tag(span, key)
+    if value is not None:
+        return actual == value
+    return actual is not None
+
+
+def _span_duration_ms(span: dict[str, Any]) -> float:
+    """Convert Jaeger span duration (microseconds) to milliseconds."""
+    return float(span.get("duration", 0)) / 1000.0
+
+
+def from_jaeger_trace(trace_data: dict[str, Any]) -> list[FrontendRumEvent]:
+    """Convert a Jaeger trace's spans into a list of :class:`FrontendRumEvent`.
+
+    Mapping rules:
+    - Spans with ``http.status_code >= 400`` or ``error=true`` → ``js_error``
+    - Spans with ``http.method`` → ``web_vital`` (HTTP serving spans)
+    - Spans with ``rpc.method`` → ``custom_timing`` (gRPC spans)
+    - All others → ``custom_timing``
+    - ``duration`` (μs) → ``value`` (ms)
+    """
+    events: list[FrontendRumEvent] = []
+    trace_id = trace_data.get("traceID", "")
+    for span in trace_data.get("spans", []) or []:
+        duration_ms = _span_duration_ms(span)
+        http_target = _jaeger_tag(span, "http.target") or ""
+        http_url_tag = _jaeger_tag(span, "http.url") or ""
+        http_status = _jaeger_tag(span, "http.status_code")
+        is_error = _jaeger_has_tag(span, "error", True)
+        is_http_error = isinstance(http_status, int) and http_status >= 400
+        has_http_method = _jaeger_has_tag(span, "http.method")
+        has_rpc_method = _jaeger_has_tag(span, "rpc.method")
+
+        if is_error or is_http_error:
+            event_type: RumEventType = "js_error"
+        elif has_http_method:
+            event_type = "web_vital"
+        elif has_rpc_method:
+            event_type = "custom_timing"
+        else:
+            event_type = "custom_timing"
+
+        events.append(
+            FrontendRumEvent(
+                type=event_type,
+                name=str(span.get("operationName", "")),
+                value=round(duration_ms, 3),
+                url=http_target or http_url_tag or None,
+                trace_id=str(trace_id),
+                timestamp=str(span.get("startTime", "")),
+                metadata={
+                    "span_id": str(span.get("spanID", "")),
+                    "http_status_code": http_status,
+                    "rpc_service": _jaeger_tag(span, "rpc.service"),
+                    "rpc_method": _jaeger_tag(span, "rpc.method"),
+                },
+            )
+        )
+    return events
+
+
+def from_jaeger_trace_to_logs(trace_data: dict[str, Any]) -> list[ExecutionLog]:
+    """Convert a Jaeger trace's spans into a list of :class:`ExecutionLog`.
+
+    Mapping rules:
+    - Spans become ``ExecutionLog`` with ``event_type="tool"``
+    - ``duration`` (μs) → ``duration_ms``
+    - Spans with errors → ``status="failed"``, otherwise ``status="completed"``
+    """
+    logs: list[ExecutionLog] = []
+    trace_id = trace_data.get("traceID", "")
+    for span in trace_data.get("spans", []) or []:
+        duration_ms = int(_span_duration_ms(span))
+        http_status = _jaeger_tag(span, "http.status_code")
+        is_error = _jaeger_has_tag(span, "error", True)
+        is_http_error = isinstance(http_status, int) and http_status >= 400
+        status: str = "failed" if (is_error or is_http_error) else "completed"
+        log = ExecutionLog(
+            id=0,
+            created_at=datetime.now(timezone.utc),  # type: ignore[arg-type]
+            thread_id=trace_id,
+            run_id=str(span.get("spanID", "")),
+            parent_id=None,
+            event_type="tool",
+            status=status,  # type: ignore[arg-type]
+            name=str(span.get("operationName", "")),
+            input={
+                "http_method": _jaeger_tag(span, "http.method"),
+                "http_url": _jaeger_tag(span, "http.url"),
+                "rpc_method": _jaeger_tag(span, "rpc.method"),
+            },
+            output={},
+            error={"http_status_code": http_status} if (is_error or is_http_error) else {},
+            duration_ms=duration_ms,
+            token_usage={},
+            metadata={
+                "span_id": str(span.get("spanID", "")),
+                "trace_id": trace_id,
+                "rpc_service": _jaeger_tag(span, "rpc.service"),
+            },
+        )
+        logs.append(log)
+    return logs
+
+
+def _prometheus_metric_name(result: dict[str, Any]) -> str | None:
+    """Extract the ``__name__`` label from a Prometheus result metric dict."""
+    metric = result.get("metric", {}) if isinstance(result, dict) else {}
+    return metric.get("__name__") if isinstance(metric, dict) else None
+
+
+def from_prometheus_metric(
+    metric_name_hint: str,
+    prometheus_result: dict[str, Any],
+    *,
+    metric_filter: dict[str, str] | None = None,
+) -> list[ExecutionLog]:
+    """Convert a Prometheus query result into a list of :class:`ExecutionLog`.
+
+    Args:
+        metric_name_hint: The metric name the caller intended to query
+            (used as the ``name`` field in generated logs).
+        prometheus_result: The parsed JSON response from Prometheus.
+        metric_filter: Optional label key-value pairs to filter results.
+
+    Mapping rules:
+    - Counter metrics (``_total`` suffix) → ``event_type="turn"``
+    - Histogram/summary metrics → ``event_type="tool"``
+    - ``duration_ms`` derived from the value field when numeric
+    """
+    logs: list[ExecutionLog] = []
+    data = prometheus_result.get("data", {}) if isinstance(prometheus_result, dict) else {}
+    results: list[dict[str, Any]] = data.get("result", []) or []
+
+    for idx, result in enumerate(results):
+        metric_labels = result.get("metric", {}) if isinstance(result, dict) else {}
+        if not isinstance(metric_labels, dict):
+            continue
+
+        # Apply optional label filter
+        if metric_filter:
+            if not all(
+                metric_labels.get(key) == value for key, value in metric_filter.items()
+            ):
+                continue
+
+        # Extract the actual metric name from labels (fall back to hint)
+        actual_name = _prometheus_metric_name(result) or metric_name_hint
+
+        # Determine event type
+        is_counter = actual_name.endswith("_total") or actual_name.endswith("_count")
+        event_type = "turn" if is_counter else "tool"
+
+        # Extract route/service name from common label keys
+        route = metric_labels.get("http_route") or metric_labels.get("rpc_method") or ""
+        service = metric_labels.get("service_name") or metric_labels.get("rpc_service") or ""
+        display_name = route or actual_name
+
+        # Extract value — Prometheus returns either "value" (instant) or "values" (range)
+        raw_value = result.get("value")
+        if isinstance(raw_value, list) and len(raw_value) >= 2:
+            raw_value = raw_value[1]
+        elif raw_value is None:
+            values = result.get("values", [])
+            if isinstance(values, list) and values:
+                last = values[-1]
+                if isinstance(last, list) and len(last) >= 2:
+                    raw_value = last[1]
+
+        try:
+            numeric_value = float(raw_value) if raw_value is not None else 0.0
+        except (ValueError, TypeError):
+            numeric_value = 0.0
+
+        logs.append(
+            ExecutionLog(
+                id=idx,
+                created_at=datetime.now(timezone.utc),  # type: ignore[arg-type]
+                thread_id="otel-prometheus",
+                run_id=None,
+                parent_id=None,
+                event_type=event_type,  # type: ignore[arg-type]
+                status="completed",
+                name=str(display_name),
+                input={"metric_name": actual_name, "labels": metric_labels},
+                output={"value": numeric_value},
+                error={},
+                duration_ms=int(numeric_value) if is_counter else None,
+                token_usage={},
+                metadata={
+                    "service_name": service,
+                    "metric_name": actual_name,
+                    "rpc_method": metric_labels.get("rpc_method"),
+                },
+            )
+        )
+
+    return logs
