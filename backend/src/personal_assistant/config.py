@@ -190,6 +190,27 @@ class Settings(BaseSettings):
         default="",
         alias="OTEL_PROMETHEUS_PROXY_URL",
     )
+    # ── OTEL Push: Kafka Consumer ──────────────────────────────────
+    otel_kafka_brokers: str = Field(
+        default="localhost:9092",
+        alias="OTEL_KAFKA_BROKERS",
+    )
+    otel_kafka_topic_spans: str = Field(
+        default="otel-spans",
+        alias="OTEL_KAFKA_TOPIC_SPANS",
+    )
+    otel_kafka_topic_metrics: str = Field(
+        default="otel-metrics",
+        alias="OTEL_KAFKA_TOPIC_METRICS",
+    )
+    otel_kafka_topic_logs: str = Field(
+        default="otel-logs",
+        alias="OTEL_KAFKA_TOPIC_LOGS",
+    )
+    otel_kafka_consumer_group: str = Field(
+        default="langgraph-claw",
+        alias="OTEL_KAFKA_CONSUMER_GROUP",
+    )
     evaluation_judge_base_url: str | None = Field(
         default=None,
         alias="EVALUATION_JUDGE_BASE_URL",

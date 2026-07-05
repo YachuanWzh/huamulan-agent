@@ -17,6 +17,7 @@ dependencies = [
   "langfuse>=3.0.0",
   "langchain-deepseek>=1.1.0",
   "redis>=5.0.0",
+  "kafka-python>=2.0.0",
 ]
 
 [project.optional-dependencies]
