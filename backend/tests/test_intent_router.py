@@ -90,3 +90,73 @@ def test_intent_routing_result_holds_slots_and_trace():
     assert result.intent_slots.primary_intent == "patrol"
     assert len(result.trace) == 1
     assert result.trace[0]["stage"] == "semantic"
+
+
+# ── Task 2: Tier 0 regex with confidence ──────────────────────────────
+
+from personal_assistant.agent.intent_router import _regex_intent_with_confidence
+
+
+def test_regex_intent_troubleshoot_high_confidence():
+    """多关键词命中 → 高置信度（≥0.80）"""
+    intent, conf = _regex_intent_with_confidence("排查 payment-service 超时 根因分析")
+    assert intent == "troubleshoot"
+    assert conf >= 0.80
+
+
+def test_regex_intent_troubleshoot_single_keyword_medium_confidence():
+    """单关键词 → 中等置信度"""
+    intent, conf = _regex_intent_with_confidence("帮我排查一下")
+    assert intent == "troubleshoot"
+    assert 0.60 <= conf < 0.80
+
+
+def test_regex_intent_patrol_single_keyword():
+    intent, conf = _regex_intent_with_confidence("巡检")
+    assert intent == "patrol"
+    assert 0.60 <= conf < 0.80
+
+
+def test_regex_intent_patrol_multi_keyword_high():
+    intent, conf = _regex_intent_with_confidence("配置巡检告警规则")
+    assert intent == "patrol"
+    assert conf >= 0.80
+
+
+def test_regex_intent_metrics_with_metric_names():
+    """包含指标名 → metrics"""
+    intent, conf = _regex_intent_with_confidence("帮我查下 p99 和 LCP")
+    assert intent == "metrics"
+    assert conf >= 0.80
+
+
+def test_regex_intent_metrics_single_metric():
+    intent, conf = _regex_intent_with_confidence("p99")
+    assert intent == "metrics"
+    assert 0.60 <= conf < 0.80
+
+
+def test_regex_intent_general_fallback():
+    """不匹配任何意图 → general 低置信"""
+    intent, conf = _regex_intent_with_confidence("你好，帮我介绍一下系统功能")
+    assert intent == "general"
+    assert conf < 0.60
+
+
+def test_regex_intent_audit_multi_keyword():
+    intent, conf = _regex_intent_with_confidence("审计一下合规情况")
+    assert intent == "audit"
+    assert conf >= 0.80
+
+
+def test_regex_intent_audit_single_keyword():
+    intent, conf = _regex_intent_with_confidence("审计")
+    assert intent == "audit"
+    assert 0.60 <= conf < 0.80
+
+
+def test_regex_intent_case_insensitive():
+    """大小写不敏感"""
+    intent, conf = _regex_intent_with_confidence("RCA TIMEOUT ERROR")
+    assert intent == "troubleshoot"
+    assert conf >= 0.80

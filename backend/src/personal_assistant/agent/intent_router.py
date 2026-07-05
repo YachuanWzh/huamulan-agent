@@ -9,6 +9,7 @@ The key difference from single-agent routing:
   - Multi-agent: embeds *intent utterances* (example queries per category)
     to classify user query → intent category (troubleshoot/patrol/audit/metrics)
 """
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -119,3 +120,65 @@ class IntentRoutingResult:
     """Result of the 3-tier intent routing funnel with diagnostic trace."""
     intent_slots: IntentSlots
     trace: list[dict[str, Any]]
+
+
+# ── Tier 0: Regex with confidence ─────────────────────────────────────────
+
+
+def _regex_intent_with_confidence(normalized: str) -> tuple[str, float]:
+    """Tier 0: regex intent classification with confidence heuristics.
+
+    Returns (intent, confidence). When confidence < 0.80, the caller
+    should proceed to Tier 1 (semantic) instead of short-circuiting.
+
+    Confidence levels:
+      - >= 0.90: 2+ signal keywords matched (high confidence)
+      - 0.70: exactly 1 signal keyword matched (medium confidence)
+      - 0.40: no signal matched (fallback to general)
+    """
+    lowered = normalized.lower()
+
+    # ── Count keyword signals per intent ──
+    troubleshoot_signals = len(re.findall(
+        r"\b(?:rca|root\s*cause|troubleshoot|timeout|slow|error)\b|排查|根因|超时|异常|故障|挂了",
+        lowered,
+    ))
+    patrol_signals = len(re.findall(
+        r"\b(?:patrol|health\s*check|alert)\b|巡检|告警|健康检查|监控",
+        lowered,
+    ))
+    audit_signals = len(re.findall(
+        r"\b(?:audit|approval|compliance|log)\b|审计|合规|审批|日志|治理",
+        lowered,
+    ))
+    metric_keywords = len(re.findall(
+        r"\b(?:metric|web\s*vitals|conversion)\b|指标|转化率|趋势|解读|定义",
+        lowered,
+    ))
+    metric_names = len(re.findall(
+        r"\b(?:p50|p75|p90|p95|p99|lcp|cls|inp|ttfb|apdex|slo|fid)\b", lowered,
+    ))
+    metrics_signals = metric_keywords + metric_names
+
+    # ── High confidence: 2+ signals ──
+    if troubleshoot_signals >= 2:
+        return ("troubleshoot", 0.90)
+    if patrol_signals >= 2:
+        return ("patrol", 0.90)
+    if audit_signals >= 2:
+        return ("audit", 0.90)
+    if metrics_signals >= 2:
+        return ("metrics", 0.90)
+
+    # ── Medium confidence: exactly 1 signal ──
+    if troubleshoot_signals == 1:
+        return ("troubleshoot", 0.70)
+    if patrol_signals == 1:
+        return ("patrol", 0.70)
+    if audit_signals == 1:
+        return ("audit", 0.70)
+    if metrics_signals == 1:
+        return ("metrics", 0.70)
+
+    # ── Fallback ──
+    return ("general", 0.40)
