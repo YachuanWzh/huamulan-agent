@@ -318,3 +318,96 @@ def test_intent_decision_pydantic_validation():
     )
     assert decision.primary_intent == "audit"
     assert decision.secondary_intents == ["metrics"]
+
+
+# ── Task 5: 3-tier funnel orchestrator ─────────────────────────────────
+
+from personal_assistant.agent.intent_router import route_intent_with_trace
+
+
+def test_route_intent_regex_short_circuit():
+    """高置信度正则命中 → 短路返回，不进入语义层"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    result = async_test(route_intent_with_trace(
+        user_text="排查服务超时 根因分析 故障定位",
+        intent_index=index,
+        llm=None,
+        regex_threshold=0.80,
+        semantic_threshold=0.75,
+    ))
+
+    assert result.intent_slots.primary_intent == "troubleshoot"
+    assert result.intent_slots.source == "regex"
+    assert result.intent_slots.confidence >= 0.80
+    # 正则短路时 trace 只有 regex stage
+    assert len(result.trace) == 1
+    assert result.trace[0]["stage"] == "regex"
+
+
+def test_route_intent_falls_through_to_semantic():
+    """单关键词低置信 → 进入语义层"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    result = async_test(route_intent_with_trace(
+        user_text="巡检",
+        intent_index=index,
+        llm=None,
+        regex_threshold=0.80,
+        semantic_threshold=0.75,
+    ))
+
+    assert result.intent_slots.primary_intent != "general"
+    stages = {t["stage"] for t in result.trace}
+    assert "regex" in stages
+    assert "semantic" in stages
+
+
+def test_route_intent_without_index_uses_regex_only():
+    """没有 semantic index → 仅 Tier 0"""
+    result = async_test(route_intent_with_trace(
+        user_text="查询天气",
+        intent_index=None,
+        llm=None,
+    ))
+
+    assert result.intent_slots.primary_intent == "general"
+    assert result.intent_slots.source == "regex"
+
+
+def test_route_intent_trace_structure():
+    """trace 每项都有 stage 和 status 字段"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    result = async_test(route_intent_with_trace(
+        user_text="帮我巡检一下",
+        intent_index=index,
+        llm=None,
+    ))
+
+    for entry in result.trace:
+        assert "stage" in entry
+        assert "status" in entry
+
+
+def test_route_intent_preserves_existing_slots():
+    """传入的 existing_slots（metrics/entities）被保留"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    result = async_test(route_intent_with_trace(
+        user_text="排查 checkout p99 超时",
+        intent_index=index,
+        llm=None,
+        existing_slots={"metrics": ["p99"], "entities": ["checkout"]},
+    ))
+
+    assert "p99" in result.intent_slots.metrics
+    assert "checkout" in result.intent_slots.entities

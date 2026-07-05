@@ -372,3 +372,195 @@ def _parse_intent_llm_decision(raw: object) -> IntentDecision:
         confidence=min(max(confidence, 0.0), 1.0),
         reason=reason,
     )
+
+
+# ── 3-Tier Funnel Orchestrator ─────────────────────────────────────────────
+
+
+async def route_intent_with_trace(
+    user_text: str,
+    *,
+    intent_index: IntentEmbeddingIndex | None = None,
+    llm=None,
+    regex_threshold: float = 0.80,
+    semantic_threshold: float = 0.75,
+    semantic_top_k: int = 3,
+    llm_threshold: float = 0.60,
+    existing_slots: dict[str, Any] | None = None,
+) -> IntentRoutingResult:
+    """3-tier intent routing funnel: regex → semantic → LLM.
+
+    Follows the same 3-tier pattern as the single-agent skill router
+    (route_skill_names_with_trace in router.py), adapted for intent
+    classification instead of skill selection.
+
+    Args:
+        user_text: Raw user query.
+        intent_index: Optional IntentEmbeddingIndex for Tier 1.
+        llm: Optional LLM for Tier 2 structured output classification.
+        regex_threshold: Confidence >= this short-circuits after Tier 0.
+        semantic_threshold: Cosine similarity >= this selects after Tier 1.
+        semantic_top_k: Max candidates from semantic search.
+        llm_threshold: Confidence >= this selects after Tier 2.
+        existing_slots: Pre-extracted metrics/entities from legacy regex
+            (rewrite_query_and_slots output).
+
+    Returns:
+        IntentRoutingResult with classified intent and diagnostic trace.
+    """
+    normalized = " ".join(user_text.split())
+    trace: list[dict[str, Any]] = []
+
+    # Merge pre-extracted metrics/entities from legacy regex
+    metrics: list[str] = []
+    entities: list[str] = []
+    if isinstance(existing_slots, dict):
+        metrics = list(existing_slots.get("metrics") or [])
+        entities = list(existing_slots.get("entities") or [])
+
+    # ── Tier 0: Regex with confidence ─────────────────────────────────
+    regex_intent, regex_conf = _regex_intent_with_confidence(normalized)
+
+    if regex_conf >= regex_threshold and regex_intent != "general":
+        trace.append({
+            "stage": "regex",
+            "status": "selected",
+            "intent": regex_intent,
+            "confidence": regex_conf,
+            "threshold": regex_threshold,
+        })
+        return IntentRoutingResult(
+            intent_slots=IntentSlots(
+                domain=_looks_like_apm_domain(normalized),
+                primary_intent=regex_intent,
+                confidence=regex_conf,
+                source="regex",
+                reason=f"regex matched with {regex_conf:.0%} confidence",
+                metrics=metrics,
+                entities=entities,
+            ),
+            trace=trace,
+        )
+
+    trace.append({
+        "stage": "regex",
+        "status": "below_threshold" if regex_intent != "general" else "missed",
+        "intent": regex_intent,
+        "confidence": regex_conf,
+        "threshold": regex_threshold,
+    })
+
+    # ── Tier 1: Semantic Router ──────────────────────────────────────
+    if intent_index is not None and normalized.strip():
+        try:
+            candidates = await intent_index.search(normalized, top_k=semantic_top_k)
+        except Exception:
+            logger.exception("Intent semantic search failed")
+            candidates = []
+            trace.append({"stage": "semantic", "status": "failed", "reason": "search error"})
+
+        if candidates:
+            top = candidates[0]
+            candidate_trace = [
+                {"name": c.name, "score": round(c.score, 4)} for c in candidates
+            ]
+            if top.score >= semantic_threshold:
+                trace.append({
+                    "stage": "semantic",
+                    "status": "selected",
+                    "candidates": candidate_trace,
+                    "selected_intent": top.name,
+                    "threshold": semantic_threshold,
+                })
+                return IntentRoutingResult(
+                    intent_slots=IntentSlots(
+                        domain=_looks_like_apm_domain(normalized),
+                        primary_intent=top.name,
+                        confidence=top.score,
+                        source="semantic",
+                        reason=f"semantic match score={top.score:.3f}",
+                        metrics=metrics,
+                        entities=entities,
+                    ),
+                    trace=trace,
+                )
+            trace.append({
+                "stage": "semantic",
+                "status": "below_threshold",
+                "candidates": candidate_trace,
+                "threshold": semantic_threshold,
+            })
+        else:
+            trace.append({"stage": "semantic", "status": "no_candidates"})
+    elif intent_index is None:
+        trace.append({"stage": "semantic", "status": "skipped", "reason": "no intent index"})
+
+    # ── Tier 2: LLM Classifier ───────────────────────────────────────
+    if llm is not None:
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            response = await llm.ainvoke([
+                SystemMessage(content=INTENT_CLASSIFIER_PROMPT),
+                HumanMessage(content=(
+                    f"用户查询: {normalized}\n"
+                    f"已提取的指标: {metrics}\n"
+                    f"已提取的实体: {entities}"
+                )),
+            ])
+            decision = _parse_intent_llm_decision(response)
+        except Exception:
+            logger.exception("Intent LLM classification failed")
+            decision = IntentDecision(primary_intent="general", confidence=0.1, reason="llm invocation failed")
+
+        trace.append({
+            "stage": "llm_judge",
+            "status": "selected" if decision.confidence >= llm_threshold else "below_threshold",
+            "primary_intent": decision.primary_intent,
+            "secondary_intents": decision.secondary_intents,
+            "confidence": decision.confidence,
+            "reason": decision.reason,
+            "threshold": llm_threshold,
+        })
+
+        return IntentRoutingResult(
+            intent_slots=IntentSlots(
+                domain=_looks_like_apm_domain(normalized),
+                primary_intent=decision.primary_intent,
+                secondary_intents=decision.secondary_intents,
+                confidence=decision.confidence,
+                source="llm",
+                reason=decision.reason,
+                metrics=metrics,
+                entities=entities,
+            ),
+            trace=trace,
+        )
+
+    trace.append({"stage": "llm_judge", "status": "skipped", "reason": "no llm available"})
+
+    # ── Fallback ──────────────────────────────────────────────────────
+    return IntentRoutingResult(
+        intent_slots=IntentSlots(
+            domain=_looks_like_apm_domain(normalized),
+            primary_intent=regex_intent,
+            confidence=regex_conf,
+            source="regex",
+            reason="fallback: regex result used",
+            metrics=metrics,
+            entities=entities,
+        ),
+        trace=trace,
+    )
+
+
+def _looks_like_apm_domain(text: str) -> str:
+    """Heuristic domain detection: 'apm' vs 'general'."""
+    lowered = text.lower()
+    if re.search(
+        r"\b(?:apm|api|p95|p99|lcp|cls|inp|apdex|slo|rca|patrol|troubleshoot)\b|"
+        r"排查|根因|巡检|告警|指标|审计|合规",
+        lowered,
+    ):
+        return "apm"
+    return "general"
