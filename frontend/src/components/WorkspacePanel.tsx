@@ -21,6 +21,7 @@ interface Props {
   threadId: string | null
   onThreadCleared?: () => void
   onReplayState?: (state: ReplayState) => void
+  onViewOtelAnalysis?: (threadId: string) => void
   agentMode?: AgentMode
 }
 
@@ -58,6 +59,7 @@ export function WorkspacePanel({
   threadId,
   onThreadCleared,
   onReplayState,
+  onViewOtelAnalysis,
   agentMode = 'single',
 }: Props) {
   const [replay, setReplay] = useState<ReplayResponse | null>(null)
@@ -536,7 +538,7 @@ export function WorkspacePanel({
         <OtelAlertsPanel
           threadId={threadId}
           agentMode={agentMode}
-          onTriggerRca={() => {}}
+          onViewAnalysis={onViewOtelAnalysis}
         />
       )}
 

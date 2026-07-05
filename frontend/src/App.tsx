@@ -96,6 +96,12 @@ function App() {
               setReplayState(state)
               setActivePanel('chat')
             }}
+            onViewOtelAnalysis={(tid) => {
+              localStorage.setItem('threadId', tid)
+              setThreadId(tid)
+              setConversationKey(tid)
+              setActivePanel('chat')
+            }}
           />
         )}
         <Sidebar

@@ -3089,3 +3089,68 @@ button {
 .alert-analyze-btn:hover {
   background: #e0e7ff;
 }
+
+.alert-view-btn {
+  font-size: 0.85em;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid #16a34a;
+  background: #f0fdf4;
+  color: #15803d;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.alert-view-btn:hover {
+  background: #dcfce7;
+}
+
+.alert-retry-btn {
+  font-size: 0.82em;
+  padding: 2px 10px;
+  margin-left: 6px;
+  border-radius: 4px;
+  border: 1px solid #ef4444;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+}
+.alert-retry-btn:hover {
+  background: #fee2e2;
+}
+
+.alert-analyzing {
+  font-size: 0.85em;
+  color: #6366f1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.alert-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e0e7ff;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: alert-spin 0.8s linear infinite;
+}
+
+@keyframes alert-spin {
+  to { transform: rotate(360deg); }
+}
+
+.alert-failed {
+  font-size: 0.85em;
+  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.alert-thread-id {
+  font-family: monospace;
+  font-size: 0.78em;
+  color: #6366f1;
+}

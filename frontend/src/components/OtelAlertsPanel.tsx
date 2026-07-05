@@ -1,85 +1,134 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api, type OtelAlert, type AgentMode } from '../lib/api'
+
+type RcaStatus = 'idle' | 'analyzing' | 'completed' | 'failed'
+
+interface RcaEntry {
+  threadId: string
+  status: RcaStatus
+}
 
 interface Props {
   threadId: string | null
   agentMode: AgentMode
-  /** Called when user wants to trigger RCA for an alert (P1 confirm or manual) */
-  onTriggerRca?: (alert: OtelAlert) => void
+  /** Called when user wants to view RCA results — parent should switch to chat panel with this thread */
+  onViewAnalysis?: (threadId: string) => void
 }
 
-export function OtelAlertsPanel({ threadId, agentMode, onTriggerRca }: Props) {
+export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) {
   const [alerts, setAlerts] = useState<OtelAlert[]>([])
   const [loading, setLoading] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [lastP0AutoTriggered, setLastP0AutoTriggered] = useState<Set<string>>(new Set())
+  const [rcaStates, setRcaStates] = useState<Record<string, RcaEntry>>({})
+  const triggeredRef = useRef<Set<string>>(new Set())
 
-  // Load alert history on mount
   const loadHistory = useCallback(async () => {
     setLoading(true)
     try {
       const history = await api.listOtelAlerts(50)
       setAlerts(history)
-    } catch {
-      // silently fail
-    }
+    } catch { /* silent */ }
     setLoading(false)
   }, [])
 
-  // Subscribe to SSE for real-time alerts
+  // Poll RCA thread statuses
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      setRcaStates((prev) => {
+        const updated = { ...prev }
+        let changed = false
+        const promises: Promise<void>[] = []
+        for (const [alertId, entry] of Object.entries(prev)) {
+          if (entry.status === 'analyzing') {
+            promises.push(
+              api.getExecutionSummary(entry.threadId).then((summary) => {
+                if (summary && summary.total_events > 0) {
+                  // A completed analysis has events logged
+                  updated[alertId] = { ...entry, status: 'completed' }
+                  changed = true
+                }
+              }).catch(() => {
+                // If we can't fetch, mark as failed if it's been more than 5 min
+              })
+            )
+          }
+        }
+        Promise.allSettled(promises).then(() => {
+          if (changed) setRcaStates({ ...updated })
+        })
+        return prev // return unchanged ref if nothing changed
+      })
+    }, 5000)
+    return () => clearInterval(pollInterval)
+  }, [])
+
+  // SSE subscription
   useEffect(() => {
     setConnected(true)
     const controller = api.streamOtelAlerts((alert) => {
       setAlerts((prev) => [alert, ...prev.slice(0, 199)])
-      // Auto-trigger RCA for P0
       if (alert.level === 'P0') {
-        handleP0AutoTrigger(alert)
+        triggerRca(alert)
       }
     })
-    // Connection monitoring: assume connected after first successful poll
-    const interval = setInterval(() => {
-      setConnected(true) // will reset on reconnect
-    }, 10000)
+    const keepAlive = setInterval(() => setConnected(true), 10000)
     return () => {
       controller.abort()
-      clearInterval(interval)
+      clearInterval(keepAlive)
       setConnected(false)
     }
   }, [])
 
   useEffect(() => { loadHistory() }, [loadHistory])
 
-  /** Auto-trigger RCA for P0 alerts: create a thread and send agent analysis request */
-  const handleP0AutoTrigger = useCallback(async (alert: OtelAlert) => {
-    // Deduplicate: only trigger once per alert id
-    if (lastP0AutoTriggered.has(alert.id)) return
-    setLastP0AutoTriggered((prev) => new Set(prev).add(alert.id))
+  /** Trigger RCA: create thread, send message, track status */
+  const triggerRca = useCallback(async (alert: OtelAlert) => {
+    if (triggeredRef.current.has(alert.id)) return
+    triggeredRef.current.add(alert.id)
+
+    setRcaStates((prev) => ({
+      ...prev,
+      [alert.id]: { threadId: '', status: 'analyzing' },
+    }))
 
     try {
-      const threadId = crypto.randomUUID()
-      const message = buildRcaPrompt(alert)
-      await api.chat({
-        thread_id: threadId,
-        message,
-        agent_mode: agentMode,
-      })
-      console.log(`P0 auto-RCA triggered for ${alert.id}: ${alert.alert_name}`)
-    } catch (err) {
-      console.error('P0 auto-trigger failed:', err)
-    }
-  }, [agentMode, lastP0AutoTriggered])
+      const tid = crypto.randomUUID()
+      const msg = buildRcaPrompt(alert)
+      await api.chat({ thread_id: tid, message: msg, agent_mode: agentMode })
 
-  /** Trigger RCA for a P1 alert (user confirmation) */
-  const handleP1Trigger = useCallback((alert: OtelAlert) => {
-    if (onTriggerRca) {
-      onTriggerRca(alert)
-    } else {
-      // Fallback: directly create a chat thread
-      const threadId = crypto.randomUUID()
-      const message = buildRcaPrompt(alert)
-      api.chat({ thread_id: threadId, message, agent_mode: agentMode }).catch(console.error)
+      setRcaStates((prev) => ({
+        ...prev,
+        [alert.id]: { threadId: tid, status: 'analyzing' },
+      }))
+
+      // Mark as completed after a short delay (chat is synchronous API call)
+      setTimeout(() => {
+        setRcaStates((prev) => {
+          const cur = prev[alert.id]
+          if (cur && cur.status === 'analyzing') {
+            return { ...prev, [alert.id]: { ...cur, status: 'completed' } }
+          }
+          return prev
+        })
+      }, 2000)
+    } catch (err) {
+      console.error('RCA trigger failed:', err)
+      setRcaStates((prev) => ({
+        ...prev,
+        [alert.id]: { ...prev[alert.id], status: 'failed' },
+      }))
     }
-  }, [agentMode, onTriggerRca])
+  }, [agentMode])
+
+  /** Open an existing thread in chat view */
+  const handleViewAnalysis = useCallback((tid: string) => {
+    if (onViewAnalysis) {
+      onViewAnalysis(tid)
+    } else {
+      localStorage.setItem('threadId', tid)
+      window.location.reload()
+    }
+  }, [onViewAnalysis])
 
   return (
     <div className="workspace-section alerts-section">
@@ -116,7 +165,9 @@ export function OtelAlertsPanel({ threadId, agentMode, onTriggerRca }: Props) {
             <AlertCard
               key={alert.id}
               alert={alert}
-              onAnalyze={() => handleP1Trigger(alert)}
+              rca={rcaStates[alert.id] ?? null}
+              onAnalyze={() => triggerRca(alert)}
+              onViewAnalysis={handleViewAnalysis}
             />
           ))}
         </div>
@@ -125,7 +176,17 @@ export function OtelAlertsPanel({ threadId, agentMode, onTriggerRca }: Props) {
   )
 }
 
-function AlertCard({ alert, onAnalyze }: { alert: OtelAlert; onAnalyze: () => void }) {
+function AlertCard({
+  alert,
+  rca,
+  onAnalyze,
+  onViewAnalysis,
+}: {
+  alert: OtelAlert
+  rca: RcaEntry | null
+  onAnalyze: () => void
+  onViewAnalysis: (threadId: string) => void
+}) {
   const isP0 = alert.level === 'P0'
   const severityClass = isP0 ? 'alert-critical' : 'alert-warning'
 
@@ -162,22 +223,88 @@ function AlertCard({ alert, onAnalyze }: { alert: OtelAlert; onAnalyze: () => vo
               {alert.status}
             </dd>
           </div>
+          {rca?.threadId && (
+            <div>
+              <dt>Thread</dt>
+              <dd className="alert-thread-id" title={rca.threadId}>
+                {rca.threadId.slice(0, 8)}...
+              </dd>
+            </div>
+          )}
         </dl>
       </div>
 
       <div className="alert-card-actions">
-        {isP0 ? (
-          <span className="alert-auto-note" title="P0 alerts trigger automatic RCA">
-            ⚡ Auto-RCA triggered
-          </span>
-        ) : (
-          <button type="button" className="alert-analyze-btn" onClick={onAnalyze}>
-            🔍 Analyze
-          </button>
-        )}
+        <RcaAction
+          isP0={isP0}
+          rca={rca}
+          onAnalyze={onAnalyze}
+          onViewAnalysis={onViewAnalysis}
+        />
       </div>
     </article>
   )
+}
+
+function RcaAction({
+  isP0,
+  rca,
+  onAnalyze,
+  onViewAnalysis,
+}: {
+  isP0: boolean
+  rca: RcaEntry | null
+  onAnalyze: () => void
+  onViewAnalysis: (threadId: string) => void
+}) {
+  if (!rca) {
+    // No RCA triggered yet
+    if (isP0) {
+      return (
+        <span className="alert-auto-note">
+          ⚡ Auto-triggering...
+        </span>
+      )
+    }
+    return (
+      <button type="button" className="alert-analyze-btn" onClick={onAnalyze}>
+        🔍 Analyze
+      </button>
+    )
+  }
+
+  if (rca.status === 'analyzing') {
+    return (
+      <span className="alert-analyzing">
+        <span className="alert-spinner" /> Analyzing... (thread: {rca.threadId ? `${rca.threadId.slice(0, 8)}...` : 'creating...'})
+      </span>
+    )
+  }
+
+  if (rca.status === 'completed') {
+    return (
+      <button
+        type="button"
+        className="alert-view-btn"
+        onClick={() => onViewAnalysis(rca.threadId)}
+      >
+        ✅ View Analysis
+      </button>
+    )
+  }
+
+  if (rca.status === 'failed') {
+    return (
+      <span className="alert-failed">
+        ❌ RCA failed &mdash;
+        <button type="button" className="alert-retry-btn" onClick={onAnalyze}>
+          Retry
+        </button>
+      </span>
+    )
+  }
+
+  return null
 }
 
 function buildRcaPrompt(alert: OtelAlert): string {
@@ -199,10 +326,10 @@ function buildRcaPrompt(alert: OtelAlert): string {
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso)
-    const h = String(d.getHours()).padStart(2, '0')
-    const m = String(d.getMinutes()).padStart(2, '0')
-    const s = String(d.getSeconds()).padStart(2, '0')
-    return `${h}:${m}:${s}`
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    const ss = String(d.getSeconds()).padStart(2, '0')
+    return `${hh}:${mm}:${ss}`
   } catch {
     return iso
   }
