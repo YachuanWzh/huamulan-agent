@@ -744,10 +744,44 @@ class AgentHarness:
 
     def _compile_multi_agent(self, llm_config: LLMConfig | None):
         from personal_assistant.agent import multi_agent as multi_agent_module
+        from personal_assistant.agent.intent_router import IntentEmbeddingIndex
+        from personal_assistant.agent.llm import build_llm as _build_llm
+        from personal_assistant.agent.router import OllamaBgeM3EmbeddingProvider
 
         kwargs = {}
         if self.cache is not None:
             kwargs["cache"] = self.cache
+
+        # ── Build intent routing deps (reuse existing BGE-M3 / LLM infra) ──
+
+        # Tier 1: semantic intent index (reuses same Ollama BGE-M3 as skill router)
+        if getattr(self.settings, "multi_agent_intent_semantic_enabled", True):
+            embedding_provider = OllamaBgeM3EmbeddingProvider(
+                base_url=getattr(
+                    self.settings, "skill_routing_ollama_base_url", "http://localhost:11434"
+                ),
+                model=getattr(self.settings, "skill_routing_embedding_model", "bge-m3"),
+            )
+            kwargs["intent_index"] = IntentEmbeddingIndex(embedding_provider)
+        else:
+            kwargs["intent_index"] = None
+
+        # Tier 2: LLM intent classifier (optional dedicated model, falls back to main LLM)
+        kwargs["intent_llm"] = None
+        if getattr(self.settings, "multi_agent_intent_llm_enabled", True):
+            try:
+                intent_llm_model = getattr(self.settings, "multi_agent_intent_llm_model", None)
+                kwargs["intent_llm"] = _build_llm(
+                    self.settings,
+                    LLMConfig(model=intent_llm_model) if intent_llm_model else llm_config,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to build intent LLM for Tier 2 classification — "
+                    "Tier 2 will be skipped for this compile_multi_agent call.",
+                    exc_info=True,
+                )
+
         return multi_agent_module.compile_multi_agent(
             self.settings,
             self.registry,
