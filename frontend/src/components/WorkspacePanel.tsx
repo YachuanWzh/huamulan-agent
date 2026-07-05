@@ -171,14 +171,22 @@ export function WorkspacePanel({
 
   const loadGoldenDatasets = useCallback(async () => {
     try {
-      const datasets = await api.listSkillEvaluationDatasets()
+      const datasets = await api.listSkillEvaluationDatasets(agentMode)
       if (datasets.length > 0) {
         setGoldenDatasets(datasets)
+        // When agentMode changes, the current selection may no longer be valid
+        setSelectedGoldenPath((prev) => {
+          if (!datasets.some((d) => d.path === prev)) {
+            // Try to preserve old preference: if the first dataset is available, pick it
+            return datasets[0]?.path ?? FALLBACK_GOLDEN_DATASETS[0].path
+          }
+          return prev
+        })
       }
     } catch {
       setGoldenDatasets(FALLBACK_GOLDEN_DATASETS)
     }
-  }, [])
+  }, [agentMode])
 
   const runSkillEvaluation = async (mode: 'quick' | 'e2e') => {
     const rawPath =
@@ -1321,6 +1329,14 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
             } else if (fail.name === 'skill_selection_recall') {
               const missing = (fail.actual as any)?.missing
               if (missing?.length) reasons.push(`❌ 漏选技能: ${missing.join(', ')}`)
+            } else if (fail.name === 'intent_match') {
+              reasons.push(`❌ 意图不匹配: 期望 '${String(fail.expected ?? '?')}', 实际 '${String(fail.actual ?? '?')}'`)
+            } else if (fail.name === 'metric_extraction') {
+              const missing = (fail.actual as any)?.missing
+              if (missing?.length) reasons.push(`❌ 漏提指标: ${missing.join(', ')}`)
+            } else if (fail.name === 'entity_extraction') {
+              const missing = (fail.actual as any)?.missing
+              if (missing?.length) reasons.push(`❌ 漏提实体: ${missing.join(', ')}`)
             }
           })
           // 工具/回答类失败原因
@@ -1339,14 +1355,22 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
           >
             <summary>
               <span>{detail.case_id}</span>
-              {detail.skill_selection_f1 != null && (
-                <span
-                  title="当前用例的路由F1分数：综合衡量精确率和召回率，100%为完全选对，0%为完全选错"
-                  style={{ margin: '0 12px', padding: '2px 8px', borderRadius: '4px', background: '#f0f4f8', fontSize: '0.9em', cursor: 'help' }}
-                >
-                  F1: {(detail.skill_selection_f1 * 100).toFixed(1)}%
-                </span>
-              )}
+              {detail.skill_selection_f1 != null && (() => {
+                const diag = detail.diagnostic_outputs ?? {}
+                const isMA = detail.checks.some(c => c.name === 'intent_match') ||
+                  (diag.expected as any)?.intent != null
+                return (
+                  <span
+                    title={isMA
+                      ? "意图匹配F1：当前用例的意图分类是否和期望一致，100%为完全匹配，0%为不匹配（multi-agent模式）"
+                      : "当前用例的路由F1分数：综合衡量精确率和召回率，100%为完全选对，0%为完全选错"
+                    }
+                    style={{ margin: '0 12px', padding: '2px 8px', borderRadius: '4px', background: '#f0f4f8', fontSize: '0.9em', cursor: 'help' }}
+                  >
+                    F1: {(detail.skill_selection_f1 * 100).toFixed(1)}%
+                  </span>
+                )
+              })()}
               <strong style={{
                 padding: '2px 8px',
                 borderRadius: '4px',
@@ -1388,22 +1412,7 @@ function EvaluationDetails({ details }: { details: CaseEvaluationDetail[] }) {
               )}
 
               {detail.status === 'fail' && (
-                <div className="evaluation-detail-grid">
-                  <EvaluationJsonBlock
-                    label="Expected"
-                    value={{
-                      skills: detail.expected_skills,
-                      tool_calls: detail.expected_tool_calls,
-                    }}
-                  />
-                  <EvaluationJsonBlock
-                    label="Actual"
-                    value={{
-                      skills: detail.selected_skills,
-                      tool_calls: detail.actual_tool_calls,
-                    }}
-                  />
-                </div>
+                <EvaluationExpectedActual detail={detail} />
               )}
               {(detail.status === 'fail' || detail.status === 'warning') && (
                 <EvaluationDiagnosticPanel detail={detail} />
@@ -1439,6 +1448,57 @@ function EvaluationJsonBlock({ label, value }: { label: string; value: unknown }
     <div className="evaluation-json-block">
       <strong>{label}</strong>
       <pre>{JSON.stringify(value, null, 2)}</pre>
+    </div>
+  )
+}
+
+function EvaluationExpectedActual({ detail }: { detail: CaseEvaluationDetail }) {
+  const diagnostics = (detail.diagnostic_outputs ?? {}) as Record<string, unknown>
+  const isMultiAgent =
+    detail.checks.some((c) => c.name === 'intent_match') ||
+    (diagnostics.expected as Record<string, unknown>)?.intent != null
+
+  if (isMultiAgent) {
+    const expected = (diagnostics.expected ?? {}) as Record<string, unknown>
+    const actual = (diagnostics.actual ?? {}) as Record<string, unknown>
+    return (
+      <div className="evaluation-detail-grid">
+        <EvaluationJsonBlock
+          label="Expected"
+          value={{
+            intent: expected.intent,
+            metrics: expected.metrics,
+            entities: expected.entities,
+          }}
+        />
+        <EvaluationJsonBlock
+          label="Actual"
+          value={{
+            intent: actual.intent,
+            metrics: actual.metrics,
+            entities: actual.entities,
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="evaluation-detail-grid">
+      <EvaluationJsonBlock
+        label="Expected"
+        value={{
+          skills: detail.expected_skills,
+          tool_calls: detail.expected_tool_calls,
+        }}
+      />
+      <EvaluationJsonBlock
+        label="Actual"
+        value={{
+          skills: detail.selected_skills,
+          tool_calls: detail.actual_tool_calls,
+        }}
+      />
     </div>
   )
 }

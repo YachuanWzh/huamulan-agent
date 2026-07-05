@@ -408,23 +408,47 @@ def _diagnostic_outputs(
 ) -> dict[str, Any]:
     final_answer = str(outcome.get("final_answer") or "")
     failed_checks = [check.model_dump(mode="json") for check in checks if not check.passed]
-    outputs: dict[str, Any] = {
-        "expected": {
-            "skills": case.expected_skills,
-            "tool_calls": [item.model_dump(mode="json") for item in case.expected_tool_calls],
-            "answer_contains": case.expected_answer_contains,
-            "forbidden_answer_contains": case.forbidden_answer_contains,
-            "forbidden_tools": case.forbidden_tools,
-        },
-        "actual": {
-            "skills": _string_list(outcome.get("selected_skills")),
-            "tool_calls": _tool_calls(outcome),
-        },
-        "failed_checks": failed_checks,
-        "final_answer": final_answer,
-        "logs": log_summary,
-        "routing_trace": routing_trace,
-    }
+    is_multi_agent = outcome.get("intent_slots") is not None
+
+    if is_multi_agent:
+        intent_slots = outcome["intent_slots"]
+        outputs: dict[str, Any] = {
+            "expected": {
+                "intent": case.expected_intent,
+                "metrics": case.expected_metrics,
+                "entities": case.expected_entities,
+                "answer_contains": case.expected_answer_contains,
+                "forbidden_answer_contains": case.forbidden_answer_contains,
+                "forbidden_tools": case.forbidden_tools,
+            },
+            "actual": {
+                "intent": intent_slots.get("intent", "general"),
+                "metrics": intent_slots.get("metrics", []),
+                "entities": intent_slots.get("entities", []),
+            },
+            "failed_checks": failed_checks,
+            "final_answer": final_answer,
+            "logs": log_summary,
+            "routing_trace": routing_trace,
+        }
+    else:
+        outputs = {
+            "expected": {
+                "skills": case.expected_skills,
+                "tool_calls": [item.model_dump(mode="json") for item in case.expected_tool_calls],
+                "answer_contains": case.expected_answer_contains,
+                "forbidden_answer_contains": case.forbidden_answer_contains,
+                "forbidden_tools": case.forbidden_tools,
+            },
+            "actual": {
+                "skills": _string_list(outcome.get("selected_skills")),
+                "tool_calls": _tool_calls(outcome),
+            },
+            "failed_checks": failed_checks,
+            "final_answer": final_answer,
+            "logs": log_summary,
+            "routing_trace": routing_trace,
+        }
     if case.expected_answer_contains:
         outputs["missing_answer_fragments"] = [
             fragment for fragment in case.expected_answer_contains if fragment not in final_answer
@@ -435,15 +459,6 @@ def _diagnostic_outputs(
         ]
     if judge:
         outputs["judge"] = judge.model_dump(mode="json")
-    # Multi-agent intent data
-    intent_slots = outcome.get("intent_slots")
-    if intent_slots is not None:
-        outputs["expected"].setdefault("intent", case.expected_intent)
-        outputs["expected"].setdefault("metrics", case.expected_metrics)
-        outputs["expected"].setdefault("entities", case.expected_entities)
-        outputs["actual"]["intent"] = intent_slots.get("intent", "general")
-        outputs["actual"]["metrics"] = intent_slots.get("metrics", [])
-        outputs["actual"]["entities"] = intent_slots.get("entities", [])
     return outputs
 
 

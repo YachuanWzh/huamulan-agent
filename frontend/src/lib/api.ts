@@ -598,8 +598,12 @@ export const api = {
     )
   },
 
-  listSkillEvaluationDatasets: () =>
-    request<SkillEvaluationDataset[]>('/api/skills/evaluation/golden-datasets'),
+  listSkillEvaluationDatasets: (agentMode: AgentMode = 'single') => {
+    const params = new URLSearchParams({ agent_mode: agentMode })
+    return request<SkillEvaluationDataset[]>(
+      `/api/skills/evaluation/golden-datasets?${params.toString()}`,
+    )
+  },
 
   runSkillEvaluation: (body: SkillEvaluationRunRequest) =>
     request<SkillEvaluationRunResponse>('/api/skills/evaluation/run', {

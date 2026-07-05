@@ -391,8 +391,10 @@ async def skill_evaluation_history(
 
 
 @app.get("/api/skills/evaluation/golden-datasets", response_model=list[SkillEvaluationDataset])
-async def list_skill_evaluation_datasets() -> list[SkillEvaluationDataset]:
-    return _list_golden_datasets()
+async def list_skill_evaluation_datasets(
+    agent_mode: str = "single",
+) -> list[SkillEvaluationDataset]:
+    return _list_golden_datasets(agent_mode=agent_mode)
 
 
 @app.delete("/api/skills/evaluation", response_model=SkillEvaluationResetResponse)
@@ -977,19 +979,51 @@ def _golden_dataset_root() -> Path:
 def _list_golden_datasets(
     *,
     golden_root: Path | None = None,
+    agent_mode: str = "single",
 ) -> list[SkillEvaluationDataset]:
     root = golden_root or _golden_dataset_root()
     if not root.exists():
         return []
-    return [
-        SkillEvaluationDataset(
-            name=path.stem,
-            path=path.stem,
-            label=path.stem.replace("_", " "),
+    datasets = []
+    for path in sorted(root.glob("*.jsonl"), key=lambda item: item.name):
+        if not path.is_file():
+            continue
+        if agent_mode == "multi" and not _dataset_supports_multi_agent(path):
+            continue
+        datasets.append(
+            SkillEvaluationDataset(
+                name=path.stem,
+                path=path.stem,
+                label=path.stem.replace("_", " "),
+            )
         )
-        for path in sorted(root.glob("*.jsonl"), key=lambda item: item.name)
-        if path.is_file()
-    ]
+    return datasets
+
+
+def _dataset_supports_multi_agent(path: Path) -> bool:
+    """Check if the first case in a golden dataset is compatible with multi-agent evaluation.
+
+    Multi-agent compatible datasets must have at least one of:
+    - expected_intent (multi-agent intent routing)
+    - expected_behavior (security / prompt guard, runs before routing in all modes)
+    """
+    try:
+        first_line = ""
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped:
+                    first_line = stripped
+                    break
+        if not first_line:
+            return False
+        case = json.loads(first_line)
+        return (
+            case.get("expected_intent") is not None
+            or case.get("expected_behavior") is not None
+        )
+    except Exception:
+        return False
 
 
 def _resolve_golden_path(
