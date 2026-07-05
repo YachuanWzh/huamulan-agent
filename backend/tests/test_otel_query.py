@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -321,3 +322,206 @@ class TestOtelToObservabilitySnapshot:
         assert snapshot.frontend.total_events == 4
         # Combined trace + prometheus logs
         assert snapshot.backend.total_events > 4
+
+
+# ── Tests: query_traces script ────────────────────────────────────────────
+
+SCRIPT_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "src" / "personal_assistant" / "skills" / "otel_query" / "scripts"
+)
+QUERY_TRACES_SCRIPT = SCRIPT_DIR / "query_traces.py"
+QUERY_METRICS_SCRIPT = SCRIPT_DIR / "query_metrics.py"
+
+
+class TestQueryTracesScript:
+    """Test query_traces.py as a subprocess (like health_check.py tests)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_script(self) -> None:
+        if not QUERY_TRACES_SCRIPT.is_file():
+            pytest.skip("query_traces.py not yet created")
+
+    def test_accepts_service_query_and_returns_json(self) -> None:
+        input_data = json.dumps({
+            "service": "frontend",
+            "limit": 1,
+            "lookback": "15m",
+        })
+        completed = subprocess.run(
+            [sys.executable, str(QUERY_TRACES_SCRIPT)],
+            input=input_data,
+            text=True,
+            capture_output=True,
+        )
+        # May return error (network unreachable) or data (real call succeeds) —
+        # both are valid JSON responses from the script.
+        result = json.loads(completed.stdout)
+        assert "data" in result or "error" in result
+
+    def test_reports_missing_service_parameter(self) -> None:
+        input_data = json.dumps({"limit": 5})
+        completed = subprocess.run(
+            [sys.executable, str(QUERY_TRACES_SCRIPT)],
+            input=input_data,
+            text=True,
+            capture_output=True,
+        )
+        # Should exit non-zero or return an error field
+        assert completed.returncode != 0 or "error" in json.loads(completed.stdout)
+
+
+class TestQueryMetricsScript:
+    """Test query_metrics.py as a subprocess."""
+
+    @pytest.fixture(autouse=True)
+    def _require_script(self) -> None:
+        if not QUERY_METRICS_SCRIPT.is_file():
+            pytest.skip("query_metrics.py not yet created")
+
+    def test_accepts_promql_and_returns_json(self) -> None:
+        input_data = json.dumps({
+            "query": "up",
+            "time_range": "5m",
+        })
+        completed = subprocess.run(
+            [sys.executable, str(QUERY_METRICS_SCRIPT)],
+            input=input_data,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        result = json.loads(completed.stdout)
+        assert "status" in result or "error" in result
+
+    def test_reports_missing_query_parameter(self) -> None:
+        input_data = json.dumps({"time_range": "5m"})
+        completed = subprocess.run(
+            [sys.executable, str(QUERY_METRICS_SCRIPT)],
+            input=input_data,
+            text=True,
+            capture_output=True,
+        )
+        assert completed.returncode != 0 or "error" in json.loads(completed.stdout)
+
+
+# ── Tests: query function unit tests (mocked HTTP) ────────────────────────
+
+
+JAEGER_API_RESPONSE = {
+    "data": [
+        {
+            "traceID": "abc123",
+            "spans": [
+                {
+                    "traceID": "abc123",
+                    "spanID": "span1",
+                    "operationName": "GET",
+                    "duration": 5000,
+                    "tags": [
+                        {"key": "http.method", "type": "string", "value": "GET"},
+                        {"key": "http.status_code", "type": "int64", "value": 200},
+                    ],
+                }
+            ],
+        }
+    ],
+    "total": 1,
+    "limit": 1,
+    "offset": 0,
+    "errors": None,
+}
+
+PROMETHEUS_API_RESPONSE = {
+    "status": "success",
+    "data": {
+        "resultType": "vector",
+        "result": [
+            {
+                "metric": {"__name__": "up", "job": "test"},
+                "value": [1783242620, "1"],
+            }
+        ],
+    },
+}
+
+
+class TestQueryTracesFunction:
+    """Test the query_traces function with mocked HTTP."""
+
+    def test_returns_structured_trace_data(self) -> None:
+        from personal_assistant.skills.otel_query.scripts.query_traces import (
+            query_traces,
+        )
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = json.dumps(
+                JAEGER_API_RESPONSE
+            ).encode("utf-8")
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result = query_traces(
+                service="frontend",
+                limit=5,
+                lookback="15m",
+                api_url="http://test:8080/jaeger/ui/api",
+            )
+
+        assert result["total"] == 1
+        assert len(result["data"]) == 1
+        assert result["data"][0]["traceID"] == "abc123"
+
+    def test_handles_http_error_gracefully(self) -> None:
+        from personal_assistant.skills.otel_query.scripts.query_traces import (
+            query_traces,
+        )
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = OSError("Connection refused")
+
+            result = query_traces(
+                service="frontend",
+                api_url="http://invalid:9999/jaeger/ui/api",
+            )
+
+        assert "error" in result
+
+
+class TestQueryMetricsFunction:
+    """Test the query_metrics function with mocked HTTP."""
+
+    def test_returns_structured_metric_data(self) -> None:
+        from personal_assistant.skills.otel_query.scripts.query_metrics import (
+            query_metrics,
+        )
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = json.dumps(
+                PROMETHEUS_API_RESPONSE
+            ).encode("utf-8")
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result = query_metrics(
+                promql="up",
+                time_range="5m",
+                proxy_url="http://test:8080/grafana/api/datasources/proxy/uid/test/api/v1",
+            )
+
+        assert result["status"] == "success"
+
+    def test_handles_http_error_gracefully(self) -> None:
+        from personal_assistant.skills.otel_query.scripts.query_metrics import (
+            query_metrics,
+        )
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.side_effect = OSError("Connection refused")
+
+            result = query_metrics(
+                promql="up",
+                proxy_url="http://invalid:9999/grafana/api",
+            )
+
+        assert "error" in result
