@@ -139,8 +139,25 @@ def _regex_intent_with_confidence(normalized: str) -> tuple[str, float]:
       - >= 0.90: 2+ signal keywords matched (high confidence)
       - 0.70: exactly 1 signal keyword matched (medium confidence)
       - 0.40: no signal matched (fallback to general)
+
+    Knowledge-context adjustment:
+      When the query is a definition / explanation question (e.g. "什么是
+      LCP / error rate"), stray ``troubleshoot`` / ``patrol`` signals from
+      words like "error" or "告警" are demoted unless accompanied by
+      **action** keywords (排查 / 根因 / 配置 / 设置 / …).  This prevents
+      knowledge-seeking queries from being misclassified as action intents.
     """
     lowered = normalized.lower()
+
+    # ── Knowledge-context detection ─────────────────────────────────
+    # When the query is asking "what is X" / "explain X" / "how to collect X",
+    # "error" and "告警" are metric concepts, not action signals.
+    knowledge_keywords = re.findall(
+        r"什么是|怎么定义|含义|解读|解释|how\s*to\s*collect"
+        r"|what\s*is\b|define|definition|采集方法|怎么采集",
+        lowered,
+    )
+    is_knowledge_query = len(knowledge_keywords) > 0
 
     # ── Count keyword signals per intent ──
     troubleshoot_signals = len(re.findall(
@@ -160,9 +177,28 @@ def _regex_intent_with_confidence(normalized: str) -> tuple[str, float]:
         lowered,
     ))
     metric_names = len(re.findall(
-        r"\b(?:p50|p75|p90|p95|p99|lcp|cls|inp|ttfb|apdex|slo|fid)\b", lowered,
+        r"\b(?:p50|p75|p90|p95|p99|lcp|cls|inp|ttfb|fid|tbt|apdex|slo)\b", lowered,
     ))
     metrics_signals = metric_keywords + metric_names
+
+    # ── Knowledge-context signal demotion ───────────────────────────
+    # In knowledge-question context, demote troubleshoot/patrol signals
+    # that lack accompanying **action** keywords.  "什么是 error rate"
+    # is a metrics question, not a troubleshoot request.
+    if is_knowledge_query:
+        has_troubleshoot_action = bool(re.search(
+            r"排查|根因|rca|故障|挂了|timeout|slow|超时|异常",
+            lowered,
+        ))
+        if troubleshoot_signals > 0 and not has_troubleshoot_action:
+            troubleshoot_signals = 0
+
+        has_patrol_action = bool(re.search(
+            r"配置|设置|创建|定时|巡检规则|patrol\s*rule|健康检查\s*任务",
+            lowered,
+        ))
+        if patrol_signals > 0 and not has_patrol_action:
+            patrol_signals = 0
 
     # ── High confidence: 2+ signals ──
     if troubleshoot_signals >= 2:

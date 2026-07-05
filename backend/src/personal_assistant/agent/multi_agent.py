@@ -20,21 +20,24 @@ APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
 
 
 def rewrite_query_and_slots(query: str) -> dict[str, Any]:
+    """Extract metrics/entities and classify intent from a user query.
+
+    Intent classification uses signal-counting heuristics (via
+    _regex_intent_with_confidence from intent_router) instead of a
+    simple if-elif chain, so that keyword-rich knowledge queries
+    (e.g. "解释 LCP/CLS 和告警") are correctly classified as
+    ``metrics`` rather than being short-circuited by a stray
+    ``patrol`` or ``troubleshoot`` keyword.
+    """
+    from personal_assistant.agent.intent_router import _regex_intent_with_confidence
+
     normalized = " ".join(query.split())
     lowered = normalized.lower()
     metrics = _unique(
         match.group(0).lower()
-        for match in re.finditer(r"\b(?:p50|p75|p90|p95|p99|lcp|cls|inp|ttfb|apdex|slo)\b", lowered)
+        for match in re.finditer(r"\b(?:p50|p75|p90|p95|p99|lcp|cls|inp|ttfb|fid|tbt|apdex|slo)\b", lowered)
     )
-    intent = "general"
-    if re.search(r"\b(?:rca|root cause|troubleshoot|timeout|slow|error)\b|排查|根因|超时|异常|故障", normalized, re.I):
-        intent = "troubleshoot"
-    elif re.search(r"\b(?:patrol|health check|alert)\b|巡检|告警|健康检查", normalized, re.I):
-        intent = "patrol"
-    elif re.search(r"\b(?:audit|approval|compliance|log)\b|审计|合规|审批|日志", normalized, re.I):
-        intent = "audit"
-    elif metrics or re.search(r"\b(?:metric|web vitals|conversion)\b|指标|转化率", normalized, re.I):
-        intent = "metrics"
+    intent, _confidence = _regex_intent_with_confidence(normalized)
 
     entities = _unique(
         token
