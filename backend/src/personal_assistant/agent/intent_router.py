@@ -9,9 +9,13 @@ The key difference from single-agent routing:
   - Multi-agent: embeds *intent utterances* (example queries per category)
     to classify user query → intent category (troubleshoot/patrol/audit/metrics)
 """
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # ── Intent utterances (Tier 1 semantic matching) ──────────────────────────
@@ -252,3 +256,119 @@ class IntentEmbeddingIndex:
             candidates.append(IntentCandidate(name=intent, score=score))
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates[: max(1, top_k)]
+
+
+# ── Tier 2: LLM Intent Classifier ─────────────────────────────────────────
+
+
+class IntentDecision:
+    """LLM structured output for intent classification.
+
+    Uses a plain class (not Pydantic BaseModel) to keep the dependency
+    surface minimal and consistent with the dataclass pattern in the
+    rest of intent_router.py.
+    """
+
+    def __init__(
+        self,
+        primary_intent: str = "general",
+        confidence: float = 0.0,
+        reason: str = "",
+        secondary_intents: list[str] | None = None,
+    ) -> None:
+        self.primary_intent = primary_intent
+        self.confidence = min(max(float(confidence), 0.0), 1.0)
+        self.reason = reason
+        self.secondary_intents = secondary_intents or []
+
+
+# Pre-defined secondary intents per primary intent.
+# Mirrors the _supervisor_plan() logic so downstream sub-agent scheduling
+# automatically benefits from richer intent signals.
+_PRIMARY_TO_SECONDARY: dict[str, list[str]] = {
+    "troubleshoot": ["metrics", "audit"],
+    "patrol": ["metrics", "audit"],
+    "audit": ["metrics"],
+    "metrics": [],
+    "general": [],
+}
+
+INTENT_CLASSIFIER_PROMPT = """你是 APM 意图分类器。分析用户查询，输出结构化分类结果。
+
+## 意图定义
+
+- **troubleshoot**: 排查故障、根因分析、性能异常诊断、RCA
+- **patrol**: 巡检规则配置、告警阈值设置、定时健康检查
+- **audit**: 执行日志审计、SLA 合规检查、审批记录查询、安全事件审查
+- **metrics**: 指标定义/解读、性能数据查询、Web Vitals、业务指标
+- **general**: 以上都不匹配的通用查询
+
+## 规则
+
+- 用户可能同时有多个意图，主意图放 primary_intent，次要意图放 secondary_intents
+- 如果确实无法判断，primary_intent 设为 "general"，confidence 设为 0.3 以下
+- 只输出 JSON，不要解释"""
+
+
+def _parse_intent_llm_decision(raw: object) -> IntentDecision:
+    """Parse LLM response into an IntentDecision with robust fallback.
+
+    Handles: dict, JSON string, Markdown code blocks, AIMessage objects,
+    None, and malformed input.
+    """
+    if raw is None:
+        return IntentDecision(primary_intent="general", confidence=0.1, reason="empty response")
+
+    text = ""
+    if isinstance(raw, dict):
+        text = json.dumps(raw)
+    elif hasattr(raw, "content"):
+        text = str(getattr(raw, "content", ""))
+    else:
+        text = str(raw)
+
+    # Strip Markdown code fences (```json ... ```)
+    text = text.strip()
+    if text.startswith("```"):
+        end = text.rfind("```")
+        if end > 3:
+            newline = text.find("\n")
+            if newline != -1 and newline < end:
+                text = text[newline + 1 : end].strip()
+            else:
+                text = text[3:end].strip()
+
+    # Parse JSON
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Intent LLM decision JSON parse failed: %s", text[:200])
+        return IntentDecision(primary_intent="general", confidence=0.1, reason="json parse failed")
+
+    if not isinstance(data, dict):
+        return IntentDecision(primary_intent="general", confidence=0.1, reason="not a dict")
+
+    primary = str(data.get("primary_intent") or "general")
+    confidence = float(data.get("confidence") or 0.0)
+    reason = str(data.get("reason") or "")
+
+    # Validate primary intent
+    valid_intents = {"troubleshoot", "patrol", "audit", "metrics", "general"}
+    if primary not in valid_intents:
+        primary = "general"
+        confidence = min(confidence, 0.3)
+
+    # Build secondary intents: auto-inferred + explicit from LLM
+    secondary = list(_PRIMARY_TO_SECONDARY.get(primary, []))
+    explicit = data.get("secondary_intents")
+    if isinstance(explicit, list):
+        for s in explicit:
+            if isinstance(s, str) and s in valid_intents and s != "general" and s not in secondary:
+                secondary.append(s)
+
+    return IntentDecision(
+        primary_intent=primary,
+        secondary_intents=secondary,
+        confidence=min(max(confidence, 0.0), 1.0),
+        reason=reason,
+    )

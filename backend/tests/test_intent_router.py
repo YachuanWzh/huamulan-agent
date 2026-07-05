@@ -227,3 +227,94 @@ def test_intent_index_search_returns_sorted_by_score():
     candidates = async_test(index.search("test query", top_k=4))
     scores = [c.score for c in candidates]
     assert scores == sorted(scores, reverse=True)
+
+
+# ── Task 4: Tier 2 LLM classifier ─────────────────────────────────────
+
+from personal_assistant.agent.intent_router import (
+    IntentDecision,
+    INTENT_CLASSIFIER_PROMPT,
+    _parse_intent_llm_decision,
+)
+
+
+def test_parse_intent_llm_decision_dict():
+    """解析字典格式"""
+    decision = _parse_intent_llm_decision({
+        "primary_intent": "troubleshoot",
+        "confidence": 0.9,
+        "reason": "用户明确要求排查故障",
+    })
+    assert decision.primary_intent == "troubleshoot"
+    assert decision.confidence == 0.9
+    assert decision.reason == "用户明确要求排查故障"
+    # troubleshoot 的 secondary 应该是 metrics + audit
+    assert "metrics" in decision.secondary_intents
+    assert "audit" in decision.secondary_intents
+
+
+def test_parse_intent_llm_decision_json_string():
+    """解析 JSON 字符串"""
+    decision = _parse_intent_llm_decision(
+        '{"primary_intent": "patrol", "confidence": 0.85, "reason": "巡检规则配置"}'
+    )
+    assert decision.primary_intent == "patrol"
+    assert decision.confidence == 0.85
+
+
+def test_parse_intent_llm_decision_invalid_fallback():
+    """非法输入 → general fallback"""
+    decision = _parse_intent_llm_decision(None)
+    assert decision.primary_intent == "general"
+    assert decision.confidence < 0.3
+
+
+def test_parse_intent_llm_decision_markdown_code_block():
+    """解析 Markdown 代码块包裹的 JSON"""
+    decision = _parse_intent_llm_decision(
+        '```json\n{"primary_intent": "metrics", "confidence": 0.7}\n```'
+    )
+    assert decision.primary_intent == "metrics"
+
+
+def test_parse_intent_llm_decision_unknown_intent_fallback():
+    """未知意图 → general fallback"""
+    decision = _parse_intent_llm_decision(
+        {"primary_intent": "unknown_thing", "confidence": 0.99}
+    )
+    assert decision.primary_intent == "general"
+    assert decision.confidence <= 0.3
+
+
+def test_parse_intent_llm_decision_explicit_secondary():
+    """LLM 显式返回 secondary_intents"""
+    decision = _parse_intent_llm_decision({
+        "primary_intent": "troubleshoot",
+        "confidence": 0.88,
+        "secondary_intents": ["patrol"],
+    })
+    assert decision.primary_intent == "troubleshoot"
+    # 自动推断 + 显式指定
+    assert "patrol" in decision.secondary_intents
+    assert "metrics" in decision.secondary_intents
+
+
+def test_classifier_prompt_contains_all_intents():
+    """Prompt 中定义所有意图"""
+    assert "troubleshoot" in INTENT_CLASSIFIER_PROMPT
+    assert "patrol" in INTENT_CLASSIFIER_PROMPT
+    assert "audit" in INTENT_CLASSIFIER_PROMPT
+    assert "metrics" in INTENT_CLASSIFIER_PROMPT
+    assert "general" in INTENT_CLASSIFIER_PROMPT
+
+
+def test_intent_decision_pydantic_validation():
+    """Pydantic 模型验证"""
+    decision = IntentDecision(
+        primary_intent="audit",
+        confidence=0.75,
+        secondary_intents=["metrics"],
+        reason="合规审计",
+    )
+    assert decision.primary_intent == "audit"
+    assert decision.secondary_intents == ["metrics"]
