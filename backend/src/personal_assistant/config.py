@@ -148,6 +148,31 @@ class Settings(BaseSettings):
         alias="USER_VECTOR_QDRANT_COLLECTION",
     )
     user_vector_top_k: int = Field(default=5, alias="USER_VECTOR_TOP_K")
+    # ── Multi-agent Hybrid Intent Routing ──────────────────────────────
+    multi_agent_intent_regex_threshold: float = Field(
+        default=0.80,
+        alias="MULTI_AGENT_INTENT_REGEX_THRESHOLD",
+    )
+    multi_agent_intent_semantic_enabled: bool = Field(
+        default=True,
+        alias="MULTI_AGENT_INTENT_SEMANTIC_ENABLED",
+    )
+    multi_agent_intent_semantic_threshold: float = Field(
+        default=0.75,
+        alias="MULTI_AGENT_INTENT_SEMANTIC_THRESHOLD",
+    )
+    multi_agent_intent_llm_enabled: bool = Field(
+        default=True,
+        alias="MULTI_AGENT_INTENT_LLM_ENABLED",
+    )
+    multi_agent_intent_llm_threshold: float = Field(
+        default=0.60,
+        alias="MULTI_AGENT_INTENT_LLM_THRESHOLD",
+    )
+    multi_agent_intent_llm_model: str | None = Field(
+        default=None,
+        alias="MULTI_AGENT_INTENT_LLM_MODEL",
+    )
     evaluation_judge_enabled: bool = Field(
         default=True,
         alias="EVALUATION_JUDGE_ENABLED",

@@ -253,3 +253,38 @@ def test_redis_url_rejects_http_scheme() -> None:
             REDIS_URL="http://redis.example.local:6379",
             _env_file=None,
         )
+
+
+def test_multi_agent_intent_settings_defaults() -> None:
+    """MULTI_AGENT_INTENT_* 配置项默认值"""
+    settings = Settings(
+        DATABASE_URL="postgresql://localhost/test",
+        LLM_MODEL="test-model",
+        _env_file=None,
+    )
+    assert settings.multi_agent_intent_regex_threshold == 0.80
+    assert settings.multi_agent_intent_semantic_enabled is True
+    assert settings.multi_agent_intent_semantic_threshold == 0.75
+    assert settings.multi_agent_intent_llm_enabled is True
+    assert settings.multi_agent_intent_llm_threshold == 0.60
+    assert settings.multi_agent_intent_llm_model is None
+
+
+def test_multi_agent_intent_settings_from_env(monkeypatch) -> None:
+    """环境变量重写 MULTI_AGENT_INTENT_*"""
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/test")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_REGEX_THRESHOLD", "0.85")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_SEMANTIC_ENABLED", "false")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_SEMANTIC_THRESHOLD", "0.70")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_LLM_ENABLED", "false")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_LLM_THRESHOLD", "0.50")
+    monkeypatch.setenv("MULTI_AGENT_INTENT_LLM_MODEL", "deepseek-v4-flash")
+
+    settings = Settings(_env_file=None)
+    assert settings.multi_agent_intent_regex_threshold == 0.85
+    assert settings.multi_agent_intent_semantic_enabled is False
+    assert settings.multi_agent_intent_semantic_threshold == 0.70
+    assert settings.multi_agent_intent_llm_enabled is False
+    assert settings.multi_agent_intent_llm_threshold == 0.50
+    assert settings.multi_agent_intent_llm_model == "deepseek-v4-flash"
