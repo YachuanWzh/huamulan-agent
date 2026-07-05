@@ -64,6 +64,20 @@ def render_markdown_report(report: SkillEvaluationReport) -> str:
                 "",
             ]
         )
+    if report.multi_agent_routing is not None:
+        lines.extend(
+            [
+                "## Multi-Agent Routing",
+                f"- Total Cases: {report.multi_agent_routing.total_cases}",
+                f"- Intent Accuracy: {_fmt_rate(report.multi_agent_routing.intent_accuracy)}",
+                f"- Intent Precision: {_fmt_rate(report.multi_agent_routing.intent_precision)}",
+                f"- Intent Recall: {_fmt_rate(report.multi_agent_routing.intent_recall)}",
+                f"- Intent F1: {_fmt_rate(report.multi_agent_routing.intent_f1)}",
+                f"- Metric Extraction Recall: {_fmt_rate(report.multi_agent_routing.metric_extraction_recall)}",
+                f"- Entity Extraction Recall: {_fmt_rate(report.multi_agent_routing.entity_extraction_recall)}",
+                "",
+            ]
+        )
     if report.safety is not None:
         lines.extend(
             [

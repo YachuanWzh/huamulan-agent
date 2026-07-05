@@ -22,7 +22,10 @@ from personal_assistant.skills.evaluation.judge import (
     evaluate_case_with_judge,
     parse_judge_response,
 )
-from personal_assistant.skills.evaluation.offline import evaluate_routing_cases
+from personal_assistant.skills.evaluation.offline import (
+    evaluate_multi_agent_intent_cases,
+    evaluate_routing_cases,
+)
 from personal_assistant.skills.evaluation.quality import (
     evaluate_answer_cases,
     evaluate_hallucination_cases,
@@ -57,6 +60,7 @@ __all__ = [
     "evaluate_answer_cases",
     "evaluate_hallucination_cases",
     "evaluate_case_with_judge",
+    "evaluate_multi_agent_intent_cases",
     "evaluate_skill_registry",
     "evaluate_tool_cases",
     "evaluate_runtime_logs",

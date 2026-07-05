@@ -68,6 +68,7 @@ from personal_assistant.skills.evaluation.quality import (
     evaluate_hallucination_cases,
     evaluate_tool_cases,
 )
+from personal_assistant.skills.evaluation.offline import evaluate_multi_agent_intent_cases
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
 from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
@@ -511,7 +512,7 @@ async def _iter_skill_evaluation_events(
                 raise HTTPException(status_code=500, detail="harness is required for e2e evaluation")
             outcome = await _run_e2e_case(harness, case, run_id, agent_mode=agent_mode)
         else:
-            outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm)
+            outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm, agent_mode=agent_mode)
         case_results.append(outcome)
         judge = None
         if mode == "e2e" and judge_client is not None:
@@ -558,7 +559,10 @@ async def _iter_skill_evaluation_events(
 
     report = SkillEvaluationReport(
         skills=results,
-        routing=_routing_metrics_from_case_results(case_results),
+        routing=_routing_metrics_from_case_results(case_results) if agent_mode == "single" else None,
+        multi_agent_routing=(
+            evaluate_multi_agent_intent_cases(cases) if agent_mode == "multi" else None
+        ),
         safety=evaluate_safety_cases(cases, case_results),  # 快检也需要Prompt Guard安全检测
         tools=evaluate_tool_cases(cases, case_results) if mode == "e2e" else None,
         answers=evaluate_answer_cases(cases, case_results) if mode == "e2e" else None,
@@ -595,7 +599,7 @@ def _build_evaluation_judge(settings):
     )
 
 
-async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase, guard_llm=None) -> dict:
+async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase, guard_llm=None, *, agent_mode: str = "single") -> dict:
     query = _case_query(case)
     logs: list[dict] = []
     # Layer 1: 正则快速拦截
@@ -623,6 +627,24 @@ async def _run_quick_case(registry: SkillRegistry, case: GoldenSkillCase, guard_
             "tool_completed": False,
             "tool_failed": False,
         }
+
+    if agent_mode == "multi":
+        # Multi-agent: use rewrite_query_and_slots for intent+slot routing
+        from personal_assistant.agent.multi_agent import rewrite_query_and_slots
+        payload = rewrite_query_and_slots(query)
+        return {
+            "case": case,
+            "selected_skills": [],
+            "intent_slots": payload["slots"],
+            "rewritten_query": payload["rewritten_query"],
+            "logs": logs,
+            "final_answer": "",
+            "tool_names": [],
+            "tool_calls": [],
+            "tool_completed": False,
+            "tool_failed": False,
+        }
+
     # 快检模式使用完整三层漏斗路由：正则→语义检索→LLM判定
     # 服务不可用时自动降级，和生产环境逻辑一致
     try:

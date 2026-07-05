@@ -161,6 +161,76 @@ def _build_checks(
                 reason="" if passed else "Selected skills did not match expected skills",
             )
         )
+    # Multi-agent intent checks
+    intent_slots = outcome.get("intent_slots")
+    if intent_slots is not None and isinstance(intent_slots, dict):
+        actual_intent = intent_slots.get("intent", "general")
+        if case.expected_intent is not None:
+            intent_passed = actual_intent == case.expected_intent
+            checks.append(
+                EvaluationCheck(
+                    name="intent_match",
+                    stage="routing",
+                    passed=intent_passed,
+                    expected=case.expected_intent,
+                    actual=actual_intent,
+                    reason=(
+                        ""
+                        if intent_passed
+                        else f"Expected intent '{case.expected_intent}', got '{actual_intent}'"
+                    ),
+                )
+            )
+        if case.expected_metrics:
+            actual_metrics = set(
+                m.lower() for m in intent_slots.get("metrics", [])
+            )
+            expected_metrics_set = set(m.lower() for m in case.expected_metrics)
+            missing = sorted(expected_metrics_set - actual_metrics)
+            metric_passed = not missing
+            checks.append(
+                EvaluationCheck(
+                    name="metric_extraction",
+                    stage="routing",
+                    passed=metric_passed,
+                    expected={"required": case.expected_metrics},
+                    actual=(
+                        {"missing": missing}
+                        if not metric_passed
+                        else {"matched": sorted(actual_metrics & expected_metrics_set)}
+                    ),
+                    reason=(
+                        ""
+                        if metric_passed
+                        else f"Missing expected metrics: {', '.join(missing)}"
+                    ),
+                )
+            )
+        if case.expected_entities:
+            actual_entities = set(
+                e.lower() for e in intent_slots.get("entities", [])
+            )
+            expected_entities_set = set(e.lower() for e in case.expected_entities)
+            missing = sorted(expected_entities_set - actual_entities)
+            entity_passed = not missing
+            checks.append(
+                EvaluationCheck(
+                    name="entity_extraction",
+                    stage="routing",
+                    passed=entity_passed,
+                    expected={"required": case.expected_entities},
+                    actual=(
+                        {"missing": missing}
+                        if not entity_passed
+                        else {"matched": sorted(actual_entities & expected_entities_set)}
+                    ),
+                    reason=(
+                        ""
+                        if entity_passed
+                        else f"Missing expected entities: {', '.join(missing)}"
+                    ),
+                )
+            )
     if mode != "e2e":
         return checks
     if case.expected_tool_calls:

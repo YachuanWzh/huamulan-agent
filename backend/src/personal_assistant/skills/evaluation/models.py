@@ -181,6 +181,7 @@ class SkillEvaluationResult(BaseModel):
 class SkillEvaluationReport(BaseModel):
     skills: list[SkillEvaluationResult]
     routing: RoutingMetrics | None = None
+    multi_agent_routing: MultiAgentRoutingMetrics | None = None
     safety: SafetyEvaluationMetrics | None = None
     tools: ToolEvaluationMetrics | None = None
     answers: AnswerEvaluationMetrics | None = None
