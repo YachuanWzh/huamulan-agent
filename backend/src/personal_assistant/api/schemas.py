@@ -200,3 +200,38 @@ class DeleteThreadResponse(BaseModel):
 class ClearThreadsResponse(BaseModel):
     thread_ids: list[str]
     deleted: int
+
+
+# ── OTEL Push: AlertManager Webhook ──────────────────────────────
+
+
+class OtelAlert(BaseModel):
+    """A single alert from AlertManager webhook (v4 format).
+
+    ``labels`` and ``annotations`` are open-ended dicts because AlertManager
+    supports arbitrary key-value pairs set in Prometheus alerting rules.
+    """
+
+    status: str  # "firing" | "resolved"
+    labels: dict[str, str]  # alertname, severity, service_name, ...
+    annotations: dict[str, str]  # summary, description, runbook_url, ...
+    starts_at: str = Field(alias="startsAt")
+    ends_at: str = Field(default="", alias="endsAt")
+    generator_url: str = Field(default="", alias="generatorURL")
+
+
+class AlertManagerWebhook(BaseModel):
+    """AlertManager webhook payload (v4 format).
+
+    Received at ``POST /api/otel/alerts`` when P0 (critical) or P1 (warning)
+    alerts fire in the opentelemetry-demo observability stack.
+    """
+
+    receiver: str
+    status: str  # "firing" | "resolved"
+    alerts: list[OtelAlert]
+    group_labels: dict[str, str] = Field(default_factory=dict, alias="groupLabels")
+    common_labels: dict[str, str] = Field(default_factory=dict, alias="commonLabels")
+    common_annotations: dict[str, str] = Field(default_factory=dict, alias="commonAnnotations")
+    external_url: str = Field(default="", alias="externalURL")
+    version: str = ""
