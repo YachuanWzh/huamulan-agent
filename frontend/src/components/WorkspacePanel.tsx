@@ -1601,6 +1601,12 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   'Argument Hallucination': '参数幻觉率：工具参数编造了不存在值的比例，越低越好',
   'Evidence Usage': '证据使用率：工具返回的真实数据在回答中被引用的比例，越高说明回答越 grounded',
   'Unsupported Answer': '无依据回答率：回答内容没有工具返回结果支撑的比例，越低越好',
+  'Intent Accuracy': '意图准确率：子Agent意图分类和预期完全一致的用例占比（multi-agent模式核心指标）',
+  'Intent Precision': '意图精确率：所有被分类的意图中，正确的比例（multi-agent模式）',
+  'Intent Recall': '意图召回率：所有期望意图中，被正确识别的比例（multi-agent模式）',
+  'Intent F1': '意图F1分数：意图分类的精确率和召回率的调和平均值（multi-agent模式）',
+  'Metric Extraction Recall': '指标提取召回率：查询中的APM指标（如p95、LCP）被正确提取的比例',
+  'Entity Extraction Recall': '实体提取召回率：查询中的关键实体被正确提取的比例',
 }
 
 const CHECK_TOOLTIPS: Record<string, string> = {
@@ -1615,14 +1621,30 @@ const CHECK_TOOLTIPS: Record<string, string> = {
   'answer.answer_contains': '回答内容检查：回答是否包含了期望的关键信息',
   'hallucination.answer_hallucination': '回答幻觉检查：回答是否包含了无依据的编造内容',
   'tool.tool_execution': '工具执行检查：工具运行是否成功没有报错',
+  'routing.intent_match': '意图匹配检查：NLU意图分类是否和期望的子Agent一致（multi-agent模式）',
+  'routing.metric_extraction': '指标提取检查：APM指标（p95/LCP等）是否被正确提取（multi-agent模式）',
+  'routing.entity_extraction': '实体提取检查：关键实体是否被正确提取（multi-agent模式）',
 }
 
 function buildEvaluationSummary(report: SkillEvaluationReport) {
   const routingMetrics = report.routing as Record<string, number | null | undefined> | null | undefined
+  const maRouting = report.multi_agent_routing
   const metrics: Array<{label: string, value: number | null | undefined, tooltip?: string}> = []
 
-  // 路由指标（quick和e2e都有）
-  if (routingMetrics) {
+  // Multi-agent routing 指标（agent_mode=multi 时）
+  if (maRouting) {
+    metrics.push(
+      { label: 'Intent Accuracy', value: maRouting.intent_accuracy, tooltip: METRIC_TOOLTIPS['Intent Accuracy'] },
+      { label: 'Intent Precision', value: maRouting.intent_precision, tooltip: METRIC_TOOLTIPS['Intent Precision'] },
+      { label: 'Intent Recall', value: maRouting.intent_recall, tooltip: METRIC_TOOLTIPS['Intent Recall'] },
+      { label: 'Intent F1', value: maRouting.intent_f1, tooltip: METRIC_TOOLTIPS['Intent F1'] },
+      { label: 'Metric Extraction Recall', value: maRouting.metric_extraction_recall, tooltip: METRIC_TOOLTIPS['Metric Extraction Recall'] },
+      { label: 'Entity Extraction Recall', value: maRouting.entity_extraction_recall, tooltip: METRIC_TOOLTIPS['Entity Extraction Recall'] },
+    )
+  }
+
+  // Single-agent 路由指标（quick和e2e都有）
+  if (!maRouting && routingMetrics) {
     metrics.push(
       { label: 'Routing Exact Match', value: routingMetrics.selection_accuracy, tooltip: METRIC_TOOLTIPS['Routing Exact Match'] },
       { label: 'Routing Precision', value: routingMetrics.skill_selection_precision, tooltip: METRIC_TOOLTIPS['Routing Precision'] },

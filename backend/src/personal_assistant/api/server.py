@@ -524,7 +524,7 @@ async def _iter_skill_evaluation_events(
             )
         detail = build_case_evaluation_detail(case, outcome, mode=mode, judge=judge)
         case_details.append(detail)
-        yield {
+        progress_event: dict = {
             "type": "case_progress",
             "mode": mode,
             "source": source,
@@ -538,23 +538,41 @@ async def _iter_skill_evaluation_events(
             "tool_completed": outcome["tool_completed"],
             "detail": detail.model_dump(mode="json"),
         }
+        if agent_mode == "multi":
+            intent_slots = outcome.get("intent_slots", {})
+            progress_event["expected_intent"] = case.expected_intent
+            progress_event["actual_intent"] = intent_slots.get("intent", "general")
+            progress_event["intent_slots"] = intent_slots
+        yield progress_event
 
     results: list[SkillEvaluationResult] = []
     for skill in skills:
         static_metrics = evaluate_static_skill(skill)
-        components = _case_score_components(skill.name, case_results, static_metrics, mode)
-        runtime_metrics = (
-            _runtime_metrics_from_cases(skill.name, case_results, static_metrics)
-            if mode == "e2e"
-            else None
-        )
-        result = SkillEvaluationResult(
-            skill_name=skill.name,
-            overall_score=_weighted_score(components),
-            static=static_metrics,
-            runtime=runtime_metrics,
-            score_components=components,
-        )
+        if agent_mode == "multi":
+            # Multi-agent: per-skill routing is meaningless; score only static quality
+            static_score = score_static_metrics(static_metrics)
+            components = {"static": static_score}
+            result = SkillEvaluationResult(
+                skill_name=skill.name,
+                overall_score=static_score,
+                static=static_metrics,
+                runtime=None,
+                score_components=components,
+            )
+        else:
+            components = _case_score_components(skill.name, case_results, static_metrics, mode)
+            runtime_metrics = (
+                _runtime_metrics_from_cases(skill.name, case_results, static_metrics)
+                if mode == "e2e"
+                else None
+            )
+            result = SkillEvaluationResult(
+                skill_name=skill.name,
+                overall_score=_weighted_score(components),
+                static=static_metrics,
+                runtime=runtime_metrics,
+                score_components=components,
+            )
         results.append(result)
 
     report = SkillEvaluationReport(

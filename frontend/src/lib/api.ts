@@ -171,6 +171,15 @@ export interface CaseEvaluationDetail {
 export interface SkillEvaluationReport {
   skills: SkillEvaluationResult[]
   routing?: Record<string, unknown> | null
+  multi_agent_routing?: {
+    total_cases: number
+    intent_accuracy?: number | null
+    intent_precision?: number | null
+    intent_recall?: number | null
+    intent_f1?: number | null
+    metric_extraction_recall?: number | null
+    entity_extraction_recall?: number | null
+  } | null
   safety?: {
     total_cases: number
     attack_block_rate?: number | null
@@ -230,6 +239,9 @@ export type SkillEvaluationStreamEvent =
       case_id: string
       expected_skills: string[]
       selected_skills: string[]
+      expected_intent?: string | null
+      actual_intent?: string | null
+      intent_slots?: Record<string, unknown>
       tool_completed: boolean
       tool_failed: boolean
       detail: CaseEvaluationDetail
