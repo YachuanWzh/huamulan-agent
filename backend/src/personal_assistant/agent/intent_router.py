@@ -182,3 +182,73 @@ def _regex_intent_with_confidence(normalized: str) -> tuple[str, float]:
 
     # ── Fallback ──
     return ("general", 0.40)
+
+
+# ── Vector helpers (reused from router.py pattern) ─────────────────────────
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors of equal dimension."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+# ── Tier 1: Intent Embedding Index ─────────────────────────────────────────
+# Reuses the SAME OllamaBgeM3EmbeddingProvider from router.py.
+# Each intent's utterances are embedded and mean-pooled into a centroid
+# vector. Query-time: embed query → cosine similarity against centroids.
+
+
+class IntentEmbeddingIndex:
+    """In-memory vector index for intent utterances.
+
+    Embeds each utterance in INTENT_UTTERANCES via the provided embedding
+    provider, then computes a mean-pooled centroid vector per intent.
+    At query time, the user query is embedded and compared against each
+    centroid via cosine similarity.
+
+    This is the multi-agent analogue of InMemorySkillVectorIndex in
+    router.py — same pattern, different documents to index.
+    """
+
+    def __init__(self, embedding_provider) -> None:
+        """Args:
+        embedding_provider: Any object with `async embed(text) -> list[float]`.
+            Typically OllamaBgeM3EmbeddingProvider from router.py.
+        """
+        self.embedding_provider = embedding_provider
+        self._intent_vectors: dict[str, list[float]] = {}
+
+    async def warmup(self) -> None:
+        """Pre-compute intent centroid vectors from utterance embeddings.
+
+        Uses mean pooling: embeds each utterance, then averages the
+        vectors element-wise to get a single centroid per intent.
+        """
+        for intent, utterances in INTENT_UTTERANCES.items():
+            vectors: list[list[float]] = []
+            for utterance in utterances:
+                vectors.append(await self.embedding_provider.embed(utterance))
+            if not vectors:
+                continue
+            dim = len(vectors[0])
+            avg = [sum(v[i] for v in vectors) / len(vectors) for i in range(dim)]
+            self._intent_vectors[intent] = avg
+
+    async def search(self, query: str, top_k: int = 5) -> list[IntentCandidate]:
+        """Return intent candidates sorted by descending cosine similarity."""
+        if not self._intent_vectors:
+            return []
+        query_vector = await self.embedding_provider.embed(query)
+        candidates: list[IntentCandidate] = []
+        for intent, vector in self._intent_vectors.items():
+            score = _cosine_similarity(query_vector, vector)
+            candidates.append(IntentCandidate(name=intent, score=score))
+        candidates.sort(key=lambda c: c.score, reverse=True)
+        return candidates[: max(1, top_k)]

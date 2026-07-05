@@ -160,3 +160,70 @@ def test_regex_intent_case_insensitive():
     intent, conf = _regex_intent_with_confidence("RCA TIMEOUT ERROR")
     assert intent == "troubleshoot"
     assert conf >= 0.80
+
+
+# ── Task 3: IntentEmbeddingIndex ──────────────────────────────────────
+
+from personal_assistant.agent.intent_router import IntentEmbeddingIndex
+
+
+class FakeEmbeddingProvider:
+    """Fake embedding provider — deterministic vectors per text via hash."""
+
+    async def embed(self, text: str) -> list[float]:
+        h = hash(text) % 1000
+        return [float((h + i) % 100) / 100.0 for i in range(8)]
+
+
+def test_intent_index_warmup_and_search():
+    """预热后 search() 返回意图候选"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+
+    async_test(index.warmup())
+
+    candidates = async_test(index.search("排查服务超时问题", top_k=3))
+    assert len(candidates) >= 1
+    assert candidates[0].name in ("troubleshoot", "patrol", "audit", "metrics")
+    assert 0.0 <= candidates[0].score <= 1.0
+
+
+def test_intent_index_only_searches_defined_intents():
+    """不会返回未定义的意图"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    candidates = async_test(index.search("random query", top_k=10))
+    for c in candidates:
+        assert c.name in ("troubleshoot", "patrol", "audit", "metrics")
+
+
+def test_intent_index_top_k_respected():
+    """top_k 限制返回数量"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    candidates = async_test(index.search("anything", top_k=2))
+    assert len(candidates) <= 2
+
+
+def test_intent_index_empty_before_warmup():
+    """warmup() 之前 search() 返回空列表"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+
+    candidates = async_test(index.search("anything"))
+    assert candidates == []
+
+
+def test_intent_index_search_returns_sorted_by_score():
+    """结果按相似度降序排列"""
+    provider = FakeEmbeddingProvider()
+    index = IntentEmbeddingIndex(provider)
+    async_test(index.warmup())
+
+    candidates = async_test(index.search("test query", top_k=4))
+    scores = [c.score for c in candidates]
+    assert scores == sorted(scores, reverse=True)
