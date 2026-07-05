@@ -62,6 +62,7 @@ def query_metrics(
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")
     payload = json.loads(sys.stdin.read() or "{}")
     if not payload.get("query"):
         print(json.dumps({"error": "Missing required parameter: query"}))

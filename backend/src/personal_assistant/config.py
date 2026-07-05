@@ -181,6 +181,15 @@ class Settings(BaseSettings):
         default="deepseek-v4-pro",
         alias="EVALUATION_JUDGE_MODEL",
     )
+    # ── OTEL Demo telemetry query endpoints ────────────────────────────
+    otel_jaeger_api_url: str = Field(
+        default="http://192.168.5.7:32801/jaeger/ui/api",
+        alias="OTEL_JAEGER_API_URL",
+    )
+    otel_prometheus_proxy_url: str = Field(
+        default="http://192.168.5.7:32807/api/datasources/proxy/uid/webstore-metrics/api/v1",
+        alias="OTEL_PROMETHEUS_PROXY_URL",
+    )
     evaluation_judge_base_url: str | None = Field(
         default=None,
         alias="EVALUATION_JUDGE_BASE_URL",

@@ -525,3 +525,36 @@ class TestQueryMetricsFunction:
             )
 
         assert "error" in result
+
+
+# ── Tests: Config defaults ───────────────────────────────────────────────
+
+
+class TestOtelConfig:
+    """Verify OTEL endpoint configuration defaults."""
+
+    def test_default_jaeger_api_url(self) -> None:
+        from personal_assistant.config import get_settings
+        settings = get_settings()
+        assert "jaeger" in settings.otel_jaeger_api_url.lower()
+        assert "/api" in settings.otel_jaeger_api_url
+
+    def test_default_prometheus_proxy_url(self) -> None:
+        from personal_assistant.config import get_settings
+        settings = get_settings()
+        assert "prometheus" in settings.otel_prometheus_proxy_url.lower() or \
+            "webstore-metrics" in settings.otel_prometheus_proxy_url
+        assert "/api/v1" in settings.otel_prometheus_proxy_url
+
+    def test_otel_env_vars_override_defaults(self, monkeypatch) -> None:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+        monkeypatch.setenv("LLM_MODEL", "test-model")
+        monkeypatch.setenv("OTEL_JAEGER_API_URL", "http://custom:1234/jaeger/api")
+        monkeypatch.setenv(
+            "OTEL_PROMETHEUS_PROXY_URL",
+            "http://custom:3000/prometheus/api/v1",
+        )
+        from personal_assistant.config import Settings
+        settings = Settings()
+        assert settings.otel_jaeger_api_url == "http://custom:1234/jaeger/api"
+        assert settings.otel_prometheus_proxy_url == "http://custom:3000/prometheus/api/v1"

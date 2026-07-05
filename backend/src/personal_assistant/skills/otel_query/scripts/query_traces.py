@@ -65,6 +65,7 @@ def query_traces(
 
 
 def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")
     payload = json.loads(sys.stdin.read() or "{}")
     if not payload.get("service"):
         print(json.dumps({"error": "Missing required parameter: service"}))
