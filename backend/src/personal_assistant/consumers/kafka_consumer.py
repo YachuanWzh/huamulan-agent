@@ -169,6 +169,100 @@ def otlp_spans_to_jaeger_trace(
     }
 
 
+# ── OTLP Protobuf -> dict conversion ──────────────────────────────
+
+
+def _decode_otlp_spans(raw: bytes) -> dict[str, Any]:
+    """Decode OTLP protobuf span export into a Jaeger-compatible trace dict.
+
+    Directly maps proto fields to the Jaeger format expected by
+    :func:`personal_assistant.apm.from_jaeger_trace`, without going through
+    the lossy ``MessageToDict`` round-trip.
+    """
+    try:
+        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+            ExportTraceServiceRequest,
+        )
+    except ImportError:
+        logger.error("opentelemetry-proto not installed, cannot decode spans")
+        return {"traceID": "", "spans": []}
+
+    try:
+        request = ExportTraceServiceRequest()
+        request.ParseFromString(raw)
+    except Exception as exc:
+        logger.error("Failed to parse OTLP protobuf: %s", exc)
+        return {"traceID": "", "spans": []}
+
+    spans_by_trace: dict[str, list[dict[str, Any]]] = {}
+
+    for rs in request.resource_spans:
+        service_name = ""
+        for attr in rs.resource.attributes:
+            if attr.key == "service.name":
+                service_name = attr.value.string_value
+                break
+
+        for ss in rs.scope_spans:
+            scope_name = ss.scope.name
+
+            for span in ss.spans:
+                trace_id = _bytes_to_hex(span.trace_id)
+                span_id = _bytes_to_hex(span.span_id)
+
+                # Build Jaeger-compatible tags
+                tags: list[dict[str, Any]] = []
+                for attr in span.attributes:
+                    value = _proto_attr_value(attr)
+                    if value is not None:
+                        tags.append({"key": attr.key, "value": value})
+
+                if scope_name:
+                    tags.append({"key": "otel.scope.name", "value": scope_name})
+                if service_name:
+                    tags.append({"key": "service.name", "value": service_name})
+
+                # Map OTLP status code
+                if span.status.code == 2:  # STATUS_CODE_ERROR
+                    tags.append({"key": "error", "value": True})
+
+                jaeger_span: dict[str, Any] = {
+                    "traceID": trace_id,
+                    "spanID": span_id,
+                    "operationName": span.name,
+                    "startTime": int(span.start_time_unix_nano / 1_000_000),
+                    "duration": int(
+                        (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000
+                    ),
+                    "tags": tags,
+                }
+                spans_by_trace.setdefault(trace_id, []).append(jaeger_span)
+
+    trace_ids = list(spans_by_trace.keys())
+    if not trace_ids:
+        return {"traceID": "", "spans": []}
+    return {"traceID": trace_ids[0], "spans": spans_by_trace[trace_ids[0]]}
+
+
+def _bytes_to_hex(data: bytes) -> str:
+    """Convert proto bytes field to lowercase hex string."""
+    return data.hex()
+
+
+def _proto_attr_value(attr) -> Any:
+    """Extract typed value from an OTLP proto attribute."""
+    val = attr.value
+    if val.HasField("string_value"):
+        return val.string_value
+    if val.HasField("int_value"):
+        return val.int_value
+    if val.HasField("double_value"):
+        return val.double_value
+    if val.HasField("bool_value"):
+        return val.bool_value
+    return None
+
+
 # ── Kafka consumer ──────────────────────────────────────────────────
 
 
@@ -226,10 +320,25 @@ class OtelKafkaConsumer:
         messages = self._fetch_messages(topic_name, limit=limit)
 
         for msg in messages:
-            try:
-                otlp_batch = json.loads(msg)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Failed to parse Kafka message as JSON, skipping")
+            # Try JSON first, then protobuf
+            otlp_batch: dict[str, Any] | None = None
+            if isinstance(msg, str):
+                try:
+                    otlp_batch = json.loads(msg)
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug("Message is not JSON, trying protobuf decode")
+            elif isinstance(msg, bytes):
+                trace_result = _decode_otlp_spans(msg)
+                if trace_result.get("spans"):
+                    otlp_batch = trace_result
+                else:
+                    logger.warning("Failed to decode protobuf span message, skipping")
+                    continue
+            else:
+                logger.warning("Unexpected message type %s, skipping", type(msg))
+                continue
+
+            if otlp_batch is None:
                 continue
 
             # Convert OTLP → Jaeger format → FrontendRumEvent + ExecutionLog
@@ -250,12 +359,8 @@ class OtelKafkaConsumer:
 
         return snapshots
 
-    def _fetch_messages(self, topic: str, *, limit: int = 100) -> list[str]:
-        """Fetch recent messages from a Kafka topic.
-
-        Uses kafka-python KafkaConsumer to read messages from the end
-        of the topic (latest offsets within the limit).
-        """
+    def _fetch_messages(self, topic: str, *, limit: int = 100) -> list[bytes]:
+        """Fetch recent messages from a Kafka topic as raw bytes (protobuf)."""
         try:
             from kafka import KafkaConsumer, TopicPartition
         except ImportError:
@@ -273,7 +378,6 @@ class OtelKafkaConsumer:
                 auto_offset_reset="latest",
                 enable_auto_commit=True,
                 consumer_timeout_ms=10_000,
-                value_deserializer=lambda m: m.decode("utf-8") if m else "",
             )
 
             partitions = consumer.partitions_for_topic(topic)
@@ -287,7 +391,7 @@ class OtelKafkaConsumer:
             ]
             consumer.assign(topic_partitions)
 
-            messages: list[str] = []
+            messages: list[bytes] = []
             for tp in topic_partitions:
                 end_offset = consumer.end_offsets([tp]).get(tp, 0)
                 start_offset = max(0, end_offset - max(1, limit // len(topic_partitions)))

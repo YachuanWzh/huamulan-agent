@@ -3,7 +3,6 @@ import {
   api,
   type ExecutionLog,
   type ExecutionSummary,
-  type ObservabilitySnapshot,
   type AgentMode,
   type CaseEvaluationDetail,
   type ReplayResponse,
@@ -15,6 +14,7 @@ import {
   type SkillInfo,
 } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { OtelAlertsPanel } from './OtelAlertsPanel'
 
 interface Props {
   panel: 'skills' | 'checkpoint' | 'audit' | 'performance'
@@ -66,8 +66,6 @@ export function WorkspacePanel({
   const [executionLogs, setExecutionLogs] = useState<ExecutionLog[]>([])
   const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null)
   const [executionLoading, setExecutionLoading] = useState(false)
-  const [observability, setObservability] = useState<ObservabilitySnapshot | null>(null)
-  const [observabilityLoading, setObservabilityLoading] = useState(false)
   const [auditFilter, setAuditFilter] = useState<AuditFilter>('all')
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
@@ -126,16 +124,6 @@ export function WorkspacePanel({
       setExecutionLogs([])
     }
     setExecutionLoading(false)
-  }, [threadId])
-
-  const loadObservability = useCallback(async () => {
-    setObservabilityLoading(true)
-    try {
-      setObservability(await api.getObservabilitySnapshot(threadId ?? undefined))
-    } catch {
-      setObservability(null)
-    }
-    setObservabilityLoading(false)
   }, [threadId])
 
   const loadSkills = useCallback(async () => {
@@ -277,12 +265,6 @@ export function WorkspacePanel({
       loadExecutionAudit()
     }
   }, [loadExecutionAudit, panel])
-
-  useEffect(() => {
-    if (panel === 'performance') {
-      loadObservability()
-    }
-  }, [loadObservability, panel])
 
   const deleteCurrentHistory = async () => {
     if (!threadId) return
@@ -551,88 +533,11 @@ export function WorkspacePanel({
       )}
 
       {panel === 'performance' && (
-        <div className="workspace-section performance-section">
-          <div className="workspace-header">
-            <div>
-              <h2>Frontend Performance</h2>
-              <p>Web vitals, browser errors, anomaly signals, and RCA recommendations.</p>
-            </div>
-            <div className="workspace-actions">
-              <button onClick={loadObservability} disabled={observabilityLoading}>
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {observabilityLoading && <div className="loading">Loading...</div>}
-          {!observabilityLoading && !observability && (
-            <div className="workspace-empty">No frontend observability data yet.</div>
-          )}
-          {observability && (
-            <>
-              <div className="audit-summary-grid">
-                <div className="audit-metric">
-                  <span>RUM Events</span>
-                  <strong>{observability.frontend.total_events}</strong>
-                </div>
-                <div className="audit-metric">
-                  <span>Browser Errors</span>
-                  <strong>{observability.frontend.error_count}</strong>
-                </div>
-                <div className="audit-metric">
-                  <span>Tool Retries</span>
-                  <strong>{observability.backend.tool_retries}</strong>
-                </div>
-                <div className="audit-metric">
-                  <span>Backend p95</span>
-                  <strong>{observability.backend.p95_duration_ms ?? 0}ms</strong>
-                </div>
-              </div>
-
-              <div className="performance-grid">
-                {Object.entries(observability.frontend.web_vitals).map(([metric, values]) => (
-                  <section key={metric} className="performance-card">
-                    <h3>{metric}</h3>
-                    <dl className="skill-evaluation-metrics">
-                      <div>
-                        <dt>avg</dt>
-                        <dd>{formatMetricValue(metric, values.avg)}</dd>
-                      </div>
-                      <div>
-                        <dt>p75</dt>
-                        <dd>{formatMetricValue(metric, values.p75)}</dd>
-                      </div>
-                      <div>
-                        <dt>p95</dt>
-                        <dd>{formatMetricValue(metric, values.p95)}</dd>
-                      </div>
-                    </dl>
-                  </section>
-                ))}
-              </div>
-
-              <section className="performance-card">
-                <h3>Root Cause</h3>
-                <strong>{observability.root_cause.category}</strong>
-                <p>{observability.root_cause.summary}</p>
-                <p>{observability.root_cause.recommendation}</p>
-              </section>
-
-              {observability.anomalies.length > 0 && (
-                <section className="performance-card">
-                  <h3>Anomalies</h3>
-                  <ul>
-                    {observability.anomalies.map((signal) => (
-                      <li key={`${signal.metric}-${signal.value}-${signal.method}`}>
-                        {signal.metric} {formatMetricValue(signal.metric, signal.value)}: {signal.reason}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-            </>
-          )}
-        </div>
+        <OtelAlertsPanel
+          threadId={threadId}
+          agentMode={agentMode}
+          onTriggerRca={() => {}}
+        />
       )}
 
       {panel === 'audit' && (

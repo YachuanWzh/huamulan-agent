@@ -1,11 +1,14 @@
+import asyncio
 import logging
 import sys
 import json
+from collections import deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -173,6 +176,27 @@ memory = CachedPostgresMemory(
 )
 langfuse_callback = build_langfuse_callback(settings)
 frontend_rum_events: list[FrontendRumEvent] = []
+
+# ── OTEL Push: in-memory alert store + SSE broadcast ──────────────
+_otel_alerts: deque[dict] = deque(maxlen=200)
+_otel_alert_subscribers: list[asyncio.Queue] = []
+
+
+async def _broadcast_otel_alert(alert_data: dict) -> None:
+    """Push an alert to all active SSE subscribers."""
+    stale: list[asyncio.Queue] = []
+    for queue in _otel_alert_subscribers:
+        try:
+            queue.put_nowait(alert_data)
+        except asyncio.QueueFull:
+            stale.append(queue)
+    for queue in stale:
+        try:
+            _otel_alert_subscribers.remove(queue)
+        except ValueError:
+            pass
+
+
 harness = AgentHarness(
     settings,
     registry,
@@ -384,16 +408,64 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
             starts_at,
         )
 
-        # TODO Phase 4: Dispatch to troubleshoot_agent for auto RCA
-        # background_tasks.add_task(
-        #     run_auto_troubleshoot,
-        #     alert=alert,
-        #     service=service,
-        # )
+        # Store in memory for SSE broadcast and history
+        alert_data = {
+            "id": uuid4().hex[:12],
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "severity": severity,
+            "level": "P0" if severity == "critical" else "P1",
+            "service_name": service,
+            "alert_name": alert_name,
+            "summary": summary,
+            "description": alert.annotations.get("description", ""),
+            "starts_at": starts_at,
+            "status": alert.status,
+        }
+        _otel_alerts.appendleft(alert_data)
+        await _broadcast_otel_alert(alert_data)
 
         processed += 1
 
     return {"status": "accepted", "alerts": processed}
+
+
+@app.get("/api/otel/alerts/history")
+async def list_otel_alerts(limit: int = Query(default=50, le=200)) -> list[dict]:
+    """Return recent P0/P1 alerts received via webhook."""
+    return list(_otel_alerts)[:limit]
+
+
+@app.get("/api/otel/alerts/stream")
+async def stream_otel_alerts():
+    """SSE endpoint for real-time OTEL alert notifications."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    _otel_alert_subscribers.append(queue)
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    alert_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"event: alert\ndata: {json.dumps(alert_data)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f"event: ping\ndata: {json.dumps({'ts': datetime.now(timezone.utc).isoformat()})}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                _otel_alert_subscribers.remove(queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])

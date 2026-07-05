@@ -520,6 +520,23 @@ async function* streamRequest<T extends { type: string }>(
   }
 }
 
+// ── OTEL Push: Alert types ───────────────────────────────────────
+
+export interface OtelAlert {
+  id: string
+  received_at: string
+  severity: 'critical' | 'warning'
+  level: 'P0' | 'P1'
+  service_name: string
+  alert_name: string
+  summary: string
+  description: string
+  starts_at: string
+  status: string
+}
+
+// ── API client ────────────────────────────────────────────────────
+
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
 
@@ -624,4 +641,51 @@ export const api = {
     request<SkillEvaluationResetResponse>('/api/skills/evaluation', {
       method: 'DELETE',
     }),
+
+  // ── OTEL Push alerts ──────────────────────────────────────────
+
+  listOtelAlerts: (limit = 50) =>
+    request<OtelAlert[]>(`/api/otel/alerts/history?limit=${limit}`),
+
+  /** Subscribe to SSE stream of real-time OTEL alerts. Returns an AbortController
+   *  that can be used to disconnect. */
+  streamOtelAlerts: (onAlert: (alert: OtelAlert) => void): AbortController => {
+    const controller = new AbortController()
+    const url = `${_baseUrl}/api/otel/alerts/stream`
+
+    void (async () => {
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: 'text/event-stream' },
+          signal: controller.signal,
+        })
+        if (!res.body) return
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let eventType = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim()
+            } else if (line.startsWith('data: ') && eventType === 'alert') {
+              try {
+                onAlert(JSON.parse(line.slice(6)))
+              } catch { /* skip malformed */ }
+            }
+            if (line === '') eventType = ''
+          }
+        }
+      } catch {
+        // connection closed or aborted
+      }
+    })()
+
+    return controller
+  },
 }

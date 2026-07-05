@@ -290,9 +290,9 @@ export function Sidebar({
         {tab === 'performance' && (
           <div className="sidebar-panel-note">
             <div className="sidebar-panel-note-header">
-              <h3>Frontend Performance</h3>
+              <h3>OTEL Alerts</h3>
             </div>
-            <div className="sidebar-panel-note-body">在主案台查看 APM 指标</div>
+            <div className="sidebar-panel-note-body">实时 OTEL 告警推送与自动排障</div>
           </div>
         )}
       </div>

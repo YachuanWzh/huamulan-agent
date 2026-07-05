@@ -196,15 +196,15 @@ class Settings(BaseSettings):
         alias="OTEL_KAFKA_BROKERS",
     )
     otel_kafka_topic_spans: str = Field(
-        default="otel-spans",
+        default="otlp_spans",
         alias="OTEL_KAFKA_TOPIC_SPANS",
     )
     otel_kafka_topic_metrics: str = Field(
-        default="otel-metrics",
+        default="otlp_metrics",
         alias="OTEL_KAFKA_TOPIC_METRICS",
     )
     otel_kafka_topic_logs: str = Field(
-        default="otel-logs",
+        default="otlp_logs",
         alias="OTEL_KAFKA_TOPIC_LOGS",
     )
     otel_kafka_consumer_group: str = Field(

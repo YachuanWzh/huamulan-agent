@@ -2952,3 +2952,140 @@ button {
     opacity: 1;
   }
 }
+
+/* ── OTEL Alerts Panel ─────────────────────────────────────── */
+
+.alerts-section .sse-status {
+  font-size: 0.85em;
+  color: var(--color-muted, #64748b);
+}
+.alerts-section .sse-status.live {
+  color: var(--color-success, #16a34a);
+  font-weight: 600;
+}
+
+.alerts-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.alert-card {
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #fff);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+}
+.alert-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.alert-card.alert-critical {
+  border-left: 4px solid #dc2626;
+}
+.alert-card.alert-warning {
+  border-left: 4px solid #f59e0b;
+}
+
+.alert-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-surface-alt, #f8fafc);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  flex-wrap: wrap;
+}
+
+.alert-badge {
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.badge-p0 {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.badge-p1 {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.alert-service {
+  font-size: 0.95em;
+  color: var(--color-text, #1e293b);
+}
+.alert-name {
+  font-size: 0.82em;
+  color: var(--color-muted, #64748b);
+  font-family: monospace;
+}
+.alert-time {
+  margin-left: auto;
+  font-size: 0.78em;
+  color: var(--color-muted, #94a3b8);
+}
+
+.alert-card-body {
+  padding: 10px 14px;
+}
+.alert-summary {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--color-text, #1e293b);
+}
+.alert-description {
+  font-size: 0.88em;
+  color: var(--color-muted, #475569);
+  margin-bottom: 6px;
+}
+.alert-meta {
+  display: flex;
+  gap: 20px;
+  font-size: 0.8em;
+  color: var(--color-muted, #64748b);
+}
+.alert-meta dt {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75em;
+  letter-spacing: 0.05em;
+}
+.alert-meta dd.status-firing {
+  color: #dc2626;
+  font-weight: 600;
+}
+.alert-meta dd.status-resolved {
+  color: #16a34a;
+}
+
+.alert-card-actions {
+  padding: 8px 14px;
+  border-top: 1px solid var(--color-border, #e2e8f0);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.alert-auto-note {
+  font-size: 0.82em;
+  color: #9333ea;
+  font-weight: 500;
+}
+
+.alert-analyze-btn {
+  font-size: 0.85em;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid #6366f1;
+  background: #eef2ff;
+  color: #4338ca;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.alert-analyze-btn:hover {
+  background: #e0e7ff;
+}
