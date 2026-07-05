@@ -108,6 +108,44 @@ def test_compiled_multi_agent_graph_runs_child_agents(monkeypatch) -> None:
     assert result["user_vector_context"]["status"] == "skipped"
 
 
+def test_compile_multi_agent_accepts_intent_router_params(monkeypatch) -> None:
+    """compile_multi_agent 接受 intent_index 和 intent_llm 可选参数（向后兼容）"""
+    class FakeLLM:
+        async def ainvoke(self, messages, config=None):
+            content = getattr(messages[-1], "content", "")
+            if '"reports"' in content:
+                return AIMessage(content="综合结论")
+            if "agent" in content:
+                import json
+                name = "metrics" if "metrics" in content else "troubleshoot"
+                return AIMessage(content=json.dumps({
+                    "agent": name, "findings": [], "evidence": [], "recommendations": [], "confidence": 0.5,
+                }))
+            return AIMessage(content="{}")
+
+    class Memory:
+        checkpointer = None
+        async def record_execution_log(self, log):
+            return None
+
+    monkeypatch.setattr(multi_agent_module, "build_llm", lambda *_args, **_kwargs: FakeLLM())
+
+    # 不传 intent params — 应该保持兼容
+    app = multi_agent_module.compile_multi_agent("settings", "registry", Memory())
+    result = asyncio.run(app.ainvoke(
+        {"messages": [AIMessage(content="ignored"), multi_agent_module.HumanMessage(content="排查 checkout")]},
+        config={"configurable": {"thread_id": "t1"}},
+    ))
+    assert result["messages"][-1].content == "综合结论"
+
+
+def test_rewrite_query_and_slots_still_works_for_legacy_tests() -> None:
+    """rewrite_query_and_slots() 未修改，保持原有行为"""
+    result = rewrite_query_and_slots("巡检一下")
+    assert result["slots"]["intent"] == "patrol"
+    assert result["slots"]["domain"] == "apm"
+
+
 # ── _coerce_report confidence handling ──────────────────────────────
 
 

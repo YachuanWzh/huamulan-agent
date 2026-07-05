@@ -61,12 +61,50 @@ def compile_multi_agent(
     llm_config: LLMConfig | None = None,
     hook_manager=None,
     cache=None,
+    # ── Hybrid intent routing (3-tier funnel) ──────────────────────────
+    intent_index=None,  # IntentEmbeddingIndex | None
+    intent_llm=None,    # LLM for Tier 2 intent classification
 ):
     llm = build_llm(settings, llm_config)
 
+    # Read multi-agent intent routing config (use getattr for test compatibility)
+    regex_threshold = float(getattr(settings, "multi_agent_intent_regex_threshold", 0.80) or 0.80)
+    semantic_enabled = bool(getattr(settings, "multi_agent_intent_semantic_enabled", True))
+    semantic_threshold = float(getattr(settings, "multi_agent_intent_semantic_threshold", 0.75) or 0.75)
+    llm_enabled = bool(getattr(settings, "multi_agent_intent_llm_enabled", True))
+    llm_threshold = float(getattr(settings, "multi_agent_intent_llm_threshold", 0.60) or 0.60)
+
     async def rewrite_intent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         query = _last_human_text(state)
-        payload = rewrite_query_and_slots(query)
+
+        # Always run legacy regex for metrics/entities extraction
+        legacy = rewrite_query_and_slots(query)
+
+        # Use 3-tier funnel when intent_index or intent_llm is available
+        if intent_index is not None or intent_llm is not None:
+            from personal_assistant.agent.intent_router import route_intent_with_trace
+
+            routing = await route_intent_with_trace(
+                query,
+                intent_index=intent_index if semantic_enabled else None,
+                llm=intent_llm if llm_enabled else None,
+                regex_threshold=regex_threshold,
+                semantic_threshold=semantic_threshold,
+                llm_threshold=llm_threshold,
+                existing_slots=legacy.get("slots"),
+            )
+            slots_dict = routing.intent_slots.to_dict()
+            await _record_multiagent_log(memory, config, "rewrite_intent", output={
+                "slots": slots_dict,
+                "trace": routing.trace,
+            })
+            return {
+                "rewritten_query": legacy["rewritten_query"],
+                "intent_slots": slots_dict,
+            }
+
+        # Fallback: pure regex (original behavior, unchanged)
+        payload = legacy
         await _record_multiagent_log(memory, config, "rewrite_intent", output=payload)
         return {
             "rewritten_query": payload["rewritten_query"],
