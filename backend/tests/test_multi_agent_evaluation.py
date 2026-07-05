@@ -262,3 +262,77 @@ class TestMultiAgentDiagnostics:
 
         intent_check = next(c for c in detail.checks if c.name == "intent_match")
         assert intent_check.passed is False
+
+    def test_multi_agent_status_pass_when_intent_matches(self):
+        """Multi-agent: status should be PASS when intent matches, ignoring skill checks."""
+        from personal_assistant.skills.evaluation.diagnostics import (
+            build_case_evaluation_detail,
+        )
+
+        case = GoldenSkillCase(
+            id="m-status-1",
+            query="排查 checkout API p95 超时",
+            expected_skills=["apm-metrics", "troubleshoot"],  # single-agent skills
+            expected_intent="troubleshoot",
+            expected_metrics=["p95"],
+        )
+        outcome = {
+            "case": case,
+            "selected_skills": [],  # multi-agent has no skill selection
+            "intent_slots": {
+                "intent": "troubleshoot",
+                "domain": "apm",
+                "metrics": ["p95"],
+                "entities": [],
+                "requires_user_vector_context": True,
+            },
+            "logs": [],
+            "final_answer": "",
+            "tool_names": [],
+            "tool_calls": [],
+            "tool_completed": False,
+            "tool_failed": False,
+        }
+
+        detail = build_case_evaluation_detail(case, outcome, mode="quick")
+
+        # Should NOT have skill checks since intent_slots is present
+        skill_check_names = [c.name for c in detail.checks if "skill" in c.name]
+        assert len(skill_check_names) == 0, f"Unexpected skill checks: {skill_check_names}"
+
+        # Intent matches → status should be "pass"
+        assert detail.status == "pass", f"Expected pass, got {detail.status}: {detail.diagnosis}"
+
+    def test_multi_agent_status_fail_when_intent_mismatches(self):
+        """Multi-agent: status should be FAIL when intent mismatches."""
+        from personal_assistant.skills.evaluation.diagnostics import (
+            build_case_evaluation_detail,
+        )
+
+        case = GoldenSkillCase(
+            id="m-status-2",
+            query="帮我查下指标定义",
+            expected_intent="troubleshoot",
+        )
+        outcome = {
+            "case": case,
+            "selected_skills": [],
+            "intent_slots": {
+                "intent": "metrics",
+                "domain": "apm",
+                "metrics": [],
+                "entities": [],
+                "requires_user_vector_context": True,
+            },
+            "logs": [],
+            "final_answer": "",
+            "tool_names": [],
+            "tool_calls": [],
+            "tool_completed": False,
+            "tool_failed": False,
+        }
+
+        detail = build_case_evaluation_detail(case, outcome, mode="quick")
+
+        # Intent mismatch → status should be "fail"
+        assert detail.status == "fail"

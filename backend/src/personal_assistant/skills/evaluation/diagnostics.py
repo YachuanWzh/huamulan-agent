@@ -19,11 +19,20 @@ def build_case_evaluation_detail(
 ) -> CaseEvaluationDetail:
     checks = _build_checks(case, outcome, mode=mode)
     selected = _string_list(outcome.get("selected_skills"))
+    is_multi_agent = outcome.get("intent_slots") is not None
     # Calculate per-case routing P/R/F1
     precision = None
     recall = None
     f1 = None
-    if case.expected_skills:
+    if is_multi_agent and case.expected_intent is not None:
+        # Multi-agent: P/R/F1 reflect intent accuracy (1.0 = match, 0.0 = mismatch)
+        intent_slots = outcome.get("intent_slots", {})
+        actual_intent = intent_slots.get("intent", "general")
+        matched = actual_intent == case.expected_intent
+        precision = 1.0 if matched else 0.0
+        recall = precision
+        f1 = precision
+    elif case.expected_skills:
         expected_set = set(case.expected_skills)
         selected_set = set(selected)
         tp = len(expected_set & selected_set)
@@ -40,14 +49,17 @@ def build_case_evaluation_detail(
     failed_checks = [c for c in checks if not c.passed]
     status = "pass"
     diagnosis = _diagnose(checks)
+    is_multi_agent = outcome.get("intent_slots") is not None
     if failed_checks:
-        # 仅多选技能（无漏选、无其他阶段失败）→ warning（黄色提示，不算失败）
+        # 仅多选技能（无漏选、无其他阶段失败、非multi-agent）→ warning（黄色提示，不算失败）
         has_recall_failure = any(
             c.stage == "routing" and c.name == "skill_selection_recall"
             for c in failed_checks
         )
         has_non_routing_failure = any(c.stage != "routing" for c in failed_checks)
-        only_over_selected = not has_recall_failure and not has_non_routing_failure
+        only_over_selected = (
+            not has_recall_failure and not has_non_routing_failure and not is_multi_agent
+        )
         if only_over_selected:
             status = "warning"
             diagnosis.severity = "warning"
@@ -123,7 +135,9 @@ def _build_checks(
                 reason="" if passed else "Expected security block event was not recorded",
             )
         )
-    if case.expected_skills:
+    # Single-agent skill checks: only when no intent_slots (multi-agent has its own checks below)
+    is_multi_agent = outcome.get("intent_slots") is not None
+    if case.expected_skills and not is_multi_agent:
         expected_set = set(case.expected_skills)
         selected_set = set(selected)
         extra = sorted(selected_set - expected_set)
@@ -421,6 +435,15 @@ def _diagnostic_outputs(
         ]
     if judge:
         outputs["judge"] = judge.model_dump(mode="json")
+    # Multi-agent intent data
+    intent_slots = outcome.get("intent_slots")
+    if intent_slots is not None:
+        outputs["expected"].setdefault("intent", case.expected_intent)
+        outputs["expected"].setdefault("metrics", case.expected_metrics)
+        outputs["expected"].setdefault("entities", case.expected_entities)
+        outputs["actual"]["intent"] = intent_slots.get("intent", "general")
+        outputs["actual"]["metrics"] = intent_slots.get("metrics", [])
+        outputs["actual"]["entities"] = intent_slots.get("entities", [])
     return outputs
 
 
