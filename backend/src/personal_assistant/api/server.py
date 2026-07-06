@@ -304,8 +304,20 @@ async def _trigger_rca_background(alert_data: dict) -> None:
 
 
 def _extract_rca_result_text(response) -> str | None:
-    """Extract the RCA agent's final text response from agent harness output."""
+    """Extract the RCA agent's final text response from agent harness output.
+
+    The harness ``run_user_turn`` returns a :class:`ChatResponse` whose
+    ``message`` field (singular) carries the final AI reply.  We also
+    handle older or streaming return shapes that expose a ``messages``
+    iterable (plural) so this helper works regardless of harness version.
+    """
     try:
+        # New harness ChatResponse — ``message`` is a plain str | None
+        message = getattr(response, "message", None)
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+
+        # Fallback: older/streaming responses with a ``messages`` iterable
         messages = getattr(response, "messages", None)
         if messages and hasattr(messages, "__iter__"):
             for msg in reversed(list(messages)):

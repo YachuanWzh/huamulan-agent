@@ -123,7 +123,7 @@ flowchart LR
 | 排障 Runbook | `backend/src/personal_assistant/skills/troubleshoot-runbook` | 收录 JS Error、Resource Failure、Slow API、Memory Leak 等 SOP |
 | 业务治理巡检 | `audit-sop` 升级 | 从单线程日志审计扩展到跨线程 retry/error/security/token 趋势治理 |
 | APM 评测 case | `backend/evaluation/golden/golden_dataset.jsonl` | `apm-*` 用例覆盖 troubleshoot、patrol、metrics、runbook、audit-sop |
-| 飞书推送通知 | `backend/src/personal_assistant/api/feishu_notifier.py` | P0/P1 告警触发 + RCA 完成时推送 interactive card 到飞书群聊；未配置 `FEISHU_WEBHOOK_URL` 时静默跳过 |
+| 飞书推送通知 | `backend/src/personal_assistant/api/feishu_notifier.py` | **两阶段推送**：P0/P1 告警到达时先推送 🚨 告警触发卡片（等级/名称/服务/内容）；RCA 后台任务完成后推送 🔍 RCA 分析结果卡片（✅ 完成 / ❌ 失败 / ⏸️ 阻塞 / ⏳ 运行中）。使用飞书 interactive card + `lark_md` 渲染，支持 HMAC-SHA256 签名校验，未配置 `FEISHU_WEBHOOK_URL` 时静默跳过。详见[技术方案报告 §4.7](./技术方案报告.md#47-飞书-webhook-推送通知) |
 
 ### 使用入口
 
@@ -255,7 +255,7 @@ flowchart TB
         SSE["SSE /api/otel/alerts/stream<br/>━━━━━━━━━━━━━━<br/>每客户端独立 asyncio.Queue<br/>30s heartbeat 保活"]
         RCA["_trigger_rca_background<br/>━━━━━━━━━━━━━━<br/>asyncio.create_task 后台执行<br/>requires_rca_tool_approval<br/>安全工具自动批 / 危险操作阻塞"]
         CONSUMER["OtelKafkaConsumer<br/>━━━━━━━━━━━━━━<br/>cron 定时拉起<br/>OTLP protobuf/JSON 双解码<br/>→ Jaeger 兼容格式"]
-        FEISHU["FeishuNotifier<br/>━━━━━━━━━━━━━━<br/>告警触发 → send_alert()<br/>RCA 完成 → send_rca_result()<br/>interactive card 推送"]
+        FEISHU["FeishuNotifier<br/>━━━━━━━━━━━━━━<br/>告警触发 → send_alert() → _build_alert_card()<br/>RCA 完成 → send_rca_result() → _build_rca_card()<br/>_extract_rca_result_text 从 ChatResponse.message 提取<br/>interactive card + lark_md 推送<br/>失败降级纯文本重试"]
     end
 
     subgraph 前端["前端"]
@@ -282,7 +282,7 @@ flowchart TB
     CONSUMER -->|ObservabilitySnapshot| PANEL
 
     RCA -->|"状态变更"| SSE
-    RCA -->|"RCA 完成/失败<br/>send_rca_result()"| FEISHU
+    RCA -->|"finally 块: _extract_rca_result_text →<br/>send_rca_result(status=completed/failed/blocked)"| FEISHU
     FEISHU -->|"POST card"| FS_CARD
     SSE -->|"EventSource"| PANEL
 ```
@@ -389,7 +389,7 @@ python -m personal_assistant.consumers.kafka_consumer --topic otlp_metrics --win
 | **数据内容** | AlertManager 告警元数据（service/severity/summary） | 原始 OTLP 遥测（span/metric/log 全量） |
 | **核心代码** | `server.py:handle_otel_alert` + `_trigger_rca_background` | `kafka_consumer.py:OtelKafkaConsumer.consume_and_analyze` |
 | **审批策略** | `requires_rca_tool_approval`（仅危险操作需批） | 无需审批（纯分析消费） |
-| **通知推送** | 飞书 Webhook 卡片通知（`FeishuNotifier`） | 不推送（批量报告） |
+| **通知推送** | 飞书两阶段推送：🚨 告警触发卡片 + 🔍 RCA 分析结果卡片（`FeishuNotifier`） | 不推送（批量报告） |
 
 > 详细代码级设计见 **[技术方案报告.md §OTEL](./技术方案报告.md#otel-远程遥测数据集成)**。
 

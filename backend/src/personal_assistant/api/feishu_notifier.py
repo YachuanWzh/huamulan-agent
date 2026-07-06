@@ -101,18 +101,21 @@ def _build_rca_card(
     service_name = alert_data.get("service_name", "unknown")
     summary = alert_data.get("summary", "")
 
-    if status == "completed" and rca_result:
+    if status == "completed":
         status_label = "✅ RCA 分析完成"
-        result_text = rca_result
+        result_text = rca_result or "（分析已完成，详情请查看系统面板）"
     elif status == "failed":
         status_label = "❌ RCA 分析失败"
         result_text = "根因分析执行失败，请检查系统日志。"
     elif status == "blocked":
         status_label = "⏸️ RCA 等待审批"
         result_text = "根因分析需要人工审批后才能继续。"
-    else:
+    elif status == "running":
         status_label = "⏳ RCA 分析中"
         result_text = rca_result or "分析进行中..."
+    else:
+        status_label = f"ℹ️ RCA 状态：{status}"
+        result_text = rca_result or "未知状态，请联系管理员。"
 
     body_lines = [
         f"告警等级：{level}",

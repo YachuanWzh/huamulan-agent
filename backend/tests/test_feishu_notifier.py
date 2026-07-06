@@ -8,6 +8,10 @@ from personal_assistant.api.feishu_notifier import (
     _build_signature,
 )
 
+# Import _extract_rca_result_text for targeted testing
+from personal_assistant.api.server import _extract_rca_result_text
+from personal_assistant.api.schemas import ChatResponse
+
 
 class TestBuildSignature:
     def test_build_signature_returns_timestamp_and_sign(self):
@@ -81,6 +85,60 @@ class TestBuildRcaCard:
         card = _build_rca_card(alert_data, rca_result=None, status="failed")
         content = card["card"]["elements"][0]["text"]["content"]
         assert "失败" in content
+
+    def test_build_rca_card_completed_without_result(self):
+        """Regression: status="completed" with None rca_result MUST show
+        '分析完成', NOT fall through to the else branch and show '分析中'."""
+        alert_data = {
+            "level": "P0",
+            "alert_name": "ServiceDown",
+            "service_name": "frontend",
+            "summary": "Service frontend is DOWN",
+            "severity": "critical",
+        }
+        card = _build_rca_card(alert_data, rca_result=None, status="completed")
+        content = card["card"]["elements"][0]["text"]["content"]
+        assert "分析完成" in content
+        assert "分析中" not in content
+
+    def test_build_rca_card_running_status(self):
+        alert_data = {
+            "level": "P0",
+            "alert_name": "ServiceDown",
+            "service_name": "frontend",
+            "summary": "Service frontend is DOWN",
+            "severity": "critical",
+        }
+        card = _build_rca_card(alert_data, rca_result=None, status="running")
+        content = card["card"]["elements"][0]["text"]["content"]
+        assert "分析中" in content
+
+
+class TestExtractRcaResultText:
+    def test_extract_from_chat_response_message_field(self):
+        """ChatResponse uses ``message`` (singular), not ``messages``."""
+        resp = ChatResponse(
+            thread_id="rca-123",
+            status="completed",
+            message="Root cause: DB connection pool exhausted.",
+        )
+        result = _extract_rca_result_text(resp)
+        assert result == "Root cause: DB connection pool exhausted."
+
+    def test_extract_from_chat_response_empty_message(self):
+        resp = ChatResponse(thread_id="rca-123", status="completed", message="")
+        result = _extract_rca_result_text(resp)
+        assert result is None
+
+    def test_extract_from_chat_response_none_message(self):
+        resp = ChatResponse(thread_id="rca-123", status="completed", message=None)
+        result = _extract_rca_result_text(resp)
+        assert result is None
+
+    def test_extract_from_plain_object_with_no_message_field(self):
+        """Object with neither ``message`` nor ``messages`` returns None."""
+        result = _extract_rca_result_text(object())
+        assert result is None
 
 
 class TestFeishuNotifier:
