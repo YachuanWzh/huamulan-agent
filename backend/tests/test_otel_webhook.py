@@ -1,4 +1,6 @@
 """Tests for POST /api/otel/alerts webhook endpoint."""
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
 from personal_assistant.api.server import app
 
@@ -178,3 +180,102 @@ def test_otel_alerts_endpoint_accepts_unknown_severity():
     assert response.status_code == 200
     data = response.json()
     assert data["alerts"] == 1  # Accepted — defaults to P3
+
+
+# ── Feishu push integration tests ─────────────────────────────────────
+
+
+class TestFeishuIntegration:
+    """Verify Feishu notifier is called for P0/P1 but not P2/P3."""
+
+    @patch("personal_assistant.api.server.get_feishu_notifier")
+    def test_p0_alert_triggers_feishu_push(self, mock_get_notifier):
+        mock_notifier = MagicMock()
+        mock_notifier.enabled = True
+        mock_notifier.send_alert.return_value = True
+        mock_get_notifier.return_value = mock_notifier
+
+        response = client.post("/api/otel/alerts", json=ALERTMANAGER_P0_PAYLOAD)
+        assert response.status_code == 200
+        mock_notifier.send_alert.assert_called_once()
+        call_args = mock_notifier.send_alert.call_args[0][0]
+        assert call_args["level"] == "P0"
+
+    @patch("personal_assistant.api.server.get_feishu_notifier")
+    def test_p1_alert_triggers_feishu_push(self, mock_get_notifier):
+        mock_notifier = MagicMock()
+        mock_notifier.enabled = True
+        mock_notifier.send_alert.return_value = True
+        mock_get_notifier.return_value = mock_notifier
+
+        response = client.post("/api/otel/alerts", json=ALERTMANAGER_P1_PAYLOAD)
+        assert response.status_code == 200
+        mock_notifier.send_alert.assert_called_once()
+
+    @patch("personal_assistant.api.server.get_feishu_notifier")
+    def test_p2_alert_does_not_trigger_feishu_push(self, mock_get_notifier):
+        mock_notifier = MagicMock()
+        mock_notifier.enabled = True
+        mock_get_notifier.return_value = mock_notifier
+
+        payload = {
+            "receiver": "blackhole",
+            "status": "firing",
+            "alerts": [
+                {
+                    "status": "firing",
+                    "labels": {"alertname": "LatencyTrendRising", "severity": "info", "service_name": "cart"},
+                    "annotations": {"summary": "P95 latency trending upward"},
+                    "startsAt": "2026-07-05T10:00:00Z",
+                    "endsAt": "",
+                    "generatorURL": "",
+                }
+            ],
+            "groupLabels": {},
+            "commonLabels": {"alertname": "LatencyTrendRising", "severity": "info"},
+            "commonAnnotations": {},
+            "externalURL": "",
+            "version": "4",
+        }
+        response = client.post("/api/otel/alerts", json=payload)
+        assert response.status_code == 200
+        mock_notifier.send_alert.assert_not_called()
+
+    @patch("personal_assistant.api.server.get_feishu_notifier")
+    def test_p3_alert_does_not_trigger_feishu_push(self, mock_get_notifier):
+        mock_notifier = MagicMock()
+        mock_notifier.enabled = True
+        mock_get_notifier.return_value = mock_notifier
+
+        payload = {
+            "receiver": "blackhole",
+            "status": "firing",
+            "alerts": [
+                {
+                    "status": "firing",
+                    "labels": {"alertname": "SloComplianceDrift", "severity": "none", "service_name": "quote"},
+                    "annotations": {"summary": "SLO compliance drift detected"},
+                    "startsAt": "2026-07-05T10:00:00Z",
+                    "endsAt": "",
+                    "generatorURL": "",
+                }
+            ],
+            "groupLabels": {},
+            "commonLabels": {"alertname": "SloComplianceDrift", "severity": "none"},
+            "commonAnnotations": {},
+            "externalURL": "",
+            "version": "4",
+        }
+        response = client.post("/api/otel/alerts", json=payload)
+        assert response.status_code == 200
+        mock_notifier.send_alert.assert_not_called()
+
+    @patch("personal_assistant.api.server.get_feishu_notifier")
+    def test_feishu_disabled_skips_push(self, mock_get_notifier):
+        mock_notifier = MagicMock()
+        mock_notifier.enabled = False
+        mock_get_notifier.return_value = mock_notifier
+
+        response = client.post("/api/otel/alerts", json=ALERTMANAGER_P0_PAYLOAD)
+        assert response.status_code == 200
+        mock_notifier.send_alert.assert_not_called()

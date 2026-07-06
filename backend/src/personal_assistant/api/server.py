@@ -67,6 +67,7 @@ from personal_assistant.skills.evaluation.report import (
 from personal_assistant.skills.evaluation.models import GoldenSkillCase
 from personal_assistant.skills.evaluation.diagnostics import build_case_evaluation_detail
 from personal_assistant.skills.evaluation.judge import evaluate_case_with_judge
+from personal_assistant.api.feishu_notifier import get_feishu_notifier
 from personal_assistant.skills.evaluation.quality import (
     evaluate_answer_cases,
     evaluate_hallucination_cases,
@@ -257,6 +258,7 @@ async def _trigger_rca_background(alert_data: dict) -> None:
     )
     await _broadcast_otel_alert(alert_data)
 
+    rca_result_text = None
     try:
         prompt = _build_rca_prompt(alert_data)
         response = await harness.run_user_turn(
@@ -280,6 +282,7 @@ async def _trigger_rca_background(alert_data: dict) -> None:
                 rca_status="completed",
                 rca_pending_approvals=None,
             )
+            rca_result_text = _extract_rca_result_text(response)
     except Exception:
         logger.exception("RCA failed for alert %s", alert_id)
         _update_alert_rca_status(
@@ -289,6 +292,30 @@ async def _trigger_rca_background(alert_data: dict) -> None:
         )
     finally:
         await _broadcast_otel_alert(alert_data)
+        # Push RCA result to Feishu for P0/P1 (skip P2/P3)
+        if alert_data.get("level") in ("P0", "P1"):
+            notifier = get_feishu_notifier()
+            if notifier.enabled:
+                _ = notifier.send_rca_result(
+                    alert_data,
+                    rca_result=rca_result_text,
+                    status=alert_data.get("rca_status", "failed"),
+                )
+
+
+def _extract_rca_result_text(response) -> str | None:
+    """Extract the RCA agent's final text response from agent harness output."""
+    try:
+        messages = getattr(response, "messages", None)
+        if messages and hasattr(messages, "__iter__"):
+            for msg in reversed(list(messages)):
+                if hasattr(msg, "content") and msg.content:
+                    if hasattr(msg, "type") and msg.type == "ai":
+                        return str(msg.content)
+                    return str(msg.content)
+    except Exception:
+        logger.debug("Could not extract RCA result text", exc_info=True)
+    return None
 
 
 harness = AgentHarness(
@@ -555,6 +582,12 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
         }
         _otel_alerts.appendleft(alert_data)
         await _broadcast_otel_alert(alert_data)
+
+        # Push brief alert to Feishu for P0/P1 (skip P2/P3)
+        if level in ("P0", "P1"):
+            notifier = get_feishu_notifier()
+            if notifier.enabled:
+                _ = notifier.send_alert(alert_data)
 
         # P0 (critical): auto-trigger RCA in background with auto-approval
         if level == "P0":
