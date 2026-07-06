@@ -68,6 +68,7 @@ from personal_assistant.skills.evaluation.models import GoldenSkillCase
 from personal_assistant.skills.evaluation.diagnostics import build_case_evaluation_detail
 from personal_assistant.skills.evaluation.judge import evaluate_case_with_judge
 from personal_assistant.api.feishu_notifier import get_feishu_notifier
+from personal_assistant.api.feishu_stream import FeishuStreamClient
 from personal_assistant.skills.evaluation.quality import (
     evaluate_answer_cases,
     evaluate_hallucination_cases,
@@ -354,15 +355,81 @@ quick_eval_router_kwargs = {
 }
 
 
+def _build_feishu_message_handler(
+    harness: AgentHarness,
+    memory: CachedPostgresMemory,
+) -> "Callable[[dict[str, Any]], Optional[str]]":
+    """Build the on_message callback for FeishuStreamClient.
+
+    Routes incoming Feishu messages to the agent harness and returns
+    the agent's text response for reply.
+    """
+    import asyncio
+    from typing import Any, Callable, Optional
+
+    def handle_message(msg: dict[str, Any]) -> Optional[str]:
+        content = msg.get("content", "").strip()
+        if not content:
+            return None
+
+        chat_id = msg.get("chat_id", "feishu")
+        user_id = msg.get("user_id", "unknown")
+        thread_id = f"feishu:{chat_id}:{user_id}"
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                response = loop.run_until_complete(
+                    harness.run_user_turn(
+                        thread_id=thread_id,
+                        message=content,
+                        agent_mode="single",
+                    )
+                )
+            finally:
+                loop.close()
+
+            if response and response.message:
+                return response.message
+            return None
+        except Exception:
+            logger.exception("[Feishu Stream] Agent processing failed")
+            return "抱歉，处理您的消息时出错了，请稍后重试。"
+
+    return handle_message
+
+
+_feishu_stream_client: "FeishuStreamClient | None" = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _feishu_stream_client
+
     await postgres_memory.start()
     registry.start_watching()
     # Production agent harness initializes its own routing components internally, no extra warmup needed here.
     # Quick eval skips startup Qdrant sync intentionally; sync happens lazily on first semantic search if needed.
+
+    # Start Feishu Stream client (bidirectional bot via WebSocket)
+    if settings.feishu_stream_enabled and settings.feishu_app_id:
+        _feishu_stream_client = FeishuStreamClient(
+            on_message=_build_feishu_message_handler(harness, memory),
+            app_id=settings.feishu_app_id,
+            app_secret=settings.feishu_app_secret,
+        )
+        _feishu_stream_client.start_background()
+        logger.info("Feishu Stream client started (bidirectional mode)")
+
     try:
         yield
     finally:
+        # Stop Feishu Stream client
+        if _feishu_stream_client and _feishu_stream_client.running:
+            _feishu_stream_client.stop(timeout=5.0)
+            logger.info("Feishu Stream client stopped")
+
         registry.stop_watching()
         await cache.close()
         await postgres_memory.stop()
