@@ -99,8 +99,8 @@ def test_otel_alerts_endpoint_accepts_multi_alert_batch():
     assert data["alerts"] == 2
 
 
-def test_otel_alerts_endpoint_drops_p2_p3_alerts():
-    """P2 (info) and P3 (none) alerts are not processed — Kafka handles them."""
+def test_otel_alerts_endpoint_accepts_p2_alerts():
+    """P2 (info) alerts are accepted via webhook, stored and broadcast, but no RCA."""
     payload = {
         "receiver": "blackhole",
         "status": "firing",
@@ -123,4 +123,58 @@ def test_otel_alerts_endpoint_drops_p2_p3_alerts():
     response = client.post("/api/otel/alerts", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["alerts"] == 0  # Dropped — not critical/warning
+    assert data["alerts"] == 1  # Accepted — stored + broadcast, no RCA
+
+
+def test_otel_alerts_endpoint_accepts_p3_alerts():
+    """P3 (none) alerts are accepted via webhook, stored and broadcast, but no RCA."""
+    payload = {
+        "receiver": "blackhole",
+        "status": "firing",
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {"alertname": "SloComplianceDrift", "severity": "none", "service_name": "quote"},
+                "annotations": {"summary": "SLO compliance drift detected"},
+                "startsAt": "2026-07-05T10:00:00Z",
+                "endsAt": "",
+                "generatorURL": "",
+            }
+        ],
+        "groupLabels": {},
+        "commonLabels": {"alertname": "SloComplianceDrift", "severity": "none"},
+        "commonAnnotations": {},
+        "externalURL": "",
+        "version": "4",
+    }
+    response = client.post("/api/otel/alerts", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["alerts"] == 1  # Accepted — stored + broadcast, no RCA
+
+
+def test_otel_alerts_endpoint_accepts_unknown_severity():
+    """Alerts with unrecognized severity default to P3 level."""
+    payload = {
+        "receiver": "blackhole",
+        "status": "firing",
+        "alerts": [
+            {
+                "status": "firing",
+                "labels": {"alertname": "UnknownAlert", "severity": "bogus", "service_name": "test"},
+                "annotations": {"summary": "unknown severity"},
+                "startsAt": "2026-07-05T10:00:00Z",
+                "endsAt": "",
+                "generatorURL": "",
+            }
+        ],
+        "groupLabels": {},
+        "commonLabels": {"alertname": "UnknownAlert", "severity": "bogus"},
+        "commonAnnotations": {},
+        "externalURL": "",
+        "version": "4",
+    }
+    response = client.post("/api/otel/alerts", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["alerts"] == 1  # Accepted — defaults to P3

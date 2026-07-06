@@ -487,25 +487,39 @@ async def frontend_observability_summary(
     return build_observability_snapshot(frontend_rum_events[-limit:], logs)
 
 
+# ── Severity label → display level mapping ──────────────────────────
+_SEVERITY_LEVEL_MAP: dict[str, str] = {
+    "critical": "P0",
+    "warning": "P1",
+    "info": "P2",
+    "none": "P3",
+}
+
+
+def _severity_to_level(severity: str) -> str:
+    """Map an AlertManager severity label to a P0-P3 display level."""
+    return _SEVERITY_LEVEL_MAP.get(severity, "P3")
+
+
 @app.post("/api/otel/alerts")
 async def handle_otel_alert(payload: AlertManagerWebhook):
-    """Receive AlertManager webhook for P0/P1 instant RCA.
+    """Receive AlertManager webhook for P0-P3 alerts.
 
-    P0 (severity=critical) and P1 (severity=warning) alerts trigger
-    immediate root cause analysis. The handler:
-    1. Filters to P0/P1 alerts only (P2/P3 come via Kafka)
-    2. Auto-pulls associated Jaeger traces and Prometheus metrics
-    3. Runs instant RCA via troubleshoot_agent
-    4. Returns accepted status (RCA runs in background)
+    All severity levels are accepted, stored in the in-memory alert
+    deque, and broadcast via SSE. Only P0 (critical) triggers automatic
+    RCA in the background.
 
-    P2 (info) and P3 (none) alerts are silently dropped here — they
-    arrive via the Kafka batch ingestion path.
+    Level mapping:
+      critical → P0 (auto-RCA)
+      warning  → P1 (stored + SSE)
+      info     → P2 (stored + SSE)
+      none     → P3 (stored + SSE)
+      other    → P3 (default fallback)
     """
     processed = 0
     for alert in payload.alerts:
         severity = alert.labels.get("severity", "")
-        if severity not in ("critical", "warning"):
-            continue  # P2/P3 come via Kafka
+        level = _severity_to_level(severity)
 
         service = alert.labels.get("service_name", "unknown")
         alert_name = alert.labels.get("alertname", "unknown")
@@ -513,7 +527,8 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
         starts_at = alert.starts_at
 
         logger.info(
-            "OTEL alert received: severity=%s service=%s alert=%s summary=%s starts_at=%s",
+            "OTEL alert received: level=%s severity=%s service=%s alert=%s summary=%s starts_at=%s",
+            level,
             severity,
             service,
             alert_name,
@@ -526,7 +541,7 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
             "id": uuid4().hex[:12],
             "received_at": datetime.now(timezone.utc).isoformat(),
             "severity": severity,
-            "level": "P0" if severity == "critical" else "P1",
+            "level": level,
             "service_name": service,
             "alert_name": alert_name,
             "summary": summary,
@@ -542,7 +557,7 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
         await _broadcast_otel_alert(alert_data)
 
         # P0 (critical): auto-trigger RCA in background with auto-approval
-        if severity == "critical":
+        if level == "P0":
             task = asyncio.create_task(_trigger_rca_background(alert_data))
             _active_rca_tasks.add(task)
             task.add_done_callback(_active_rca_tasks.discard)
