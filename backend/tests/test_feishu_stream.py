@@ -91,21 +91,33 @@ class TestChunkContent:
         assert chunks == ["Short message"]
 
     def test_long_content_chunked(self):
-        long_text = "A" * 100
-        chunks = _chunk_content(long_text, max_bytes=10)
+        long_text = "A" * 5000
+        chunks = _chunk_content(long_text, max_bytes=500)
         assert len(chunks) > 1
-        assert all(len(c.encode("utf-8")) <= 10 for c in chunks)
+        assert all(len(c.encode("utf-8")) <= 500 for c in chunks)
 
-    def test_chunks_preserve_content(self):
+    def test_chunks_preserve_original_text(self):
+        """Chunks should contain all original text (markers are extra)."""
         text = "0123456789" * 100
         chunks = _chunk_content(text, max_bytes=500)
-        assert "".join(chunks) == text
+        # Strip page markers and verify original text is intact
+        reconstructed = "".join(
+            chunk.rsplit("\n\n---\n", 1)[0] if "\n\n---\n" in chunk else chunk
+            for chunk in chunks
+        )
+        assert reconstructed == text
 
     def test_multi_byte_utf8_boundaries(self):
         text = "中文测试内容" * 50
-        chunks = _chunk_content(text, max_bytes=200)
-        assert "".join(chunks) == text
-        assert all(len(c.encode("utf-8")) <= 200 for c in chunks)
+        chunks = _chunk_content(text, max_bytes=300)
+        # All chunks must fit within max_bytes (including page markers)
+        assert all(len(c.encode("utf-8")) <= 300 for c in chunks)
+        # Original text must be preserved (strip markers)
+        reconstructed = "".join(
+            chunk.rsplit("\n\n---\n", 1)[0] if "\n\n---\n" in chunk else chunk
+            for chunk in chunks
+        )
+        assert reconstructed == text
 
 
 # ── _parse_event_to_message tests ──────────────────────────────────
