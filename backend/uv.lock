@@ -417,6 +417,15 @@ wheels = [
 ]
 
 [[package]]
+name = "kafka-python"
+version = "3.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/72/539ad8b49893eaa32d24688541784a150b248832c8594741001243d1dee5/kafka_python-3.0.7.tar.gz", hash = "sha256:24da5a3aa6f3dc421c74deee1b365d656b9dc54ab8e17a065b73ac4255a5254d", size = 512255, upload-time = "2026-06-28T22:12:56.964Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/ac/52de75ee82fba85a809774fcd7a5f25c48f7435afa76f3a7c83c1b185dfd/kafka_python-3.0.7-py3-none-any.whl", hash = "sha256:37dde37c1ed6d4f77ce5164d92eab70fc5d0ed57e9f20a970dc776d0371d4025", size = 613916, upload-time = "2026-06-28T22:12:55.027Z" },
+]
+
+[[package]]
 name = "langchain-core"
 version = "1.4.8"
 source = { registry = "https://pypi.org/simple" }
@@ -824,6 +833,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "kafka-python" },
     { name = "langchain-core" },
     { name = "langchain-deepseek" },
     { name = "langchain-openai" },
@@ -848,6 +858,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "kafka-python", specifier = ">=2.0.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-deepseek", specifier = ">=1.1.0" },
     { name = "langchain-openai", specifier = ">=0.2.0" },

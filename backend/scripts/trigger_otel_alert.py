@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-DEFAULT_BASE_URL = "http://192.168.5.7:8000"
+DEFAULT_BASE_URL = "http://localhost:8000"
 WEBHOOK_PATH = "/api/otel/alerts"
 
 # ── Severity to level mapping ──────────────────────────────────────────
@@ -192,7 +192,7 @@ def send_alert(
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return True
 
-    print(f"\U0001f6a8 Triggering {level} alert: {alert_name} on {service_name}")
+    print(f"[{level}] Triggering alert: {alert_name} on {service_name}")
     print(f"   POST {url}")
 
     try:
@@ -204,14 +204,14 @@ def send_alert(
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read().decode())
-            print(f"   ✅ Response: {json.dumps(result)}")
+            print(f"   OK Response: {json.dumps(result)}")
             return True
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
-        print(f"   ❌ HTTP {e.code}: {body}")
+        print(f"   ERR HTTP {e.code}: {body}")
         return False
     except urllib.error.URLError as e:
-        print(f"   ❌ Connection error: {e.reason}")
+        print(f"   ERR Connection: {e.reason}")
         return False
 
 
@@ -254,7 +254,7 @@ def cmd_preset_trigger(args: argparse.Namespace) -> None:
                 sys.exit(1)
             return
 
-    print(f"❌ Preset not found: {args.preset_name}", file=sys.stderr)
+    print(f"ERR Preset not found: {args.preset_name}", file=sys.stderr)
     print("   Use 'presets' subcommand to list available presets.", file=sys.stderr)
     sys.exit(1)
 
@@ -337,14 +337,14 @@ def cmd_batch(args: argparse.Namespace) -> None:
 
     batch_file = Path(args.file)
     if not batch_file.exists():
-        print(f"❌ File not found: {batch_file}", file=sys.stderr)
+        print(f"ERR File not found: {batch_file}", file=sys.stderr)
         sys.exit(1)
 
     batch = json.loads(batch_file.read_text(encoding="utf-8"))
     alerts = batch if isinstance(batch, list) else batch.get("alerts", [])
 
     if not alerts:
-        print("❌ No alerts found in batch file", file=sys.stderr)
+        print("ERR No alerts found in batch file", file=sys.stderr)
         sys.exit(1)
 
     success_count = 0

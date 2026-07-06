@@ -7,7 +7,7 @@ set -euo pipefail
 SERVICE="${1:-frontend}"
 ALERT="${2:-ServiceDown}"
 SUMMARY="${3:-${SERVICE} is DOWN — critical alert}"
-BASE_URL="${OTEL_BASE_URL:-http://192.168.5.7:8000}"
+BASE_URL="${OTEL_BASE_URL:-http://localhost:8000}"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo "🚨 Triggering P0 (critical) alert: ${ALERT} on ${SERVICE}"
