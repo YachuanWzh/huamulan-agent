@@ -535,7 +535,11 @@ class AgentHarness:
                 })
             else:
                 msg = _extract_last_ai_message(values.get("messages", []))
-                yield _sse_event("done", {"status": "completed", "message": msg})
+                done_payload: dict[str, Any] = {"status": "completed", "message": msg}
+                kc = values.get("knowledge_context")
+                if isinstance(kc, dict) and kc.get("documents"):
+                    done_payload["knowledge_context"] = kc
+                yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
             yield _sse_event("error", {"message": _stream_error_message(exc)})
@@ -619,7 +623,11 @@ class AgentHarness:
                 })
             else:
                 msg = _extract_last_ai_message(values.get("messages", []))
-                yield _sse_event("done", {"status": "completed", "message": msg})
+                done_payload: dict[str, Any] = {"status": "completed", "message": msg}
+                kc = values.get("knowledge_context")
+                if isinstance(kc, dict):
+                    done_payload["knowledge_context"] = kc
+                yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
             yield _sse_event("error", {"message": _stream_error_message(exc)})
@@ -705,7 +713,11 @@ class AgentHarness:
                 })
             else:
                 msg = _extract_last_ai_message(values.get("messages", []))
-                yield _sse_event("done", {"status": "completed", "message": msg})
+                done_payload: dict[str, Any] = {"status": "completed", "message": msg}
+                kc = values.get("knowledge_context")
+                if isinstance(kc, dict):
+                    done_payload["knowledge_context"] = kc
+                yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
             yield _sse_event("error", {"message": _stream_error_message(exc)})
@@ -727,6 +739,13 @@ class AgentHarness:
             kwargs["cache"] = self.cache
         if requires_approval is not None:
             kwargs["requires_approval"] = requires_approval
+
+        # ── Wire up knowledge retriever for RAG-enhanced single-agent ──
+        if getattr(self.settings, "knowledge_rag_enabled", False):
+            from personal_assistant.knowledge import build_knowledge_retriever
+            retriever = build_knowledge_retriever(self.settings)
+            if retriever is not None:
+                kwargs["knowledge_retriever"] = retriever
 
         if self.hook_manager is None:
             return agent_module.compile_agent(

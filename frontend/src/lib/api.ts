@@ -417,10 +417,24 @@ export interface StreamToolResult {
   content: string
 }
 
+export interface KnowledgeContextDocument {
+  title: string
+  source_attribution: string
+  score: number
+  content_preview: string
+  source_file: string
+}
+
+export interface KnowledgeContext {
+  status: string
+  documents: KnowledgeContextDocument[]
+}
+
 export interface StreamDone {
   type: 'done'
   status: 'completed'
   message: string
+  knowledge_context?: KnowledgeContext
 }
 
 export interface StreamError {

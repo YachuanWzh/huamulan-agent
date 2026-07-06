@@ -48,6 +48,7 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
           compacting={msg.compacting}
           compactingStreaming={msg.compactingStreaming}
           compactingCollapsed={msg.compactingCollapsed}
+          knowledgeContext={msg.knowledgeContext}
           onToggleReasoning={onToggleReasoning}
           onToggleCompacting={onToggleCompacting}
         />

@@ -154,6 +154,43 @@ class Settings(BaseSettings):
         alias="USER_VECTOR_QDRANT_COLLECTION",
     )
     user_vector_top_k: int = Field(default=5, alias="USER_VECTOR_TOP_K")
+    # ── APM Knowledge Base RAG ────────────────────────────────────────
+    knowledge_rag_enabled: bool = Field(
+        default=False,
+        alias="KNOWLEDGE_RAG_ENABLED",
+    )
+    knowledge_qdrant_url: str | None = Field(
+        default=None,
+        alias="KNOWLEDGE_QDRANT_URL",
+    )
+    knowledge_qdrant_api_key: str | None = Field(
+        default=None,
+        alias="KNOWLEDGE_QDRANT_API_KEY",
+    )
+    knowledge_qdrant_collection: str = Field(
+        default="apm_knowledge",
+        alias="KNOWLEDGE_QDRANT_COLLECTION",
+    )
+    knowledge_retrieval_top_k: int = Field(
+        default=5,
+        alias="KNOWLEDGE_RETRIEVAL_TOP_K",
+    )
+    knowledge_chunk_max_tokens: int = Field(
+        default=512,
+        alias="KNOWLEDGE_CHUNK_MAX_TOKENS",
+    )
+    knowledge_chunk_context_buffer: int = Field(
+        default=50,
+        alias="KNOWLEDGE_CHUNK_CONTEXT_BUFFER",
+    )
+    knowledge_version: str = Field(
+        default="v1.0",
+        alias="KNOWLEDGE_VERSION",
+    )
+    knowledge_dir: str = Field(
+        default="knowledge",
+        alias="KNOWLEDGE_DIR",
+    )
     # ── Multi-agent Hybrid Intent Routing ──────────────────────────────
     multi_agent_intent_regex_threshold: float = Field(
         default=0.80,

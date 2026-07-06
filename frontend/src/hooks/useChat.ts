@@ -3,6 +3,7 @@ import {
   api,
   type AgentMode,
   type ApprovalBatchItem,
+  type KnowledgeContext,
   type ReplayState,
   type StreamEvent,
   type ToolCallApproval,
@@ -21,6 +22,7 @@ export interface Message {
   compacting?: string
   compactingStreaming?: boolean
   compactingCollapsed?: boolean
+  knowledgeContext?: KnowledgeContext
 }
 
 export function useChat(
@@ -247,20 +249,38 @@ export function useChat(
             finishCompacting()
             if (assistantId && buffer) {
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        streaming: false,
+                        knowledgeContext: event.knowledge_context ?? m.knowledgeContext,
+                      }
+                    : m,
+                ),
               )
             } else if (assistantId && event.message) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: event.message, streaming: false }
+                    ? {
+                        ...m,
+                        content: event.message,
+                        streaming: false,
+                        knowledgeContext: event.knowledge_context ?? m.knowledgeContext,
+                      }
                     : m,
                 ),
               )
             } else if (!assistantId && event.message) {
               setMessages((prev) => [
                 ...prev,
-                { id: nextId(), role: 'assistant' as const, content: event.message },
+                {
+                  id: nextId(),
+                  role: 'assistant' as const,
+                  content: event.message,
+                  knowledgeContext: event.knowledge_context,
+                },
               ])
             }
             setPendingApprovals([])

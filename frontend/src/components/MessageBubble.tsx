@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Message } from '../hooks/useChat'
+import type { KnowledgeContext } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface Props {
@@ -14,6 +15,7 @@ interface Props {
   compacting?: string
   compactingStreaming?: boolean
   compactingCollapsed?: boolean
+  knowledgeContext?: KnowledgeContext
   onToggleReasoning?: (messageId: string) => void
   onToggleCompacting?: (messageId: string) => void
 }
@@ -41,10 +43,12 @@ export function MessageBubble({
   compacting,
   compactingStreaming,
   compactingCollapsed,
+  knowledgeContext,
   onToggleReasoning,
   onToggleCompacting,
 }: Props) {
   const [toolResultExpanded, setToolResultExpanded] = useState(false)
+  const [knowledgeExpanded, setKnowledgeExpanded] = useState(false)
   const isToolResult = role === 'tool_call'
   const toolResultId = id ? `${id}-tool-result` : undefined
 
@@ -125,7 +129,46 @@ export function MessageBubble({
           {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
         </div>
       ) : role === 'assistant' ? (
-        <MarkdownRenderer content={content} streaming={streaming} />
+        <>
+          {knowledgeContext && knowledgeContext.documents.length > 0 && (
+            <div className={`knowledge-sources ${knowledgeExpanded ? 'expanded' : 'collapsed'}`}>
+              <button
+                type="button"
+                className="knowledge-sources-header"
+                onClick={() => setKnowledgeExpanded((v) => !v)}
+                aria-expanded={knowledgeExpanded}
+              >
+                <span>参考知识文档（{knowledgeContext.documents.length} 篇）</span>
+                <span className="knowledge-toggle">
+                  {knowledgeExpanded ? '收起' : '展开'}
+                </span>
+              </button>
+              {knowledgeExpanded && (
+                <div className="knowledge-sources-list">
+                  {knowledgeContext.documents.map((doc, i) => (
+                    <div key={i} className="knowledge-source-item">
+                      <div className="knowledge-source-attribution">
+                        {doc.source_attribution}
+                      </div>
+                      <div className="knowledge-source-meta">
+                        <span className="knowledge-source-score">
+                          相似度：{(doc.score * 100).toFixed(1)}%
+                        </span>
+                        <span className="knowledge-source-chapter">
+                          章节：{doc.title}
+                        </span>
+                      </div>
+                      <div className="knowledge-source-preview">
+                        {doc.content_preview}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <MarkdownRenderer content={content} streaming={streaming} />
+        </>
       ) : (
         <div className="message-content">
           {content}

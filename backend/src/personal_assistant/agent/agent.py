@@ -121,6 +121,7 @@ def compile_agent(
     enable_memory_reflection: bool = True,
     cache=None,
     requires_approval: RequiresApproval | None = None,
+    knowledge_retriever=None,  # KnowledgeRetriever | None
 ):
     llm = build_llm(settings, llm_config)
     approval_callback: RequiresApproval = requires_approval or requires_tool_approval
@@ -321,7 +322,62 @@ def compile_agent(
         },
     )
     graph.add_edge("route_skills", "compact_context")
-    graph.add_edge("compact_context", "agent")
+
+    # ── Optional: RAG knowledge retrieval ─────────────────────────────
+    if knowledge_retriever is not None:
+
+        async def retrieve_knowledge(
+            state: AgentState, config: RunnableConfig | None = None,
+        ) -> AgentState:
+            query = _last_human_text(state)
+            if not query.strip():
+                return {"knowledge_context": {}}
+            try:
+                result = knowledge_retriever.retrieve(query)
+                if hasattr(result, "__await__"):
+                    result = await result
+                if result.status != "completed" or not result.documents:
+                    return {"knowledge_context": {}}
+                formatted = knowledge_retriever.format_for_llm(result)
+                if not formatted:
+                    return {"knowledge_context": {}}
+                prefix = (
+                    "以下是从 APM 知识库中检索到的相关知识，"
+                    "请参考这些内容来辅助分析和回答：\n\n"
+                )
+                knowledge_context = {
+                    "status": result.status,
+                    "documents": [
+                        {
+                            "title": doc.title,
+                            "source_attribution": doc.source_attribution,
+                            "score": round(doc.score, 4),
+                            "content_preview": (
+                                doc.content[:200] + "..."
+                                if len(doc.content) > 200
+                                else doc.content
+                            ),
+                            "source_file": doc.metadata.get("source_file", ""),
+                        }
+                        for doc in result.documents
+                    ],
+                }
+                return {
+                    "messages": [SystemMessage(content=prefix + formatted)],
+                    "knowledge_context": knowledge_context,
+                }
+            except Exception:
+                logger.warning("Knowledge retrieval failed for single-agent turn", exc_info=True)
+                return {"knowledge_context": {}}
+
+        graph.add_node(
+            "retrieve_knowledge",
+            with_hooks(hooks, HookStage.COMPACT_CONTEXT, retrieve_knowledge),
+        )
+        graph.add_edge("compact_context", "retrieve_knowledge")
+        graph.add_edge("retrieve_knowledge", "agent")
+    else:
+        graph.add_edge("compact_context", "agent")
     if enable_memory_reflection:
         graph.add_edge("agent", "memory_reflection")
         graph.add_edge("memory_reflection", "approval")
@@ -762,3 +818,11 @@ def _compaction_transcript_line(message) -> str:
     else:
         content = getattr(message, "content", "")
     return f"{getattr(message, 'type', message.__class__.__name__)}: {content}"
+
+
+def _last_human_text(state: AgentState) -> str:
+    """Extract the text of the last human message in the conversation."""
+    for message in reversed(state.get("messages", [])):
+        if getattr(message, "type", "") == "human":
+            return str(getattr(message, "content", "") or "")
+    return ""
