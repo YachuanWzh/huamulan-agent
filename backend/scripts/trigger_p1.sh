@@ -7,7 +7,7 @@ set -euo pipefail
 SERVICE="${1:-checkout}"
 ALERT="${2:-HighLatencyP95}"
 SUMMARY="${3:-${SERVICE} P95 latency exceeding SLO — warning}"
-BASE_URL="${OTEL_BASE_URL:-http://localhost:8000}"
+BASE_URL="${OTEL_BASE_URL:-http://192.168.5.7:8000}"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo "🟡 Triggering P1 (warning) alert: ${ALERT} on ${SERVICE}"

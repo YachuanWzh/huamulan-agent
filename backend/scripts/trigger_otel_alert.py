@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
-DEFAULT_BASE_URL = "http://localhost:8000"
+DEFAULT_BASE_URL = "http://192.168.5.7:8000"
 WEBHOOK_PATH = "/api/otel/alerts"
 
 # ── Severity to level mapping ──────────────────────────────────────────

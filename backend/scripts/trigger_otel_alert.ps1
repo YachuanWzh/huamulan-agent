@@ -56,7 +56,7 @@ param(
 
     [string]$Description = "",
 
-    [string]$BaseUrl = "http://localhost:8000",
+    [string]$BaseUrl = "http://192.168.5.7:8000",
 
     [switch]$DryRun
 )
