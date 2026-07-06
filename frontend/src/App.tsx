@@ -100,6 +100,7 @@ function App() {
               localStorage.setItem('threadId', tid)
               setThreadId(tid)
               setConversationKey(tid)
+              setReplayState(null)
               setActivePanel('chat')
             }}
           />

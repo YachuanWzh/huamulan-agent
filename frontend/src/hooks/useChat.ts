@@ -62,6 +62,54 @@ export function useChat(
     idRef.current = replayMessages.length
   }, [replayState])
 
+  // Load conversation history when threadId changes (e.g. navigating from
+  // OTEL alerts "View Analysis" or sidebar thread selection).
+  useEffect(() => {
+    if (!threadId || replayState) return
+
+    let cancelled = false
+    const loadHistory = async () => {
+      try {
+        const result = await api.replay(threadId)
+        if (cancelled) return
+
+        const allMessages: Message[] = []
+        for (const state of result.states) {
+          for (let i = 0; i < state.messages.length; i++) {
+            const msg = state.messages[i]
+            allMessages.push({
+              id: `history-${state.checkpoint_id}-${i}`,
+              role: msg.role,
+              content: msg.content,
+              reasoning: msg.reasoning,
+              reasoningStreaming: false,
+              reasoningCollapsed: msg.reasoning ? true : undefined,
+              compactingStreaming: false,
+            })
+          }
+        }
+
+        if (allMessages.length > 0) {
+          setMessages(allMessages)
+          idRef.current = allMessages.length
+        }
+
+        // Restore pending approvals if any
+        const lastState = result.states[result.states.length - 1]
+        if (lastState?.values?.pending_approvals) {
+          const approvals = lastState.values.pending_approvals
+          setPendingApprovals(approvals.filter((a) => !isMemoryApproval(a)))
+          setMemoryApprovals(approvals.filter(isMemoryApproval))
+        }
+      } catch {
+        // Thread may not exist yet (fresh thread) — that's fine
+      }
+    }
+
+    loadHistory()
+    return () => { cancelled = true }
+  }, [threadId, replayState])
+
   useEffect(() => {
     return () => {
       if (memoryPollRef.current !== null) {
