@@ -196,7 +196,8 @@ class Settings(BaseSettings):
         default="",
         alias="OTEL_PROMETHEUS_PROXY_URL",
     )
-    # ── Feishu (飞书) Alert Push ─────────────────────────────────────
+    # ── Feishu (飞书) ──────────────────────────────────────────────
+    # Webhook mode (existing: agent → Feishu push)
     feishu_webhook_url: str = Field(
         default="",
         alias="FEISHU_WEBHOOK_URL",
@@ -204,6 +205,19 @@ class Settings(BaseSettings):
     feishu_webhook_secret: str = Field(
         default="",
         alias="FEISHU_WEBHOOK_SECRET",
+    )
+    # Stream mode (new: Feishu ↔ agent bidirectional via WebSocket)
+    feishu_app_id: str = Field(
+        default="",
+        alias="FEISHU_APP_ID",
+    )
+    feishu_app_secret: str = Field(
+        default="",
+        alias="FEISHU_APP_SECRET",
+    )
+    feishu_stream_enabled: bool = Field(
+        default=False,
+        alias="FEISHU_STREAM_ENABLED",
     )
     # ── OTEL Push: Kafka Consumer ──────────────────────────────────
     otel_kafka_brokers: str = Field(
