@@ -169,28 +169,48 @@ class PostgresMemory:
                 WITH latest AS (
                     SELECT DISTINCT ON (thread_id)
                         thread_id,
+                        checkpoint_ns,
                         (checkpoint->>'ts')::timestamptz AS updated_at,
                         checkpoint
                     FROM checkpoints
                     WHERE thread_id NOT LIKE 'skill-eval-%%'
                     ORDER BY thread_id, (checkpoint->>'ts')::timestamptz DESC NULLS LAST
                 )
-                SELECT thread_id, updated_at, checkpoint
-                FROM latest
-                ORDER BY updated_at DESC NULLS LAST, thread_id ASC
+                SELECT
+                    l.thread_id,
+                    l.updated_at,
+                    l.checkpoint,
+                    bl.type AS messages_type,
+                    bl.blob AS messages_blob
+                FROM latest l
+                LEFT JOIN checkpoint_blobs bl
+                    ON bl.thread_id = l.thread_id
+                    AND bl.checkpoint_ns = l.checkpoint_ns
+                    AND bl.channel = 'messages'
+                    AND bl.version = (l.checkpoint->'channel_versions'->>'messages')
+                ORDER BY l.updated_at DESC NULLS LAST, l.thread_id ASC
                 LIMIT %s
                 """,
                 (limit,),
             )
             rows = await cursor.fetchall()
-        return [
-            {
+        results = []
+        for row in rows:
+            summary = None
+            messages_type = row[3]
+            messages_blob = row[4]
+            if messages_blob is not None and messages_type is not None and messages_type != "empty":
+                summary = _thread_summary_from_blob(
+                    self.checkpointer, messages_type, messages_blob
+                )
+            if summary is None:
+                summary = _thread_summary_from_checkpoint(row[2])
+            results.append({
                 "thread_id": row[0],
                 "updated_at": row[1],
-                "summary": _thread_summary_from_checkpoint(row[2]),
-            }
-            for row in rows
-        ]
+                "summary": summary,
+            })
+        return results
 
     async def delete_thread(self, thread_id: str) -> None:
         if self.checkpointer is None:
@@ -898,7 +918,7 @@ class PostgresMemory:
                     rca_status, rca_thread_id, rca_pending_approvals,
                     rca_result_text, metadata
                 ) VALUES (
-                    $1, now(), now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                    %s, now(), now(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     updated_at = now(),
@@ -909,21 +929,23 @@ class PostgresMemory:
                     rca_result_text = EXCLUDED.rca_result_text,
                     metadata = EXCLUDED.metadata
                 """,
-                alert_data["id"],
-                alert_data["received_at"],
-                alert_data["severity"],
-                alert_data["level"],
-                alert_data["service_name"],
-                alert_data["alert_name"],
-                alert_data.get("summary", ""),
-                alert_data.get("description", ""),
-                alert_data.get("starts_at"),
-                alert_data.get("status", "firing"),
-                alert_data.get("rca_status", "pending"),
-                alert_data.get("rca_thread_id"),
-                json.dumps(alert_data.get("rca_pending_approvals") or []),
-                alert_data.get("rca_result_text"),
-                json.dumps(alert_data.get("metadata", {})),
+                (
+                    alert_data["id"],
+                    alert_data["received_at"],
+                    alert_data["severity"],
+                    alert_data["level"],
+                    alert_data["service_name"],
+                    alert_data["alert_name"],
+                    alert_data.get("summary", ""),
+                    alert_data.get("description", ""),
+                    alert_data.get("starts_at"),
+                    alert_data.get("status", "firing"),
+                    alert_data.get("rca_status", "pending"),
+                    alert_data.get("rca_thread_id"),
+                    json.dumps(alert_data.get("rca_pending_approvals") or []),
+                    alert_data.get("rca_result_text"),
+                    json.dumps(alert_data.get("metadata", {})),
+                ),
             )
 
     async def list_otel_alerts(self, limit: int = 50) -> list[dict]:
@@ -931,7 +953,7 @@ class PostgresMemory:
         if self.pool is None:
             return []
         async with self.pool.connection() as conn:
-            rows = await conn.fetch(
+            cursor = await conn.execute(
                 """
                 SELECT id, created_at, updated_at, received_at,
                        severity, level, service_name, alert_name,
@@ -940,10 +962,11 @@ class PostgresMemory:
                        rca_result_text, metadata
                 FROM otel_alerts
                 ORDER BY received_at DESC
-                LIMIT $1
+                LIMIT %s
                 """,
-                limit,
+                (limit,),
             )
+            rows = await cursor.fetchall()
             return [_alert_row_to_dict(row) for row in rows]
 
     async def get_otel_alert(self, alert_id: str) -> dict | None:
@@ -951,9 +974,10 @@ class PostgresMemory:
         if self.pool is None:
             return None
         async with self.pool.connection() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM otel_alerts WHERE id = $1", alert_id
+            cursor = await conn.execute(
+                "SELECT * FROM otel_alerts WHERE id = %s", (alert_id,)
             )
+            row = await cursor.fetchone()
             return _alert_row_to_dict(row) if row else None
 
 
@@ -986,6 +1010,7 @@ def _serialize_checkpoint(checkpoint: Any) -> dict[str, Any]:
 
 
 def _thread_summary_from_checkpoint(checkpoint: Any) -> str | None:
+    """Extract summary from inline channel_values (fallback for edge cases)."""
     checkpoint_data = checkpoint if isinstance(checkpoint, dict) else {}
     values = checkpoint_data.get("channel_values", {})
     if not isinstance(values, dict):
@@ -993,12 +1018,36 @@ def _thread_summary_from_checkpoint(checkpoint: Any) -> str | None:
     messages = values.get("messages", [])
     if not isinstance(messages, list):
         return None
+    return _extract_summary_from_messages(messages)
 
+
+def _thread_summary_from_blob(
+    checkpointer: Any, messages_type: str, messages_blob: bytes
+) -> str | None:
+    """Extract thread summary from serialized messages stored in checkpoint_blobs."""
+    try:
+        serde = getattr(checkpointer, "serde", None)
+        if serde is None:
+            return None
+        messages = serde.loads_typed((messages_type, messages_blob))
+        if isinstance(messages, list):
+            return _extract_summary_from_messages(messages)
+    except Exception:
+        pass
+    return None
+
+
+def _extract_summary_from_messages(messages: list) -> str | None:
+    """Extract a human-readable summary from a list of messages."""
+    if not isinstance(messages, list):
+        return None
+    # Prefer the first user message
     for message in messages:
         if _message_role(message) == "user":
             content = _message_content_text(_message_content(message)).strip()
             if content:
                 return _clip_text(content)
+    # Fallback to any message with content
     for message in messages:
         content = _message_content_text(_message_content(message)).strip()
         if content:
@@ -1010,11 +1059,33 @@ def _message_role(message: Any) -> str | None:
     message_type = getattr(message, "type", None)
     if message_type is None and isinstance(message, dict):
         message_type = message.get("type")
-        if message_type is None and isinstance(message.get("id"), list):
-            type_name = str(message["id"][-1])
+
+    # Handle LangChain serialized "constructor" format
+    # e.g. {"lc": 1, "type": "constructor", "id": [..., "HumanMessage"],
+    #       "kwargs": {"type": "human", "content": "..."}}
+    if message_type == "constructor" and isinstance(message, dict):
+        kwargs = message.get("kwargs", {})
+        if isinstance(kwargs, dict):
+            kwargs_type = kwargs.get("type")
+            if kwargs_type in ("human", "ai", "tool"):
+                message_type = kwargs_type
+        if message_type == "constructor":
+            msg_id = message.get("id")
+            if isinstance(msg_id, list) and msg_id:
+                type_name = str(msg_id[-1])
+                if type_name.endswith("Message"):
+                    type_name = type_name[: -len("Message")]
+                message_type = type_name.lower()
+
+    # Handle messages with only id (no type field)
+    if message_type is None and isinstance(message, dict):
+        msg_id = message.get("id")
+        if isinstance(msg_id, list) and msg_id:
+            type_name = str(msg_id[-1])
             if type_name.endswith("Message"):
                 type_name = type_name[: -len("Message")]
             message_type = type_name.lower()
+
     return {
         "human": "user",
         "ai": "assistant",
