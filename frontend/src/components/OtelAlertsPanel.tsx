@@ -30,14 +30,46 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
   const [rcaStates, setRcaStates] = useState<Record<string, RcaEntry>>({})
   const triggeredRef = useRef<Set<string>>(new Set())
 
+  /** Sync RCA state from backend alert's rca_status field.
+   *  Defined early so loadHistory can reference it. */
+  const syncRcaFromBackend = useCallback((alert: OtelAlert) => {
+    if (!alert.rca_status || !alert.id) return
+
+    const statusMap: Record<string, RcaStatus> = {
+      pending: 'idle',
+      running: 'analyzing',
+      completed: 'completed',
+      blocked: 'need_approve',
+      failed: 'failed',
+    }
+    const mappedStatus = statusMap[alert.rca_status] || 'idle'
+
+    setRcaStates((prev) => ({
+      ...prev,
+      [alert.id]: {
+        threadId: alert.rca_thread_id || prev[alert.id]?.threadId || '',
+        status: mappedStatus,
+        pendingApprovals: alert.rca_pending_approvals || undefined,
+      },
+    }))
+  }, [])
+
   const loadHistory = useCallback(async () => {
     setLoading(true)
     try {
       const history = await api.listOtelAlerts(50)
       setAlerts(history)
+      // Sync RCA states from history-loaded alerts so previously
+      // analyzed alerts show their correct status (View Analysis
+      // instead of Analyze) after component remount.
+      for (const alert of history) {
+        if (alert.rca_status && alert.id) {
+          syncRcaFromBackend(alert)
+        }
+      }
     } catch { /* silent */ }
     setLoading(false)
-  }, [])
+  }, [syncRcaFromBackend])
 
   // Poll RCA thread statuses
   useEffect(() => {
@@ -122,7 +154,9 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
 
       const newState: RcaEntry = {
         threadId: result.thread_id,
-        status: result.status === 'requires_approval' ? 'need_approve' : 'analyzing',
+        status: result.status === 'requires_approval' ? 'need_approve'
+          : result.status === 'completed' ? 'completed'
+          : 'analyzing',
         pendingApprovals: result.approvals?.length ? result.approvals : undefined,
       }
 
@@ -145,29 +179,6 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
       }))
     }
   }, [agentMode, onViewAnalysis])
-
-  /** Sync RCA state from backend alert's rca_status field */
-  const syncRcaFromBackend = useCallback((alert: OtelAlert) => {
-    if (!alert.rca_status || !alert.id) return
-
-    const statusMap: Record<string, RcaStatus> = {
-      pending: 'idle',
-      running: 'analyzing',
-      completed: 'completed',
-      blocked: 'need_approve',
-      failed: 'failed',
-    }
-    const mappedStatus = statusMap[alert.rca_status] || 'idle'
-
-    setRcaStates((prev) => ({
-      ...prev,
-      [alert.id]: {
-        threadId: alert.rca_thread_id || prev[alert.id]?.threadId || '',
-        status: mappedStatus,
-        pendingApprovals: alert.rca_pending_approvals || undefined,
-      },
-    }))
-  }, [])
 
   /** Approve or deny a dangerous tool during P0 RCA */
   const handleApprove = useCallback(async (
@@ -344,8 +355,8 @@ function RcaAction({
   onViewAnalysis: (threadId: string) => void
   onApprove: (approvalId: string, approved: boolean) => void
 }) {
-  if (!rca) {
-    // No RCA triggered yet
+  if (!rca || rca.status === 'idle') {
+    // No RCA triggered yet, or RCA is pending on the backend
     if (isP0) {
       return (
         <span className="alert-auto-note">

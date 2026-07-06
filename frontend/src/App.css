@@ -1166,21 +1166,22 @@ button {
   min-width: 0;
   overflow: hidden;
   color: var(--color-text);
-  display: -webkit-box;
   font-size: var(--text-sm);
   line-height: 1.4;
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .history-preview span {
   display: block;
 }
 
-.history-summary {
+.history-preview .history-summary {
   color: var(--color-text);
   font-weight: 700;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .history-thread-id {

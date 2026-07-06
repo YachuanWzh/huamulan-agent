@@ -136,12 +136,8 @@ class CachedPostgresMemory:
     async def delete_thread(self, thread_id: str) -> None:
         await self.inner.delete_thread(thread_id)
         safe_thread = _key_part(thread_id)
-        await self._delete(f"{PREFIX}:execution_summary:{safe_thread}")
-        await self._delete_pattern(f"{PREFIX}:execution_logs:{safe_thread}:*")
-        await self._delete_pattern(f"{PREFIX}:audit_events:{safe_thread}:*")
-        await self._delete_pattern(f"{PREFIX}:tool_errors:{safe_thread}:*")
+        await self.cache.delete_thread_scope(safe_thread)
         await self._delete_pattern(f"{PREFIX}:threads:list:*")
-
     async def clear_threads(self) -> list[str]:
         thread_ids = await self.inner.clear_threads()
         for pattern in (

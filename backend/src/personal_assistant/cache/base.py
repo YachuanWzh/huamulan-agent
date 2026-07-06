@@ -31,5 +31,8 @@ class NoopCache:
     async def delete_pattern(self, pattern: str) -> None:
         return None
 
+    async def delete_thread_scope(self, scope: str) -> None:
+        return None
+
     async def close(self) -> None:
         return None

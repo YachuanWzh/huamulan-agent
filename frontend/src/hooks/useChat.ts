@@ -73,29 +73,28 @@ export function useChat(
         const result = await api.replay(threadId)
         if (cancelled) return
 
-        const allMessages: Message[] = []
-        for (const state of result.states) {
-          for (let i = 0; i < state.messages.length; i++) {
-            const msg = state.messages[i]
-            allMessages.push({
-              id: `history-${state.checkpoint_id}-${i}`,
-              role: msg.role,
-              content: msg.content,
-              reasoning: msg.reasoning,
-              reasoningStreaming: false,
-              reasoningCollapsed: msg.reasoning ? true : undefined,
-              compactingStreaming: false,
-            })
+        // Each LangGraph checkpoint contains the full accumulated message
+        // history, so we only take messages from the latest state to avoid
+        // triplicating them across __start__ → agent → __end__ states.
+        const lastState = result.states[result.states.length - 1]
+        if (lastState) {
+          const historyMessages: Message[] = lastState.messages.map((msg, i) => ({
+            id: `history-${lastState.checkpoint_id}-${i}`,
+            role: msg.role,
+            content: msg.content,
+            reasoning: msg.reasoning,
+            reasoningStreaming: false,
+            reasoningCollapsed: msg.reasoning ? true : undefined,
+            compactingStreaming: false,
+          }))
+
+          if (historyMessages.length > 0) {
+            setMessages(historyMessages)
+            idRef.current = historyMessages.length
           }
         }
 
-        if (allMessages.length > 0) {
-          setMessages(allMessages)
-          idRef.current = allMessages.length
-        }
-
         // Restore pending approvals if any
-        const lastState = result.states[result.states.length - 1]
         if (lastState?.values?.pending_approvals) {
           const approvals = lastState.values.pending_approvals
           setPendingApprovals(approvals.filter((a) => !isMemoryApproval(a)))

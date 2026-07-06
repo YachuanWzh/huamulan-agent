@@ -112,11 +112,16 @@ class RedisFirstCheckpointSaver(BaseCheckpointSaver):
                     self.serde,
                 )
                 payload = self.serde.dumps_typed(redis_payload)
+                write_key = _write_key(thread_id, checkpoint_id, task_id)
                 await self.redis.set(
-                    _write_key(thread_id, checkpoint_id, task_id),
+                    write_key,
                     payload[1],
                     ex=self.ttl_seconds,
                 )
+                # Track key for fast O(K) deletion per thread (avoid O(N) SCAN)
+                tracking_key = _checkpoint_keys_tracking_key(thread_id)
+                await self.redis.sadd(tracking_key, write_key)
+                await self.redis.expire(tracking_key, self.ttl_seconds)
                 logger.info(
                     "Redis checkpoint writes completed",
                     extra={
@@ -181,13 +186,17 @@ class RedisFirstCheckpointSaver(BaseCheckpointSaver):
             yield item
 
     async def adelete_thread(self, thread_id: str) -> None:
-        keys = []
-        async for key in self.redis.scan_iter(match=f"pa:v1:checkpoint:{thread_id}:*"):
-            keys.append(key)
-        async for key in self.redis.scan_iter(match=f"pa:v1:checkpoint_writes:{thread_id}:*"):
-            keys.append(key)
+        # Use per-thread SET to avoid O(N) SCAN over entire keyspace.
+        # Keys are tracked in _write_checkpoint_envelope and aput_writes
+        # via SADD so we can retrieve them in O(K) where K = keys for this thread.
+        tracking_key = _checkpoint_keys_tracking_key(thread_id)
+        raw_members = await self.redis.smembers(tracking_key)
+        keys: list[bytes | str] = list(raw_members) if raw_members else []
         keys.append(_thread_key(thread_id))
-        await self.redis.delete(*keys)
+        keys.append(tracking_key)
+        # unlink for non-blocking async deletion on large sets
+        if len(keys) > 1:
+            await self.redis.delete(*keys)
         await self.postgres_saver.adelete_thread(thread_id)
 
     async def drain(self, timeout: float = 5.0) -> None:
@@ -210,11 +219,16 @@ class RedisFirstCheckpointSaver(BaseCheckpointSaver):
         envelope: dict[str, Any],
     ) -> None:
         marker, payload = self.serde.dumps_typed(envelope)
-        await self.redis.set(_checkpoint_key(thread_id, checkpoint_id), marker.encode() + b"\0" + payload, ex=self.ttl_seconds)
+        ckpt_key = _checkpoint_key(thread_id, checkpoint_id)
+        await self.redis.set(ckpt_key, marker.encode() + b"\0" + payload, ex=self.ttl_seconds)
         await self.redis.zadd(
             _thread_key(thread_id),
             {checkpoint_id: _checkpoint_score(checkpoint)},
         )
+        # Track key for fast O(K) deletion per thread (avoid O(N) SCAN)
+        tracking_key = _checkpoint_keys_tracking_key(thread_id)
+        await self.redis.sadd(tracking_key, ckpt_key)
+        await self.redis.expire(tracking_key, self.ttl_seconds)
 
     async def _read_checkpoint(self, thread_id: str, checkpoint_id: str) -> CheckpointTuple | None:
         raw = await self.redis.get(_checkpoint_key(thread_id, checkpoint_id))
@@ -376,3 +390,12 @@ def _write_key(thread_id: str, checkpoint_id: str, task_id: str) -> str:
 
 def _thread_key(thread_id: str) -> str:
     return f"pa:v1:checkpoint_thread:{thread_id}"
+
+
+def _checkpoint_keys_tracking_key(thread_id: str) -> str:
+    """Per-thread Redis SET that tracks all checkpoint & write keys.
+
+    Used by :meth:`adelete_thread` to retrieve all keys for a thread in O(K)
+    instead of scanning the entire keyspace via ``SCAN``.
+    """
+    return f"pa:v1:checkpoint_keys:{thread_id}"

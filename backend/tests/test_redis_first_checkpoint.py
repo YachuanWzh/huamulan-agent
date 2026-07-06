@@ -13,6 +13,7 @@ class FakeRedis:
         self.fail_set = fail_set
         self.values: dict[str, bytes] = {}
         self.zsets: dict[str, dict[str, float]] = {}
+        self.sets: dict[str, set[bytes]] = {}
         self.ops: list[tuple] = []
 
     async def set(self, key, value, ex=None):
@@ -40,11 +41,25 @@ class FakeRedis:
             return [member for member, _score in items[start:]]
         return [member for member, _score in items[start : end + 1]]
 
+    async def sadd(self, key, value):
+        self.ops.append(("sadd", key, value))
+        self.sets.setdefault(key, set()).add(
+            value.encode() if isinstance(value, str) else value
+        )
+
+    async def smembers(self, key):
+        self.ops.append(("smembers", key))
+        return self.sets.get(key, set())
+
+    async def expire(self, key, seconds):
+        self.ops.append(("expire", key, seconds))
+
     async def delete(self, *keys):
         self.ops.append(("delete", keys))
         for key in keys:
             self.values.pop(key, None)
             self.zsets.pop(key, None)
+            self.sets.pop(key, None)
 
     async def scan_iter(self, match):
         prefix = match.rstrip("*")
