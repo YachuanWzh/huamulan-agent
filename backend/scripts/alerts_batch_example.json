@@ -1,0 +1,29 @@
+{
+  "description": "Batch alert trigger example — use with: python trigger_otel_alert.py batch alerts_batch_example.json",
+  "alerts": [
+    {
+      "level": "P0",
+      "alert": "ServiceDown",
+      "service": "frontend",
+      "summary": "frontend service is DOWN — up == 0 for 1 minute"
+    },
+    {
+      "level": "P1",
+      "alert": "HighLatencyP95",
+      "service": "checkout",
+      "summary": "checkout P95 latency 800ms > SLO×2"
+    },
+    {
+      "level": "P2",
+      "alert": "SlowQueryIncrease",
+      "service": "product-catalog",
+      "summary": "product-catalog DB slow queries increasing"
+    },
+    {
+      "level": "P3",
+      "alert": "ErrorBudgetBurnRate",
+      "service": "ad",
+      "summary": "ad service error budget remaining < 50%"
+    }
+  ]
+}
