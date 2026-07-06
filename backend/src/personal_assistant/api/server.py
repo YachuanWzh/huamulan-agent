@@ -528,6 +528,7 @@ def _severity_to_level(severity: str) -> str:
     return _SEVERITY_LEVEL_MAP.get(severity, "P3")
 
 
+
 @app.post("/api/otel/alerts")
 async def handle_otel_alert(payload: AlertManagerWebhook):
     """Receive AlertManager webhook for P0-P3 alerts.

@@ -5,15 +5,11 @@ Feishu (飞书) webhook alert push notifier for OTEL alerts.
 Sends a brief alert card on P0/P1 trigger, and a full RCA result card
 after root cause analysis completes. P2/P3 alerts are not pushed.
 
-Reference implementation pattern:
-  daily_stock_analysis/src/notification_sender/feishu_sender.py
-  (Mode 1: Group Robot Webhook)
 """
 import base64
 import hashlib
 import hmac
 import logging
-import os
 import time
 from typing import Optional
 
@@ -164,17 +160,18 @@ class FeishuNotifier:
         self,
         webhook_url: Optional[str] = None,
         webhook_secret: Optional[str] = None,
+        verify_ssl: bool = True,
     ):
+        from personal_assistant.config import get_settings
+
+        settings = get_settings()
         self._webhook_url = (
-            webhook_url or os.getenv("FEISHU_WEBHOOK_URL", "")
+            webhook_url or settings.feishu_webhook_url
         ).strip()
         self._webhook_secret = (
-            webhook_secret or os.getenv("FEISHU_WEBHOOK_SECRET", "")
+            webhook_secret or settings.feishu_webhook_secret
         ).strip()
-        self._verify_ssl = (
-            os.getenv("WEBHOOK_VERIFY_SSL", "true").strip().lower()
-            not in ("false", "0", "no")
-        )
+        self._verify_ssl = verify_ssl
 
     @property
     def enabled(self) -> bool:

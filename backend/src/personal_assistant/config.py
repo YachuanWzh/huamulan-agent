@@ -190,6 +190,15 @@ class Settings(BaseSettings):
         default="",
         alias="OTEL_PROMETHEUS_PROXY_URL",
     )
+    # ── Feishu (飞书) Alert Push ─────────────────────────────────────
+    feishu_webhook_url: str = Field(
+        default="",
+        alias="FEISHU_WEBHOOK_URL",
+    )
+    feishu_webhook_secret: str = Field(
+        default="",
+        alias="FEISHU_WEBHOOK_SECRET",
+    )
     # ── OTEL Push: Kafka Consumer ──────────────────────────────────
     otel_kafka_brokers: str = Field(
         default="localhost:9092",
