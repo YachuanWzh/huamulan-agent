@@ -143,8 +143,8 @@ def test_compile_multi_agent_accepts_intent_router_params(monkeypatch) -> None:
 
 def test_rewrite_query_and_slots_still_works_for_legacy_tests() -> None:
     """rewrite_query_and_slots() 未修改，保持原有行为"""
-    result = rewrite_query_and_slots("巡检一下")
-    assert result["slots"]["intent"] == "patrol"
+    result = rewrite_query_and_slots("排查线上故障")
+    assert result["slots"]["intent"] == "troubleshoot"
     assert result["slots"]["domain"] == "apm"
 
 

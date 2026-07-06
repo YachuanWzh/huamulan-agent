@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
+from dotenv import load_dotenv
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import NoDecode
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,6 +11,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_SKILLS_DIR = str(Path(__file__).resolve().parent / "skills")
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_FILE = BACKEND_DIR / ".env"
+
+# Populate os.environ so subprocesses (e.g. skill scripts launched via
+# script_tool.py) inherit variables defined in .env.  pydantic-settings'
+# env_file only feeds the Settings model — it does NOT modify os.environ.
+load_dotenv(DEFAULT_ENV_FILE, override=False)
 
 
 class Settings(BaseSettings):

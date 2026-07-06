@@ -1,6 +1,4 @@
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_PATH = ROOT / "evaluation" / "golden" / "apm_realistic.jsonl"
 FIXTURE_DIR = ROOT / "evaluation" / "fixtures" / "apm_realistic"
 SKILLS_DIR = ROOT / "src" / "personal_assistant" / "skills"
-PATROL_SCRIPT = SKILLS_DIR / "patrol" / "checks" / "health_check.py"
 
 
 def _load_cases() -> list[dict]:
@@ -38,11 +35,10 @@ def _load_fixture(case: dict) -> dict:
 def test_apm_realistic_golden_covers_all_prelaunch_flows() -> None:
     cases = _load_cases()
 
-    assert len(cases) >= 9
+    assert len(cases) >= 8
     assert {case["category"] for case in cases} >= {
         "apm_troubleshooting",
         "apm_runbook",
-        "apm_patrol",
         "apm_knowledge",
         "governance_audit",
     }
@@ -70,28 +66,6 @@ def test_apm_realistic_fixtures_validate_and_build_observability_snapshots() -> 
             assert snapshot.frontend.total_events == len(rum_events)
             assert snapshot.backend.total_events == len(execution_logs)
             assert snapshot.root_cause.category
-
-
-def test_apm_realistic_patrol_fixtures_follow_check_tool_contract() -> None:
-    patrol_cases = [
-        case for case in _load_cases() if "patrol" in case.get("expected_skills", [])
-    ]
-    assert patrol_cases
-
-    for case in patrol_cases:
-        payload = _load_fixture(case)
-        checks = payload.get("checks", [])
-        assert checks, f"Patrol case {case['id']} should include checks"
-        completed = subprocess.run(
-            [sys.executable, str(PATROL_SCRIPT)],
-            input=json.dumps({"checks": checks}, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        result = json.loads(completed.stdout)
-        assert len(result["findings"]) == len(checks)
-        assert {finding["status"] for finding in result["findings"]} <= {"pass", "fail"}
 
 
 @pytest.mark.asyncio

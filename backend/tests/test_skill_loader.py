@@ -185,7 +185,7 @@ def test_apm_and_governance_skills_are_discoverable() -> None:
     skills_dir = Path("src/personal_assistant/skills")
     registry = SkillRegistry(skills_dir)
 
-    for name in ["troubleshoot", "patrol", "apm-metrics", "troubleshoot-runbook"]:
+    for name in ["troubleshoot", "apm-metrics", "troubleshoot-runbook"]:
         assert name in registry.skills
 
 

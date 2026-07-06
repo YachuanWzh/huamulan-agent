@@ -17,6 +17,12 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from dotenv import find_dotenv, load_dotenv
+
+# Load .env so the script works both as a standalone CLI and when invoked as a
+# subprocess by script_tool.py (which inherits os.environ from the backend).
+load_dotenv(find_dotenv(usecwd=True))
+
 DEFAULT_JAEGER_API_URL = ""
 
 

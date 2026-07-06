@@ -19,7 +19,7 @@ def async_test(coro):
 
 def test_intent_utterances_covers_all_intents():
     """每个意图类别都有足够的示例语句（≥6条）"""
-    for intent in ("troubleshoot", "patrol", "audit", "metrics"):
+    for intent in ("troubleshoot", "audit", "metrics"):
         assert intent in INTENT_UTTERANCES, f"missing intent: {intent}"
         assert len(INTENT_UTTERANCES[intent]) >= 6, (
             f"{intent} needs >=6 utterances, got {len(INTENT_UTTERANCES[intent])}"
@@ -83,11 +83,11 @@ def test_intent_routing_result_holds_slots_and_trace():
     """IntentRoutingResult 包含 slots + trace"""
     from personal_assistant.agent.intent_router import IntentRoutingResult
 
-    slots = IntentSlots(primary_intent="patrol", confidence=0.85, source="semantic")
+    slots = IntentSlots(primary_intent="troubleshoot", confidence=0.85, source="semantic")
     trace = [{"stage": "semantic", "status": "selected"}]
     result = IntentRoutingResult(intent_slots=slots, trace=trace)
 
-    assert result.intent_slots.primary_intent == "patrol"
+    assert result.intent_slots.primary_intent == "troubleshoot"
     assert len(result.trace) == 1
     assert result.trace[0]["stage"] == "semantic"
 
@@ -110,17 +110,6 @@ def test_regex_intent_troubleshoot_single_keyword_medium_confidence():
     assert intent == "troubleshoot"
     assert 0.60 <= conf < 0.80
 
-
-def test_regex_intent_patrol_single_keyword():
-    intent, conf = _regex_intent_with_confidence("巡检")
-    assert intent == "patrol"
-    assert 0.60 <= conf < 0.80
-
-
-def test_regex_intent_patrol_multi_keyword_high():
-    intent, conf = _regex_intent_with_confidence("配置巡检告警规则")
-    assert intent == "patrol"
-    assert conf >= 0.80
 
 
 def test_regex_intent_metrics_with_metric_names():
@@ -184,7 +173,7 @@ def test_intent_index_warmup_and_search():
 
     candidates = async_test(index.search("排查服务超时问题", top_k=3))
     assert len(candidates) >= 1
-    assert candidates[0].name in ("troubleshoot", "patrol", "audit", "metrics")
+    assert candidates[0].name in ("troubleshoot", "audit", "metrics")
     assert 0.0 <= candidates[0].score <= 1.0
 
 
@@ -196,7 +185,7 @@ def test_intent_index_only_searches_defined_intents():
 
     candidates = async_test(index.search("random query", top_k=10))
     for c in candidates:
-        assert c.name in ("troubleshoot", "patrol", "audit", "metrics")
+        assert c.name in ("troubleshoot", "audit", "metrics")
 
 
 def test_intent_index_top_k_respected():
@@ -256,9 +245,9 @@ def test_parse_intent_llm_decision_dict():
 def test_parse_intent_llm_decision_json_string():
     """解析 JSON 字符串"""
     decision = _parse_intent_llm_decision(
-        '{"primary_intent": "patrol", "confidence": 0.85, "reason": "巡检规则配置"}'
+        '{"primary_intent": "troubleshoot", "confidence": 0.85, "reason": "排查故障"}'
     )
-    assert decision.primary_intent == "patrol"
+    assert decision.primary_intent == "troubleshoot"
     assert decision.confidence == 0.85
 
 
@@ -291,18 +280,18 @@ def test_parse_intent_llm_decision_explicit_secondary():
     decision = _parse_intent_llm_decision({
         "primary_intent": "troubleshoot",
         "confidence": 0.88,
-        "secondary_intents": ["patrol"],
+        "secondary_intents": ["audit"],
     })
     assert decision.primary_intent == "troubleshoot"
     # 自动推断 + 显式指定
-    assert "patrol" in decision.secondary_intents
+    assert "audit" in decision.secondary_intents
     assert "metrics" in decision.secondary_intents
 
 
 def test_classifier_prompt_contains_all_intents():
     """Prompt 中定义所有意图"""
     assert "troubleshoot" in INTENT_CLASSIFIER_PROMPT
-    assert "patrol" in INTENT_CLASSIFIER_PROMPT
+    assert "audit" in INTENT_CLASSIFIER_PROMPT
     assert "audit" in INTENT_CLASSIFIER_PROMPT
     assert "metrics" in INTENT_CLASSIFIER_PROMPT
     assert "general" in INTENT_CLASSIFIER_PROMPT

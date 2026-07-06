@@ -41,13 +41,6 @@ class TestMultiAgentIntentEvaluation:
         assert result.total_cases == 1
         assert result.intent_accuracy == 1.0
 
-    def test_correct_patrol_intent(self):
-        cases = [
-            make_case("m2", "帮我执行一次闭环巡检", intent="patrol"),
-        ]
-        result = evaluate_multi_agent_intent_cases(cases)
-
-        assert result.intent_accuracy == 1.0
 
     def test_empty_cases_returns_none_metrics(self):
         result = evaluate_multi_agent_intent_cases([])
@@ -204,14 +197,14 @@ class TestMultiAgentDiagnostics:
 
         case = GoldenSkillCase(
             id="m-diag-2",
-            query="帮我执行一次巡检",
-            expected_intent="patrol",
+            query="帮我排查线上故障",
+            expected_intent="troubleshoot",
         )
         outcome = {
             "case": case,
             "selected_skills": [],
             "intent_slots": {
-                "intent": "patrol",
+                "intent": "troubleshoot",
                 "domain": "apm",
                 "metrics": [],
                 "entities": [],

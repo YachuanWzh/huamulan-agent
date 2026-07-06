@@ -20,12 +20,12 @@
 {"id": "otel-rt-019", "query": "用 Jaeger 和 Prometheus 交叉验证 cart 服务的异常", "expected_skills": ["otel-query"]}
 
 {"id": "otel-rt-020", "query": "APM 面板报警了，帮我通过 OTEL trace 做根因分析", "expected_skills": ["otel-query", "troubleshoot"]}
-{"id": "otel-rt-021", "query": "先跑 OTEL 巡检指标，发现问题后用 jaeger trace 定位根因", "expected_skills": ["otel-query", "patrol"]}
+{"id": "otel-rt-021", "query": "先跑 OTEL 巡检指标，发现问题后用 jaeger trace 定位根因", "expected_skills": ["otel-query", "troubleshoot"]}
 {"id": "otel-rt-022", "query": "审计报告需要包含 Prometheus 采集的 SLA 指标数据", "expected_skills": ["otel-query", "audit-sop"]}
 {"id": "otel-rt-023", "query": "LCP p95 从 2s 涨到 7s，帮我查 OTEL trace 和 metric 做智能排障", "expected_skills": ["otel-query", "troubleshoot"]}
-{"id": "otel-rt-024", "query": "跑巡检发现 error rate 异常，用 trace 数据做 RCA", "expected_skills": ["otel-query", "patrol", "troubleshoot"]}
+{"id": "otel-rt-024", "query": "跑巡检发现 error rate 异常，用 trace 数据做 RCA", "expected_skills": ["otel-query", "troubleshoot"]}
 {"id": "otel-rt-025", "query": "release 发布后需要验证，先查 OTEL metrics 对比发布前后指标，再做合规审计", "expected_skills": ["otel-query", "audit-sop"]}
-{"id": "otel-rt-026", "query": "多个微服务同时异常，启动多 agent（metrics、troubleshoot、patrol、audit）联合分析 OTEL 数据", "expected_skills": ["otel-query", "troubleshoot", "patrol", "audit-sop"]}
+{"id": "otel-rt-026", "query": "多个微服务同时异常，启动多 agent（metrics、troubleshoot、audit）联合分析 OTEL 数据", "expected_skills": ["otel-query", "troubleshoot", "audit-sop"]}
 {"id": "otel-rt-027", "query": "帮我从 OTEL 数据中提取业务指标，metrics agent 做 PromQL 定义，audit agent 做合规评估", "expected_skills": ["otel-query", "audit-sop"]}
 {"id": "otel-rt-028", "query": "查 Jaeger trace 发现 retry chain，结合 Prometheus retry rate 指标评估 SLA 影响", "expected_skills": ["otel-query", "audit-sop"]}
 
@@ -38,7 +38,7 @@
 
 {"id": "otel-rt-035", "query": "API 超时了，帮我排查一下原因", "expected_skills": ["troubleshoot"]}
 {"id": "otel-rt-036", "query": "页面白屏怎么办？前端报错了", "expected_skills": ["troubleshoot"]}
-{"id": "otel-rt-037", "query": "帮我做一次系统健康检查", "expected_skills": ["patrol"]}
+
 {"id": "otel-rt-038", "query": "解释一下 LCP 和 INP 的含义", "expected_skills": ["apm-metrics"]}
 {"id": "otel-rt-039", "query": "给我一份慢 SQL 的排查 runbook", "expected_skills": ["troubleshoot-runbook"]}
 {"id": "otel-rt-040", "query": "审计最近工具调用的 token 消耗", "expected_skills": ["audit-sop"]}
@@ -58,8 +58,8 @@
 {"id": "otel-rt-054", "query": "stack trace 里面哪一行报错了", "expected_skills": []}
 
 {"id": "otel-rt-055", "query": "WebSocket 连接频繁断开，帮我查 OTEL 的 trace 和 metric 定位问题", "expected_skills": ["otel-query", "troubleshoot"]}
-{"id": "otel-rt-056", "query": "巡检发现 Redis 命中率下降，用 jaeger 查一下是不是下游依赖的问题", "expected_skills": ["otel-query", "patrol", "troubleshoot"]}
+{"id": "otel-rt-056", "query": "巡检发现 Redis 命中率下降，用 jaeger 查一下是不是下游依赖的问题", "expected_skills": ["otel-query", "troubleshoot"]}
 {"id": "otel-rt-057", "query": "OpenTelemetry 配置有问题，jaeger 和 prometheus 的 endpoint 应该怎么设？", "expected_skills": ["otel-query"]}
 {"id": "otel-rt-058", "query": "OTEL 数据怎么和 APM 排障流程集成？给我一个端到端的例子", "expected_skills": ["otel-query", "troubleshoot"]}
-{"id": "otel-rt-059", "query": "能不能自动从 prometheus 拉指标数据做巡检？发现异常自动触发 trace 分析", "expected_skills": ["otel-query", "patrol"]}
+{"id": "otel-rt-059", "query": "能不能自动从 prometheus 拉指标数据做巡检？发现异常自动触发 trace 分析", "expected_skills": ["otel-query", "troubleshoot"]}
 {"id": "otel-rt-060", "query": "帮我分析这段 jaeger trace JSON，找出最慢的 span 和错误节点", "expected_skills": ["otel-query", "troubleshoot"]}

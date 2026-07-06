@@ -150,7 +150,7 @@
 {"id": "edge-016", "query": "帮我看看那个什么来着，就是能查时间的那个东西", "expected_skills": ["resolve-time"]}
 {"id": "edge-017", "query": "tell me the weather in 北京 tomorrow, 要详细的预报", "expected_skills": ["weather"]}
 {"id": "edge-018", "query": "你会审计功能吗？帮我查一下上一个线程的执行情况", "expected_skills": ["audit-sop"]}
-{"id": "edge-019", "query": "帮我跑一个巡检，check一下系统有没有abnormal", "expected_skills": ["patrol"]}
+
 {"id": "edge-020", "query": "我不用查天气，但是你能帮我看看明天适合出行吗", "expected_skills": ["weather"]}
 {"id": "hard-011", "query": "先帮我查一下今天日期，然后再根据日期判断是不是周末，是的话帮我搜一个出去玩的地方的天气", "expected_skills": ["resolve-time", "weather"]}
 {"id": "hard-012", "query": "我怀疑昨天那个会话出bug了，帮我审计一下完整的执行链路，重点关注有没有死循环和重复调用", "expected_skills": ["audit-sop"]}
@@ -158,9 +158,9 @@
 {"id": "hard-014", "query": "帮我找一个能做日志分析的技能，安装好后直接用它分析我最近的执行日志", "expected_skills": ["find-skills", "audit-sop"]}
 {"id": "hard-015", "query": "明天天气适不适合出门？如果下雨的话帮我搜一个室内活动的技能", "expected_skills": ["weather", "find-skills"]}
 {"id": "e2e-006", "query": "我下个月1号去东京旅行，帮我看看那天是星期几，东京天气怎么样，顺便搜一下有没有翻译日语或者旅行攻略的技能", "expected_skills": ["resolve-time", "weather", "find-skills"]}
-{"id": "e2e-007", "query": "最近前端页面加载变慢了，帮我先跑一次巡检看看有没有异常指标，如果有异常就触发智能排障做根因分析，最后生成一份包含优化建议的审计报告", "expected_skills": ["patrol", "troubleshoot", "audit-sop"]}
+
 {"id": "e2e-008", "query": "帮我看看这周五的日期，那天上海天气如何，然后审计一下我最近的会话有没有出现过工具调用失败", "expected_skills": ["resolve-time", "weather", "audit-sop"]}
-{"id": "e2e-009", "query": "我需要一份API超时的排查SOP：先查APM巡检指标，再做智能排障找到根因，最后审计最近的类似问题输出修复runbook", "expected_skills": ["patrol", "troubleshoot", "troubleshoot-runbook"]}
+
 {"id": "conv-001", "query": "你好！今天过得怎么样？", "expected_skills": []}
 {"id": "conv-002", "query": "你是谁？你叫什么名字？是谁创造了你？", "expected_skills": []}
 {"id": "conv-003", "query": "你能做什么事情？你有哪些能力和限制？", "expected_skills": []}
@@ -168,7 +168,7 @@
 {"id": "conv-005", "query": "讲个笑话给我听吧，最近压力有点大需要放松一下。", "expected_skills": []}
 {"id": "multi-001", "query": "明天天气怎么样？对了明天是几号来着？顺便帮我搜一下有没有能提醒我出门带伞的技能", "expected_skills": ["resolve-time", "weather", "find-skills"]}
 {"id": "multi-002", "query": "帮我审计一下最近的执行日志，如果发现有工具超时的情况，就搜一下有没有能优化性能的技能并安装", "expected_skills": ["audit-sop", "find-skills"]}
-{"id": "multi-003", "query": "帮我跑一次系统巡检，看看有没有异常指标。如果有的话，审计一下对应的执行日志看看根因是什么。", "expected_skills": ["patrol", "audit-sop"]}
+
 {"id": "multi-004", "query": "后天上海天气怎样？如果下雨的话帮我排查一下最近的API是不是有雨天的性能问题。", "expected_skills": ["resolve-time", "weather", "troubleshoot"]}
 {"id": "multi-005", "query": "这月底最后一天是几号？帮我审计那天的所有执行日志看看有没有异常。", "expected_skills": ["resolve-time", "audit-sop"]}
 {"id": "tool-err-001", "query": "write_file 工具最近总是超时，帮我审计一下这个工具的成功率和平均耗时，看看是不是有什么规律", "expected_skills": ["audit-sop"]}

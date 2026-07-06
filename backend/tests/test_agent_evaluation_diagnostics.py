@@ -108,9 +108,9 @@ def test_case_detail_exposes_diagnostic_outputs_and_suspected_node() -> None:
 
 def test_case_detail_exposes_routing_funnel_trace() -> None:
     case = AgentEvaluationCase(
-        id="patrol-missed",
-        query="帮我做一次全量巡检",
-        expected_skills=["patrol"],
+        id="troubleshoot-missed",
+        query="帮我做一次智能排障",
+        expected_skills=["troubleshoot"],
     )
     routing_trace = [
         {
@@ -122,9 +122,9 @@ def test_case_detail_exposes_routing_funnel_trace() -> None:
         {
             "stage": "semantic",
             "status": "below_threshold",
-            "candidates": [{"name": "patrol", "score": 0.42}],
+            "candidates": [{"name": "troubleshoot", "score": 0.42}],
             "threshold": 0.72,
-            "top_candidate": "patrol",
+            "top_candidate": "troubleshoot",
             "reason": "top candidate score below threshold",
         },
         {

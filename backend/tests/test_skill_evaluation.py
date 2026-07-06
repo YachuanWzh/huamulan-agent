@@ -520,8 +520,6 @@ def test_bundled_golden_dataset_covers_apm_governance_skills() -> None:
     expected = {
         "apm-ts-001": ["troubleshoot"],
         "apm-ts-002": ["troubleshoot"],
-        "apm-patrol-001": ["patrol"],
-        "apm-patrol-002": ["patrol", "troubleshoot"],
         "apm-metrics-001": ["apm-metrics"],
         "apm-metrics-002": ["apm-metrics"],
         "apm-runbook-001": ["troubleshoot-runbook"],

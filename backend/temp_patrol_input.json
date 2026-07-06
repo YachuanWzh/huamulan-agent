@@ -1,1 +1,0 @@
-{"checks":[{"metric":"LCP","operator":">","value":6800,"threshold":4000},{"metric":"JS错误率","operator":">","value":0.12,"threshold":0.05}]}
