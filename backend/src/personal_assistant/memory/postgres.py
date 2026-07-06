@@ -72,6 +72,7 @@ class PostgresMemory:
         await self._setup_tool_results()
         await self._setup_tool_errors()
         await self._setup_skill_evaluation_results()
+        await self._setup_otel_alerts()
 
     async def stop(self) -> None:
         drain = getattr(self.checkpointer, "drain", None)
@@ -831,6 +832,131 @@ class PostgresMemory:
             )
 
 
+    async def _setup_otel_alerts(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS otel_alerts (
+                    id TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    received_at TIMESTAMPTZ NOT NULL,
+                    severity TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    alert_name TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    starts_at TEXT,
+                    status TEXT NOT NULL DEFAULT 'firing',
+                    rca_status TEXT NOT NULL DEFAULT 'pending',
+                    rca_thread_id TEXT,
+                    rca_pending_approvals JSONB,
+                    rca_result_text TEXT,
+                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_otel_alerts_received_at
+                ON otel_alerts (received_at DESC)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_otel_alerts_level
+                ON otel_alerts (level, received_at DESC)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_otel_alerts_service
+                ON otel_alerts (service_name, received_at DESC)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_otel_alerts_rca_thread
+                ON otel_alerts (rca_thread_id)
+                """
+            )
+
+    async def upsert_otel_alert(self, alert_data: dict) -> None:
+        """Insert or update an OTEL alert in PostgreSQL."""
+        if self.pool is None:
+            return
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO otel_alerts (
+                    id, created_at, updated_at, received_at,
+                    severity, level, service_name, alert_name,
+                    summary, description, starts_at, status,
+                    rca_status, rca_thread_id, rca_pending_approvals,
+                    rca_result_text, metadata
+                ) VALUES (
+                    $1, now(), now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    updated_at = now(),
+                    status = EXCLUDED.status,
+                    rca_status = EXCLUDED.rca_status,
+                    rca_thread_id = EXCLUDED.rca_thread_id,
+                    rca_pending_approvals = EXCLUDED.rca_pending_approvals,
+                    rca_result_text = EXCLUDED.rca_result_text,
+                    metadata = EXCLUDED.metadata
+                """,
+                alert_data["id"],
+                alert_data["received_at"],
+                alert_data["severity"],
+                alert_data["level"],
+                alert_data["service_name"],
+                alert_data["alert_name"],
+                alert_data.get("summary", ""),
+                alert_data.get("description", ""),
+                alert_data.get("starts_at"),
+                alert_data.get("status", "firing"),
+                alert_data.get("rca_status", "pending"),
+                alert_data.get("rca_thread_id"),
+                json.dumps(alert_data.get("rca_pending_approvals") or []),
+                alert_data.get("rca_result_text"),
+                json.dumps(alert_data.get("metadata", {})),
+            )
+
+    async def list_otel_alerts(self, limit: int = 50) -> list[dict]:
+        """List recent OTEL alerts from PostgreSQL."""
+        if self.pool is None:
+            return []
+        async with self.pool.connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, created_at, updated_at, received_at,
+                       severity, level, service_name, alert_name,
+                       summary, description, starts_at, status,
+                       rca_status, rca_thread_id, rca_pending_approvals,
+                       rca_result_text, metadata
+                FROM otel_alerts
+                ORDER BY received_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
+            return [_alert_row_to_dict(row) for row in rows]
+
+    async def get_otel_alert(self, alert_id: str) -> dict | None:
+        """Get a single OTEL alert by ID from PostgreSQL."""
+        if self.pool is None:
+            return None
+        async with self.pool.connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM otel_alerts WHERE id = $1", alert_id
+            )
+            return _alert_row_to_dict(row) if row else None
+
+
 def _serialize_checkpoint(checkpoint: Any) -> dict[str, Any]:
     payload = _jsonable(checkpoint)
     payload_mapping = payload if isinstance(payload, dict) else {}
@@ -981,6 +1107,45 @@ def _json_text(value: Any) -> str:
     if isinstance(encoded, str):
         return encoded
     return json.dumps(encoded, ensure_ascii=False)
+
+
+def _alert_row_to_dict(row: Any) -> dict:
+    """Convert an asyncpg row from otel_alerts to a plain dict.
+
+    Handles JSONB columns that may be returned as strings or parsed objects
+    depending on the asyncpg configuration.
+    """
+    import json as _json
+
+    def _parse_jsonb(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                return _json.loads(value)
+            except (_json.JSONDecodeError, TypeError):
+                return value
+        return value
+
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "received_at": row["received_at"].isoformat() if row["received_at"] else "",
+        "severity": row["severity"],
+        "level": row["level"],
+        "service_name": row["service_name"],
+        "alert_name": row["alert_name"],
+        "summary": row["summary"] or "",
+        "description": row["description"] or "",
+        "starts_at": row["starts_at"],
+        "status": row["status"] or "firing",
+        "rca_status": row["rca_status"] or "pending",
+        "rca_thread_id": row["rca_thread_id"],
+        "rca_pending_approvals": _parse_jsonb(row["rca_pending_approvals"]),
+        "rca_result_text": row["rca_result_text"],
+        "metadata": _parse_jsonb(row["metadata"]) or {},
+    }
 
 
 def _jsonable(value: Any) -> Any:
