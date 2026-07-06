@@ -24,6 +24,10 @@ class ApprovalDecision(BaseModel):
     approved: bool
 
 
+class AnalyzeAlertRequest(BaseModel):
+    agent_mode: str = "single"
+
+
 class ApprovalBatchItem(BaseModel):
     approval_id: str
     approved: bool

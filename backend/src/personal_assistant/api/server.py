@@ -24,7 +24,9 @@ from personal_assistant.apm import (
     ObservabilitySnapshot,
     build_observability_snapshot,
 )
+from personal_assistant.api.alert_persistence import AlertPersistence
 from personal_assistant.api.schemas import (
+    AnalyzeAlertRequest,
     ApprovalBatchDecision,
     ApprovalDecision,
     AuditEvent,
@@ -209,9 +211,15 @@ def _find_alert_by_thread_id(thread_id: str) -> dict | None:
 
 
 def _update_alert_rca_status(alert_data: dict, **fields) -> None:
-    """Update RCA tracking fields on an alert dict in-place."""
+    """Update RCA tracking fields on an alert dict in-place and persist."""
     for key, value in fields.items():
         alert_data[key] = value
+    # Persist the update (fire-and-forget background task)
+    alert_id = alert_data.get("id")
+    if alert_id:
+        asyncio.create_task(
+            _alert_persistence.update_alert(alert_id, **fields)
+        )
 
 
 def _build_rca_prompt(alert_data: dict) -> str:
@@ -339,6 +347,12 @@ harness = AgentHarness(
     cache=cache,
 )
 logger = logging.getLogger(__name__)
+
+# ── Alert persistence: Redis sync + PostgreSQL async dual-write ────
+_alert_persistence = AlertPersistence(
+    redis_client=getattr(memory, '_checkpoint_redis', None),
+    postgres_memory=memory,
+)
 
 # Quick evaluation uses full three-layer routing funnel: regex → vector retrieval (Qdrant/in-memory) → rerank → LLM judge
 # We intentionally skip STARTUP-TIME Qdrant warmup/sync to make eval boot faster.
@@ -659,8 +673,14 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
             "rca_status": "pending",
             "rca_thread_id": None,
             "rca_pending_approvals": None,
+            "rca_result_text": None,
+            "metadata": {},
         }
         _otel_alerts.appendleft(alert_data)
+
+        # Persist alert to Redis + PostgreSQL
+        await _alert_persistence.save_alert(alert_data)
+
         await _broadcast_otel_alert(alert_data)
 
         # Push brief alert to Feishu for P0/P1 (skip P2/P3)
@@ -682,7 +702,10 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
 
 @app.get("/api/otel/alerts/history")
 async def list_otel_alerts(limit: int = Query(default=50, le=200)) -> list[dict]:
-    """Return recent P0/P1 alerts received via webhook."""
+    """Return recent P0-P3 alerts from persistence layer."""
+    persisted = await _alert_persistence.list_alerts(limit)
+    if persisted:
+        return persisted
     return list(_otel_alerts)[:limit]
 
 
@@ -729,6 +752,7 @@ async def get_otel_rca_status(alert_id: str):
     Returns ``rca_status``, ``rca_thread_id``, and ``rca_pending_approvals``
     for the given alert, or 404 if the alert is not found.
     """
+    # Check in-memory first (hot path for active alerts)
     for alert_data in _otel_alerts:
         if alert_data.get("id") == alert_id:
             return {
@@ -737,6 +761,15 @@ async def get_otel_rca_status(alert_id: str):
                 "rca_thread_id": alert_data.get("rca_thread_id"),
                 "rca_pending_approvals": alert_data.get("rca_pending_approvals"),
             }
+    # Fallback to persistence layer
+    alert_data = await _alert_persistence.get_alert(alert_id)
+    if alert_data:
+        return {
+            "alert_id": alert_id,
+            "rca_status": alert_data.get("rca_status", "pending"),
+            "rca_thread_id": alert_data.get("rca_thread_id"),
+            "rca_pending_approvals": alert_data.get("rca_pending_approvals"),
+        }
     raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
 
 
@@ -786,6 +819,87 @@ async def approve_otel_rca(alert_id: str, request: ApprovalDecision):
 
     await _broadcast_otel_alert(alert_data)
     return response
+
+
+@app.post("/api/otel/alerts/{alert_id}/analyze")
+async def analyze_otel_alert(alert_id: str, request: AnalyzeAlertRequest | None = None):
+    """Trigger analysis for a P2/P3 alert with auto-approval for safe tools.
+
+    Unlike P0 which auto-triggers RCA immediately, P2/P3 alerts are
+    analyzed on-demand when the user clicks "Analyze". Non-dangerous
+    tools are auto-approved using the same
+    :func:`requires_rca_tool_approval` callback as P0 RCA, so the
+    analysis runs without blocking on routine read-only operations.
+    """
+    from personal_assistant.agent.harness import requires_rca_tool_approval
+
+    # Find alert in memory or persistence
+    alert_data = None
+    for item in _otel_alerts:
+        if item.get("id") == alert_id:
+            alert_data = item
+            break
+
+    if alert_data is None:
+        alert_data = await _alert_persistence.get_alert(alert_id)
+
+    if alert_data is None:
+        raise HTTPException(status_code=404, detail=f"Alert not found: {alert_id}")
+
+    # Create RCA thread and update status
+    thread_id = f"rca-{alert_id}"
+    agent_mode = request.agent_mode if request else "single"
+
+    _update_alert_rca_status(
+        alert_data,
+        rca_status="running",
+        rca_thread_id=thread_id,
+    )
+    await _broadcast_otel_alert(alert_data)
+
+    rca_result_text = None
+    try:
+        prompt = _build_rca_prompt(alert_data)
+        response = await harness.run_user_turn(
+            thread_id,
+            prompt,
+            agent_mode=agent_mode,
+            requires_approval=requires_rca_tool_approval,
+        )
+
+        if response.status == "requires_approval":
+            _update_alert_rca_status(
+                alert_data,
+                rca_status="blocked",
+                rca_pending_approvals=[
+                    a.model_dump() for a in response.approvals
+                ],
+            )
+        else:
+            rca_result_text = _extract_rca_result_text(response)
+            _update_alert_rca_status(
+                alert_data,
+                rca_status="completed",
+                rca_pending_approvals=None,
+                rca_result_text=rca_result_text,
+            )
+
+        await _broadcast_otel_alert(alert_data)
+
+        return {
+            "thread_id": thread_id,
+            "status": response.status,
+            "message": response.message or "",
+            "approvals": [
+                a.model_dump() for a in (response.approvals or [])
+            ],
+        }
+
+    except Exception:
+        logger.exception("Analysis failed for alert %s", alert_id)
+        _update_alert_rca_status(alert_data, rca_status="failed")
+        await _broadcast_otel_alert(alert_data)
+        raise HTTPException(status_code=500, detail="Analysis failed")
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])
