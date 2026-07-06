@@ -539,8 +539,8 @@ async function* streamRequest<T extends { type: string }>(
 export interface OtelAlert {
   id: string
   received_at: string
-  severity: 'critical' | 'warning'
-  level: 'P0' | 'P1'
+  severity: 'critical' | 'warning' | 'info' | 'none'
+  level: 'P0' | 'P1' | 'P2' | 'P3'
   service_name: string
   alert_name: string
   summary: string
@@ -551,6 +551,7 @@ export interface OtelAlert {
   rca_status?: 'pending' | 'running' | 'completed' | 'blocked' | 'failed'
   rca_thread_id?: string | null
   rca_pending_approvals?: ToolCallApproval[] | null
+  rca_result_text?: string | null
 }
 
 // ── API client ────────────────────────────────────────────────────
@@ -721,5 +722,18 @@ export const api = {
     request<ChatResponse>(`/api/otel/alerts/${alertId}/rca/approve`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  /** Trigger analysis for a P2/P3 alert with auto-approval for safe tools.
+   *  Returns the thread_id so the frontend can auto-navigate to chat. */
+  analyzeOtelAlert: (alertId: string, agentMode: AgentMode = 'single') =>
+    request<{
+      thread_id: string
+      status: string
+      message: string
+      approvals: ToolCallApproval[]
+    }>(`/api/otel/alerts/${alertId}/analyze`, {
+      method: 'POST',
+      body: JSON.stringify({ agent_mode: agentMode }),
     }),
 }

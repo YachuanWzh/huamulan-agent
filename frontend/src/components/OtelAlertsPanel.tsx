@@ -105,7 +105,8 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
 
   useEffect(() => { loadHistory() }, [loadHistory])
 
-  /** Trigger RCA: create thread, send message, track status */
+  /** Trigger RCA using backend analyze endpoint (auto-approves safe tools).
+   *  After triggering, auto-navigates to the chat panel with the new thread. */
   const triggerRca = useCallback(async (alert: OtelAlert) => {
     if (triggeredRef.current.has(alert.id)) return
     triggeredRef.current.add(alert.id)
@@ -116,33 +117,34 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     }))
 
     try {
-      const tid = crypto.randomUUID()
-      const msg = buildRcaPrompt(alert)
-      await api.chat({ thread_id: tid, message: msg, agent_mode: agentMode })
+      // Call backend analyze endpoint (uses auto-approval like P0 RCA)
+      const result = await api.analyzeOtelAlert(alert.id, agentMode)
+
+      const newState: RcaEntry = {
+        threadId: result.thread_id,
+        status: result.status === 'requires_approval' ? 'need_approve' : 'analyzing',
+        pendingApprovals: result.approvals?.length ? result.approvals : undefined,
+      }
 
       setRcaStates((prev) => ({
         ...prev,
-        [alert.id]: { threadId: tid, status: 'analyzing' },
+        [alert.id]: newState,
       }))
 
-      // Mark as completed after a short delay (chat is synchronous API call)
-      setTimeout(() => {
-        setRcaStates((prev) => {
-          const cur = prev[alert.id]
-          if (cur && cur.status === 'analyzing') {
-            return { ...prev, [alert.id]: { ...cur, status: 'completed' } }
-          }
-          return prev
-        })
-      }, 2000)
+      // Auto-navigate to chat view with the new thread
+      if (result.thread_id && onViewAnalysis) {
+        onViewAnalysis(result.thread_id)
+      }
+
+      // Poll for completion via SSE updates (backend broadcasts status changes)
     } catch (err) {
-      console.error('RCA trigger failed:', err)
+      console.error('Analyze trigger failed:', err)
       setRcaStates((prev) => ({
         ...prev,
         [alert.id]: { ...prev[alert.id], status: 'failed' },
       }))
     }
-  }, [agentMode])
+  }, [agentMode, onViewAnalysis])
 
   /** Sync RCA state from backend alert's rca_status field */
   const syncRcaFromBackend = useCallback((alert: OtelAlert) => {
@@ -268,12 +270,14 @@ function AlertCard({
   onApprove: (approvalId: string, approved: boolean) => void
 }) {
   const isP0 = alert.level === 'P0'
-  const severityClass = isP0 ? 'alert-critical' : 'alert-warning'
+  const isP1 = alert.level === 'P1'
+  const severityClass = isP0 ? 'alert-critical' : isP1 ? 'alert-warning' : 'alert-info'
+  const badgeClass = isP0 ? 'badge-p0' : isP1 ? 'badge-p1' : 'badge-p2'
 
   return (
     <article className={`alert-card ${severityClass}`} role="article">
       <div className="alert-card-header">
-        <span className={`alert-badge ${isP0 ? 'badge-p0' : 'badge-p1'}`}>
+        <span className={`alert-badge ${badgeClass}`}>
           {alert.level}
         </span>
         <strong className="alert-service">{alert.service_name}</strong>
@@ -421,22 +425,6 @@ function RcaAction({
   }
 
   return null
-}
-
-function buildRcaPrompt(alert: OtelAlert): string {
-  return [
-    `🚨 ${alert.level} Alert received from OTEL push: **${alert.alert_name}**`,
-    `- Service: **${alert.service_name}**`,
-    `- Severity: ${alert.severity}`,
-    `- Summary: ${alert.summary}`,
-    alert.description ? `- Details: ${alert.description}` : '',
-    alert.starts_at ? `- Alert started: ${alert.starts_at}` : '',
-    '',
-    'Please run root cause analysis using the otel-query skill:',
-    '1. Pull Jaeger traces for the affected service',
-    '2. Query Prometheus for correlated metrics',
-    '3. Identify the root cause and recommend fixes',
-  ].filter(Boolean).join('\n')
 }
 
 function formatTime(iso: string): string {
