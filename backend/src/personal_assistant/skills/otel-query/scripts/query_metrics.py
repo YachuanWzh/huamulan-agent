@@ -24,6 +24,29 @@ from dotenv import find_dotenv, load_dotenv
 load_dotenv(find_dotenv(usecwd=True))
 
 DEFAULT_PROMETHEUS_PROXY_URL = ""
+DEFAULT_PROMETHEUS_URL = ""
+
+
+def _resolve_base_url(proxy_url: str | None = None) -> str:
+    """Resolve the Prometheus API base URL.
+
+    Priority: explicit proxy_url > OTEL_PROMETHEUS_PROXY_URL (Grafana) >
+    OTEL_PROMETHEUS_URL (direct).
+    """
+    base = (
+        proxy_url
+        or os.getenv("OTEL_PROMETHEUS_PROXY_URL")
+        or DEFAULT_PROMETHEUS_PROXY_URL
+    ).rstrip("/")
+
+    if not base:
+        direct = (
+            os.getenv("OTEL_PROMETHEUS_URL") or DEFAULT_PROMETHEUS_URL
+        ).rstrip("/")
+        if direct:
+            base = f"{direct}/api/v1"
+
+    return base
 
 
 def query_metrics(
@@ -31,12 +54,8 @@ def query_metrics(
     promql: str,
     proxy_url: str | None = None,
 ) -> dict[str, Any]:
-    """Query Prometheus via the Grafana datasource proxy."""
-    base = (
-        proxy_url
-        or os.getenv("OTEL_PROMETHEUS_PROXY_URL")
-        or DEFAULT_PROMETHEUS_PROXY_URL
-    ).rstrip("/")
+    """Query Prometheus via the Grafana datasource proxy or direct URL."""
+    base = _resolve_base_url(proxy_url)
 
     params: dict[str, str] = {"query": promql}
     url = f"{base}/query?{urllib.parse.urlencode(params)}"
