@@ -390,14 +390,39 @@ export interface ObservabilitySnapshot {
 
 // --- SSE Streaming types ---
 
+export interface StreamNodeStarted {
+  type: 'node_started'
+  node: string
+  agent_role?: string
+  timestamp?: number
+}
+
+export interface StreamNodeFinished {
+  type: 'node_finished'
+  node: string
+  agent_role?: string
+  duration_ms?: number
+  timestamp?: number
+}
+
+export interface StreamToolStarted {
+  type: 'tool_started'
+  name: string
+  args?: Record<string, unknown>
+  timestamp?: number
+}
+
 export interface StreamToken {
   type: 'token'
   content: string
+  node?: string
+  agent_role?: string
 }
 
 export interface StreamReasoning {
   type: 'reasoning'
   content: string
+  node?: string
 }
 
 export interface StreamCompacting {
@@ -415,6 +440,13 @@ export interface StreamToolResult {
   type: 'tool_result'
   name: string
   content: string
+}
+
+export interface StreamToolCallGenerating {
+  type: 'tool_call_generating'
+  chunks: unknown
+  node?: string
+  agent_role?: string
 }
 
 export interface KnowledgeContextDocument {
@@ -443,11 +475,15 @@ export interface StreamError {
 }
 
 export type StreamEvent =
+  | StreamNodeStarted
+  | StreamNodeFinished
+  | StreamToolStarted
   | StreamToken
   | StreamReasoning
   | StreamCompacting
   | StreamRequiresApproval
   | StreamToolResult
+  | StreamToolCallGenerating
   | StreamDone
   | StreamError
 

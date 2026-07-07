@@ -7,6 +7,8 @@ interface Props {
   id?: string
   role: Message['role']
   content: string
+  node?: string
+  agentRole?: string
   approvalStatus?: Message['approvalStatus']
   streaming?: boolean
   reasoning?: string
@@ -15,15 +17,50 @@ interface Props {
   compacting?: string
   compactingStreaming?: boolean
   compactingCollapsed?: boolean
+  childCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
   onToggleReasoning?: (messageId: string) => void
   onToggleCompacting?: (messageId: string) => void
+  onToggleChild?: (messageId: string) => void
 }
 
 const roleLabels: Record<Message['role'], string> = {
   user: '你',
   assistant: '木兰',
   tool_call: '工具调用',
+  child_agent: '子 Agent',
+}
+
+const childAgentLabels: Record<string, string> = {
+  metrics_agent: '📊 Metrics 分析',
+  troubleshoot_agent: '🔍 故障排查',
+  patrol_agent: '🛡️ 巡检',
+  audit_agent: '📋 审计',
+}
+
+/** Try to parse child agent JSON report into sections */
+function parseChildReport(content: string): {
+  findings: string[]
+  evidence: string[]
+  recommendations: string[]
+  confidence: number | null
+  error: string | null
+  status: string | null
+} | null {
+  try {
+    const json = JSON.parse(content.trim())
+    if (typeof json !== 'object' || !json) return null
+    return {
+      findings: Array.isArray(json.findings) ? json.findings : [],
+      evidence: Array.isArray(json.evidence) ? json.evidence : [],
+      recommendations: Array.isArray(json.recommendations) ? json.recommendations : [],
+      confidence: typeof json.confidence === 'number' ? json.confidence : null,
+      error: typeof json.error === 'string' ? json.error : null,
+      status: typeof json.status === 'string' ? json.status : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 const toolResultPreview = (content: string) => {
@@ -35,6 +72,8 @@ export function MessageBubble({
   id = '',
   role,
   content,
+  node,
+  agentRole,
   approvalStatus,
   streaming,
   reasoning,
@@ -43,14 +82,19 @@ export function MessageBubble({
   compacting,
   compactingStreaming,
   compactingCollapsed,
+  childCollapsed,
   knowledgeContext,
   onToggleReasoning,
   onToggleCompacting,
+  onToggleChild,
 }: Props) {
   const [toolResultExpanded, setToolResultExpanded] = useState(false)
   const [knowledgeExpanded, setKnowledgeExpanded] = useState(false)
   const isToolResult = role === 'tool_call'
+  const isChildAgent = role === 'child_agent'
   const toolResultId = id ? `${id}-tool-result` : undefined
+  const childLabel = node ? (childAgentLabels[node] ?? roleLabels.child_agent) : roleLabels.child_agent
+  const childReport = isChildAgent ? parseChildReport(content) : null
 
   return (
     <div className={`message-bubble ${role}`} data-testid="message-bubble">
@@ -169,6 +213,68 @@ export function MessageBubble({
           )}
           <MarkdownRenderer content={content} streaming={streaming} />
         </>
+      ) : isChildAgent ? (
+        <div className={`child-agent-card ${childCollapsed ? 'collapsed' : ''} ${streaming ? 'streaming' : ''}`}>
+          <button
+            type="button"
+            className="child-agent-header"
+            onClick={() => onToggleChild?.(id)}
+            aria-expanded={!childCollapsed}
+          >
+            <span className="child-agent-label">{childLabel}</span>
+            {streaming && <span className="child-agent-badge streaming">运行中</span>}
+            {!streaming && childReport?.status === 'failed' && (
+              <span className="child-agent-badge failed">失败</span>
+            )}
+            {!streaming && childReport?.status === 'completed' && (
+              <span className="child-agent-badge completed">完成</span>
+            )}
+            <span className="child-agent-toggle">{childCollapsed ? '展开' : '收起'}</span>
+          </button>
+          {!childCollapsed && (
+            <div className="child-agent-body">
+              {childReport ? (
+                <>
+                  {childReport.error && (
+                    <div className="child-agent-error">❌ {childReport.error}</div>
+                  )}
+                  {childReport.findings.length > 0 && (
+                    <div className="child-agent-section">
+                      <h4>🔎 发现</h4>
+                      <ul>
+                        {childReport.findings.map((f, i) => <li key={i}>{f}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {childReport.evidence.length > 0 && (
+                    <div className="child-agent-section">
+                      <h4>📋 证据</h4>
+                      <ul>
+                        {childReport.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {childReport.recommendations.length > 0 && (
+                    <div className="child-agent-section">
+                      <h4>💡 建议</h4>
+                      <ul>
+                        {childReport.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {childReport.confidence !== null && (
+                    <div className="child-agent-confidence">
+                      置信度：{(childReport.confidence * 100).toFixed(0)}%
+                    </div>
+                  )}
+                </>
+              ) : (
+                <pre className="child-agent-raw">{content || '(等待输出...)'}</pre>
+              )}
+              {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="message-content">
           {content}

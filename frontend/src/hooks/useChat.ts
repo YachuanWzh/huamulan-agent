@@ -11,8 +11,10 @@ import {
 
 export interface Message {
   id: string
-  role: 'user' | 'assistant' | 'tool_call'
+  role: 'user' | 'assistant' | 'tool_call' | 'child_agent'
   content: string
+  node?: string        // LangGraph node name (e.g. 'troubleshoot_agent')
+  agentRole?: string   // 'child' | 'orchestrator' | 'system'
   approvalId?: string
   approvalStatus?: 'pending' | 'approved' | 'denied'
   streaming?: boolean
@@ -23,6 +25,7 @@ export interface Message {
   compactingStreaming?: boolean
   compactingCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
+  childCollapsed?: boolean  // child agent card collapse state
 }
 
 export function useChat(
@@ -200,30 +203,53 @@ export function useChat(
 
   const processStream = useCallback(
     async (stream: AsyncGenerator<StreamEvent>) => {
-      let assistantId = ''
+      let mainAssistantId = ''       // orchestrator (supervisor/synthesize) message
       let buffer = ''
       let reasoningBuffer = ''
       let compactingBuffer = ''
+      const nodeMessages = new Map<string, string>()  // node → messageId for child agents
 
-      const ensureAssistantMessage = () => {
-        if (assistantId) return assistantId
-        assistantId = nextId()
+      const ensureAssistantMessage = (node?: string, agentRole?: string) => {
+        // Child agents get their own card
+        if (node && agentRole === 'child' && node !== 'gate') {
+          const existing = nodeMessages.get(node)
+          if (existing) return existing
+          const id = nextId()
+          nodeMessages.set(node, id)
+          const label = _childAgentLabel(node)
+          setMessages((prev) => [
+            ...prev,
+            {
+              id,
+              role: 'child_agent' as const,
+              content: '',
+              streaming: true,
+              node,
+              agentRole,
+              childCollapsed: false,
+            },
+          ])
+          return id
+        }
+        // Orchestrator / system nodes share the main assistant message
+        if (mainAssistantId) return mainAssistantId
+        mainAssistantId = nextId()
         setMessages((prev) => [
           ...prev,
           {
-            id: assistantId,
+            id: mainAssistantId,
             role: 'assistant' as const,
             content: '',
           },
         ])
-        return assistantId
+        return mainAssistantId
       }
 
       const finishReasoning = () => {
-        if (!assistantId || !reasoningBuffer) return
+        if (!mainAssistantId || !reasoningBuffer) return
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === mainAssistantId
               ? { ...m, reasoningStreaming: false, reasoningCollapsed: true }
               : m,
           ),
@@ -231,10 +257,10 @@ export function useChat(
       }
 
       const finishCompacting = () => {
-        if (!assistantId || !compactingBuffer) return
+        if (!mainAssistantId || !compactingBuffer) return
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId
+            m.id === mainAssistantId
               ? { ...m, compactingStreaming: false, compactingCollapsed: true }
               : m,
           ),
@@ -243,6 +269,48 @@ export function useChat(
 
       for await (const event of stream) {
         switch (event.type) {
+          case 'node_started': {
+            const id = ensureAssistantMessage(event.node, event.agent_role)
+            if (event.agent_role === 'child') {
+              // Mark existing child card as active
+              setMessages((prev) =>
+                prev.map((m) => (m.id === id ? { ...m, streaming: true } : m)),
+              )
+            }
+            break
+          }
+          case 'node_finished': {
+            if (event.agent_role === 'child' && event.node) {
+              const id = nodeMessages.get(event.node)
+              if (id) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === id
+                      ? { ...m, streaming: false, childCollapsed: true }
+                      : m,
+                  ),
+                )
+              }
+            }
+            break
+          }
+          case 'tool_started': {
+            // Route tool start to the correct child agent card
+            const msgId = nodeMessages.get(event.name) || mainAssistantId
+            if (!msgId) break
+            // Tool started events create tool_call entries in the card
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: nextId(),
+                role: 'tool_call' as const,
+                content: `🔧 ${event.name}`,
+                approvalStatus: 'approved' as const,
+                node: event.name,
+              },
+            ])
+            break
+          }
           case 'compacting': {
             const id = ensureAssistantMessage()
             compactingBuffer += compactingBuffer ? `\n${event.content}` : event.content
@@ -262,6 +330,7 @@ export function useChat(
           }
           case 'reasoning': {
             finishCompacting()
+            // Reasoning only for orchestrator (child agent reasoning suppressed by backend)
             const id = ensureAssistantMessage()
             reasoningBuffer += event.content
             setMessages((prev) =>
@@ -281,35 +350,43 @@ export function useChat(
           case 'token': {
             finishReasoning()
             finishCompacting()
+            // Route token to correct card: child agent or main assistant
+            const targetId = (event.node && event.agent_role === 'child')
+              ? nodeMessages.get(event.node)
+              : undefined
+            const id = targetId || ensureAssistantMessage(event.node, event.agent_role)
             buffer += event.content
-            if (!assistantId) {
-              assistantId = nextId()
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: assistantId,
-                  role: 'assistant' as const,
-                  content: event.content,
-                  streaming: true,
-                },
-              ])
-            } else {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? { ...m, content: m.content + event.content }
-                    : m,
-                ),
-              )
-            }
+
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? { ...m, content: m.content + event.content, streaming: true }
+                  : m,
+              ),
+            )
+            break
+          }
+          case 'tool_call_generating': {
+            // Tool call argument streaming — route to child agent card
+            const targetId = (event.node && event.agent_role === 'child')
+              ? nodeMessages.get(event.node)
+              : undefined
+            const id = targetId || mainAssistantId
+            if (!id) break
+            // No visible content change for arg streaming, just keep card alive
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id ? { ...m, streaming: true } : m,
+              ),
+            )
             break
           }
           case 'requires_approval': {
             finishReasoning()
             finishCompacting()
-            if (assistantId && buffer) {
+            if (mainAssistantId && buffer) {
               setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+                prev.map((m) => (m.id === mainAssistantId ? { ...m, streaming: false } : m)),
               )
             }
             setPendingApprovals(event.approvals.filter((approval) => !isMemoryApproval(approval)))
@@ -324,7 +401,7 @@ export function useChat(
                 (m) =>
                   m.role === 'tool_call' &&
                   m.approvalStatus === 'approved' &&
-                  m.content === event.name,
+                  m.content === `🔧 ${event.name}`,
               )
               if (pendingToolIndex === -1) {
                 return [
@@ -348,10 +425,11 @@ export function useChat(
           case 'done': {
             finishReasoning()
             finishCompacting()
-            if (assistantId && buffer) {
+            // Finish main assistant
+            if (mainAssistantId && buffer) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId
+                  m.id === mainAssistantId
                     ? {
                         ...m,
                         streaming: false,
@@ -360,10 +438,10 @@ export function useChat(
                     : m,
                 ),
               )
-            } else if (assistantId && event.message) {
+            } else if (mainAssistantId && event.message) {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId
+                  m.id === mainAssistantId
                     ? {
                         ...m,
                         content: event.message,
@@ -373,7 +451,7 @@ export function useChat(
                     : m,
                 ),
               )
-            } else if (!assistantId && event.message) {
+            } else if (!mainAssistantId && event.message) {
               setMessages((prev) => [
                 ...prev,
                 {
@@ -384,6 +462,14 @@ export function useChat(
                 },
               ])
             }
+            // Finish all child agent cards
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.role === 'child_agent' && m.streaming
+                  ? { ...m, streaming: false, childCollapsed: true }
+                  : m,
+              ),
+            )
             setPendingApprovals([])
             return
           }
@@ -401,6 +487,16 @@ export function useChat(
       prev.map((m) =>
         m.id === messageId && m.reasoning
           ? { ...m, reasoningCollapsed: !m.reasoningCollapsed }
+          : m,
+      ),
+    )
+  }, [])
+
+  const toggleChild = useCallback((messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId && m.role === 'child_agent'
+          ? { ...m, childCollapsed: !m.childCollapsed }
           : m,
       ),
     )
@@ -570,7 +666,19 @@ export function useChat(
     cancel,
     toggleReasoning,
     toggleCompacting,
+    toggleChild,
   }
+}
+
+/** Human-readable label for child agent node names */
+function _childAgentLabel(node: string): string {
+  const labels: Record<string, string> = {
+    metrics_agent: '📊 Metrics 分析',
+    troubleshoot_agent: '🔍 故障排查',
+    patrol_agent: '🛡️ 巡检',
+    audit_agent: '📋 审计',
+  }
+  return labels[node] ?? node
 }
 
 function isMemoryApproval(approval: ToolCallApproval) {

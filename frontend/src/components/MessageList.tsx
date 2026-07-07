@@ -7,9 +7,10 @@ interface Props {
   loading?: boolean
   onToggleReasoning?: (messageId: string) => void
   onToggleCompacting?: (messageId: string) => void
+  onToggleChild?: (messageId: string) => void
 }
 
-export function MessageList({ messages, loading, onToggleReasoning, onToggleCompacting }: Props) {
+export function MessageList({ messages, loading, onToggleReasoning, onToggleCompacting, onToggleChild }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const lastMessage = messages[messages.length - 1]
   const showLoadingIndicator = loading && lastMessage?.role !== 'assistant'
@@ -40,6 +41,8 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
           id={msg.id}
           role={msg.role}
           content={msg.content}
+          node={msg.node}
+          agentRole={msg.agentRole}
           approvalStatus={msg.approvalStatus}
           streaming={msg.streaming}
           reasoning={msg.reasoning}
@@ -48,9 +51,11 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
           compacting={msg.compacting}
           compactingStreaming={msg.compactingStreaming}
           compactingCollapsed={msg.compactingCollapsed}
+          childCollapsed={msg.childCollapsed}
           knowledgeContext={msg.knowledgeContext}
           onToggleReasoning={onToggleReasoning}
           onToggleCompacting={onToggleCompacting}
+          onToggleChild={onToggleChild}
         />
       ))}
       {showLoadingIndicator && (
