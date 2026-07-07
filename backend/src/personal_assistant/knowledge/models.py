@@ -112,6 +112,10 @@ class KnowledgeRetrievalResult(BaseModel):
     status: str  # "completed" | "skipped" | "failed"
     documents: list[SearchResult] = Field(default_factory=list)
     reason: str = ""
+    trust_signal: str = ""
+    """When set to ``"NO_KNOWLEDGE_FOUND"``, indicates all retrieved docs were
+    filtered out by the relevance check. Downstream agents should respect this
+    and not produce free-form answers."""
 
 
 class RetrievalMetrics(BaseModel):
