@@ -184,3 +184,56 @@ class TestGenerationMetrics:
     def test_create(self) -> None:
         m = GenerationMetrics(faithfulness=0.9, answer_relevancy=0.85)
         assert m.faithfulness == 0.9
+
+
+class TestRelevanceVerdict:
+    def test_create_relevant(self):
+        from personal_assistant.knowledge.models import RelevanceVerdict
+        v = RelevanceVerdict(document_index=0, relevant=True, reason="query与文档来源匹配")
+        assert v.relevant is True
+        assert v.document_index == 0
+
+    def test_create_irrelevant(self):
+        from personal_assistant.knowledge.models import RelevanceVerdict
+        v = RelevanceVerdict(document_index=2, relevant=False, reason="文档主题是告警分级，query是关于Trace查询")
+        assert v.relevant is False
+
+
+class TestRelevanceFilterResult:
+    def test_all_relevant(self):
+        from personal_assistant.knowledge.models import (
+            RelevanceFilterResult,
+            RelevanceVerdict,
+            SearchResult,
+        )
+        docs = [
+            SearchResult(
+                chunk_id="d#c-0", doc_id="d", score=0.9,
+                content="C", title="T",
+                source_attribution="来源：文档《T》，版本 v1.0，更新日期 2026-07-06，片段 1/1",
+                metadata={},
+            )
+        ]
+        result = RelevanceFilterResult(
+            all_relevant=True,
+            verdicts=[RelevanceVerdict(document_index=0, relevant=True, reason="匹配")],
+            filtered_documents=docs,
+        )
+        assert result.all_relevant is True
+        assert len(result.filtered_documents) == 1
+        assert result.no_knowledge_signal == ""
+
+    def test_none_relevant(self):
+        from personal_assistant.knowledge.models import (
+            RelevanceFilterResult,
+            RelevanceVerdict,
+        )
+        result = RelevanceFilterResult(
+            all_relevant=False,
+            verdicts=[RelevanceVerdict(document_index=0, relevant=False, reason="不匹配")],
+            filtered_documents=[],
+            no_knowledge_signal="⚠️ 知识库中无相关知识：经过检索和相关性校验，知识库中未找到与当前查询匹配的文档。",
+        )
+        assert result.all_relevant is False
+        assert len(result.filtered_documents) == 0
+        assert "知识库中无相关知识" in result.no_knowledge_signal

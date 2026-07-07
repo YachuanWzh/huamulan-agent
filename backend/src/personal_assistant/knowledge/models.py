@@ -128,3 +128,33 @@ class GenerationMetrics(BaseModel):
 
     faithfulness: float = 0.0
     answer_relevancy: float = 0.0
+
+
+class RelevanceVerdict(BaseModel):
+    """LLM judgment on whether a single retrieved chunk is relevant to the query."""
+
+    document_index: int
+    """Index into the original search results list."""
+
+    relevant: bool
+    """True if the chunk's metadata (source, title, category) aligns with the query."""
+
+    reason: str
+    """Brief Chinese explanation of the relevance / irrelevance."""
+
+
+class RelevanceFilterResult(BaseModel):
+    """Result of running the relevance filter over a set of retrieved documents."""
+
+    all_relevant: bool
+    """True if at least one document passed the filter."""
+
+    verdicts: list[RelevanceVerdict]
+    """Per-document verdicts from the LLM."""
+
+    filtered_documents: list["SearchResult"]
+    """Subset of input documents that passed the relevance check."""
+
+    no_knowledge_signal: str = ""
+    """When ``all_relevant`` is False, this contains the instruction to inject
+    into the downstream agent's context to prevent free-form answers."""
