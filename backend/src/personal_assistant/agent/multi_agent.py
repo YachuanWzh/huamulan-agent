@@ -6,6 +6,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
@@ -66,6 +67,109 @@ _CHILD_AGENT_SYSTEM_PROMPT = """\
   "tools_used": ["tool_name_1", ...],
   "error": null
 }"""
+
+
+# ── audit agent 内置 memory 工具 ────────────────────────────────────────
+
+
+def _build_audit_memory_tools(memory) -> list:
+    """为审计子 agent 构建基于 memory 的内置查询工具。
+
+    当 ``audit-sop`` skill 未提供工具实现时（仅有 SOP 文档），
+    这些工具让 audit agent 能够查询 Postgres 中的执行日志、
+    安全事件、工具错误和执行摘要。
+
+    所有工具返回 JSON 字符串以适配 LLM tool calling 协议。
+    """
+
+    @tool
+    async def query_execution_log_summary(thread_id: str) -> str:
+        """查询指定线程的执行摘要统计。
+
+        返回：总事件数、token 消耗（prompt/completion）、工具调用数、
+        工具错误/重试数、安全事件数、总耗时(ms)。
+
+        Args:
+            thread_id: 要查询的线程 ID（可从 task_id 中提取，格式为 agent_name-thread_id）
+        """
+        try:
+            result = await memory.execution_log_summary(thread_id)
+            return json.dumps(result.model_dump(), ensure_ascii=False)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    @tool
+    async def query_execution_logs(thread_id: str, limit: int = 100) -> str:
+        """查询指定线程的详细执行日志列表。
+
+        返回按时间排序的事件列表，每个事件包含 event_type、status、
+        duration_ms、input/output 等信息。
+
+        Args:
+            thread_id: 要查询的线程 ID
+            limit: 返回条数上限（默认 100，最大 500）
+        """
+        try:
+            limit = max(1, min(limit, 500))
+            result = await memory.list_execution_logs(thread_id, limit=limit)
+            return json.dumps(
+                [item.model_dump() for item in result],
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    @tool
+    async def query_audit_events(thread_id: str, limit: int = 100) -> str:
+        """查询指定线程的安全审计事件列表。
+
+        返回 prompt guard 拦截、tool guard 拦截等安全事件，
+        每个事件包含 category、severity、reason、subject 等字段。
+
+        Args:
+            thread_id: 要查询的线程 ID
+            limit: 返回条数上限（默认 100，最大 500）
+        """
+        try:
+            limit = max(1, min(limit, 500))
+            result = await memory.list_audit_events(thread_id=thread_id, limit=limit)
+            return json.dumps(
+                [item.model_dump() for item in result],
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    @tool
+    async def query_tool_errors(thread_id: str, limit: int = 100) -> str:
+        """查询指定线程的工具错误/重试记录列表。
+
+        返回工具调用失败的详细信息，包括 tool_name、error_type、
+        error_message、attempt（第几次尝试）、will_retry 等字段。
+
+        Args:
+            thread_id: 要查询的线程 ID
+            limit: 返回条数上限（默认 100，最大 500）
+        """
+        try:
+            limit = max(1, min(limit, 500))
+            result = await memory.list_tool_errors(thread_id=thread_id, limit=limit)
+            return json.dumps(
+                [item.model_dump() for item in result],
+                ensure_ascii=False,
+                default=str,
+            )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    return [
+        query_execution_log_summary,
+        query_execution_logs,
+        query_audit_events,
+        query_tool_errors,
+    ]
 
 
 def rewrite_query_and_slots(query: str) -> dict[str, Any]:
@@ -154,6 +258,15 @@ def compile_multi_agent(
             except Exception:
                 pass
         child_agent_tools[agent_name] = tools
+
+    # ── 为 audit agent 注入内置 memory 查询工具 ─────────────────────
+    # audit-sop skill 目前仅有 SOP 文档无工具实现，但 audit agent 需要
+    # 能查询执行日志、安全事件、工具错误等数据。这些数据通过 memory 对象
+    # （PostgresMemory）暴露，此处将其包装为 LangChain tool 注入。
+    # 仅当 memory 对象具备查询能力（hasattr 检查）且 registry 未提供
+    # 工具时才注入，避免对测试 stub 对象注入无效工具。
+    if not child_agent_tools.get("audit") and hasattr(memory, "execution_log_summary"):
+        child_agent_tools["audit"] = _build_audit_memory_tools(memory)
 
     # Read multi-agent intent routing config (use getattr for test compatibility)
     regex_threshold = float(getattr(settings, "multi_agent_intent_regex_threshold", 0.80) or 0.80)

@@ -410,6 +410,7 @@ export interface StreamToolStarted {
   name: string
   args?: Record<string, unknown>
   timestamp?: number
+  node?: string
 }
 
 export interface StreamToken {
@@ -440,6 +441,7 @@ export interface StreamToolResult {
   type: 'tool_result'
   name: string
   content: string
+  node?: string
 }
 
 export interface StreamToolCallGenerating {

@@ -1141,13 +1141,14 @@ async def _record_tool_approval_requests(
         )
 
 
-def _tool_result_payload(event: dict[str, Any]) -> dict[str, str]:
+def _tool_result_payload(event: dict[str, Any]) -> dict[str, Any]:
     name = event.get("name")
     data = event.get("data") if isinstance(event.get("data"), dict) else {}
     output = data.get("output") if isinstance(data, dict) else None
     return {
         "name": name if isinstance(name, str) else "tool",
         "content": _tool_output_text(output),
+        "node": _current_node_from_event(event),
     }
 
 
@@ -1303,6 +1304,7 @@ def _tool_started_payload(event: dict[str, Any]) -> dict[str, Any]:
         "name": name if isinstance(name, str) else "tool",
         "args": input_args if isinstance(input_args, dict) else {},
         "timestamp": time.time(),
+        "node": _current_node_from_event(event),
     }
 
 

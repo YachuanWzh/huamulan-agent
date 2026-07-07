@@ -9,6 +9,13 @@ import {
   type ToolCallApproval,
 } from '../lib/api'
 
+export interface ToolCallEntry {
+  name: string
+  args?: Record<string, unknown>
+  result?: string
+  streaming?: boolean
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'tool_call' | 'child_agent'
@@ -26,6 +33,7 @@ export interface Message {
   compactingCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
   childCollapsed?: boolean  // child agent card collapse state
+  toolCalls?: ToolCallEntry[]  // tool calls inside child agent cards
 }
 
 export function useChat(
@@ -207,6 +215,7 @@ export function useChat(
       let buffer = ''
       let reasoningBuffer = ''
       let compactingBuffer = ''
+      let currentChildNode = ''     // currently active child agent node name
       const nodeMessages = new Map<string, string>()  // node → messageId for child agents
 
       const ensureAssistantMessage = (node?: string, agentRole?: string) => {
@@ -272,6 +281,7 @@ export function useChat(
           case 'node_started': {
             const id = ensureAssistantMessage(event.node, event.agent_role)
             if (event.agent_role === 'child') {
+              currentChildNode = event.node  // Track active child agent for tool routing
               // Mark existing child card as active
               setMessages((prev) =>
                 prev.map((m) => (m.id === id ? { ...m, streaming: true } : m)),
@@ -281,6 +291,7 @@ export function useChat(
           }
           case 'node_finished': {
             if (event.agent_role === 'child' && event.node) {
+              if (currentChildNode === event.node) currentChildNode = ''
               const id = nodeMessages.get(event.node)
               if (id) {
                 setMessages((prev) =>
@@ -296,19 +307,43 @@ export function useChat(
           }
           case 'tool_started': {
             // Route tool start to the correct child agent card
-            const msgId = nodeMessages.get(event.name) || mainAssistantId
-            if (!msgId) break
-            // Tool started events create tool_call entries in the card
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: nextId(),
-                role: 'tool_call' as const,
-                content: `🔧 ${event.name}`,
-                approvalStatus: 'approved' as const,
-                node: event.name,
-              },
-            ])
+            // Child agent subgraphs emit tool events with internal node names
+            // (e.g. "agent", "tools"), so fall back to currentChildNode
+            const toolNode = event.node
+            let childMsgId = toolNode ? nodeMessages.get(toolNode) : undefined
+            if (!childMsgId && currentChildNode) {
+              childMsgId = nodeMessages.get(currentChildNode)
+            }
+            if (childMsgId) {
+              // Append to child agent card's toolCalls
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === childMsgId && m.role === 'child_agent'
+                    ? {
+                        ...m,
+                        toolCalls: [
+                          ...(m.toolCalls || []),
+                          { name: event.name, args: event.args, streaming: true },
+                        ],
+                      }
+                    : m,
+                ),
+              )
+            } else {
+              // Orchestrator tool call — create standalone tool_call message
+              const msgId = mainAssistantId
+              if (!msgId) break
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: nextId(),
+                  role: 'tool_call' as const,
+                  content: `🔧 ${event.name}`,
+                  approvalStatus: 'approved' as const,
+                  node: event.name,
+                },
+              ])
+            }
             break
           }
           case 'compacting': {
@@ -396,30 +431,55 @@ export function useChat(
           case 'tool_result': {
             finishReasoning()
             finishCompacting()
-            setMessages((prev) => {
-              const pendingToolIndex = prev.findIndex(
-                (m) =>
-                  m.role === 'tool_call' &&
-                  m.approvalStatus === 'approved' &&
-                  m.content === `🔧 ${event.name}`,
+            // Route tool result to the correct child agent card
+            // Fall back to currentChildNode when tool event carries internal node name
+            const toolNode = event.node
+            let childMsgId = toolNode ? nodeMessages.get(toolNode) : undefined
+            if (!childMsgId && currentChildNode) {
+              childMsgId = nodeMessages.get(currentChildNode)
+            }
+            if (childMsgId) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== childMsgId || m.role !== 'child_agent') return m
+                  const calls = [...(m.toolCalls || [])]
+                  // Find the last matching tool call without a result
+                  for (let i = calls.length - 1; i >= 0; i--) {
+                    if (calls[i].name === event.name && !calls[i].result) {
+                      calls[i] = { ...calls[i], result: event.content, streaming: false }
+                      break
+                    }
+                  }
+                  return { ...m, toolCalls: calls }
+                }),
               )
-              if (pendingToolIndex === -1) {
-                return [
-                  ...prev,
-                  {
-                    id: nextId(),
-                    role: 'tool_call' as const,
-                    content: `${event.name}: ${event.content}`,
-                    approvalStatus: 'approved' as const,
-                  },
-                ]
-              }
-              return prev.map((m, index) =>
-                index === pendingToolIndex
-                  ? { ...m, content: `${event.name}: ${event.content}` }
-                  : m,
-              )
-            })
+            } else {
+              // Orchestrator tool result — update standalone tool_call message
+              setMessages((prev) => {
+                const pendingToolIndex = prev.findIndex(
+                  (m) =>
+                    m.role === 'tool_call' &&
+                    m.approvalStatus === 'approved' &&
+                    m.content === `🔧 ${event.name}`,
+                )
+                if (pendingToolIndex === -1) {
+                  return [
+                    ...prev,
+                    {
+                      id: nextId(),
+                      role: 'tool_call' as const,
+                      content: `${event.name}: ${event.content}`,
+                      approvalStatus: 'approved' as const,
+                    },
+                  ]
+                }
+                return prev.map((m, index) =>
+                  index === pendingToolIndex
+                    ? { ...m, content: `${event.name}: ${event.content}` }
+                    : m,
+                )
+              })
+            }
             break
           }
           case 'done': {

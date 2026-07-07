@@ -226,3 +226,81 @@ def test_coerce_report_injects_default_fields() -> None:
     assert report["findings"] == ["f1"]
     assert report["confidence"] == 0.8
     # 旧格式兼容 — _coerce_report 不负责注入新字段（由 child_agent 调用方处理）
+
+
+# ── audit agent 内置 memory 工具注入 ──────────────────────────────────
+
+
+def test_audit_agent_gets_builtin_memory_tools_when_registry_empty(monkeypatch) -> None:
+    """审计 agent 在 registry 无工具时，应获得基于 memory 的内置查询工具。
+
+    GIVEN: registry 中 audit-sop 存在但 tool_map_for_skills 返回空
+    WHEN: compile_multi_agent 构建子 agent 工具
+    THEN: audit agent 的 tools 非空，包含 memory 查询工具
+    """
+    tool_names_bound: list[str] = []
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            tool_names_bound.extend([t.name for t in tools])
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            content = str(getattr(messages[-1], "content", ""))
+            if "reports" in content:
+                return AIMessage(content="综合结论")
+            if "audit" in content:
+                return AIMessage(content=(
+                    '{"agent":"audit","findings":["发现"],"evidence":["证据"],'
+                    '"recommendations":["建议"],"confidence":0.8,'
+                    '"tools_used":["query_execution_log_summary"]}'
+                ))
+            return AIMessage(content='{"agent":"other","findings":[],"confidence":0.5}')
+
+    class FakeMemory:
+        checkpointer = None
+
+        async def record_execution_log(self, log):
+            return None
+
+        async def execution_log_summary(self, thread_id):
+            return type("Summary", (), {"total_events": 10, "total_tokens": 500})()
+
+        async def list_execution_logs(self, thread_id, limit=500):
+            return []
+
+        async def list_audit_events(self, thread_id=None, limit=100):
+            return []
+
+        async def list_tool_errors(self, thread_id=None, limit=100):
+            return []
+
+    class FakeRegistry:
+        _skills = {"audit-sop": object()}
+
+        def load_skill(self, name):
+            pass
+
+        def tool_map_for_skills(self, skill_names):
+            return {}  # 无工具
+
+    monkeypatch.setattr(multi_agent_module, "build_llm", lambda *a, **kw: FakeLLM())
+
+    app = multi_agent_module.compile_multi_agent("settings", FakeRegistry(), FakeMemory())
+    asyncio.run(app.ainvoke(
+        {
+            "messages": [
+                AIMessage(content="ignored"),
+                multi_agent_module.HumanMessage(content="审计执行日志"),
+            ]
+        },
+        config={"configurable": {"thread_id": "t1"}},
+    ))
+
+    assert len(tool_names_bound) > 0, (
+        f"audit agent 应有 memory 工具，但 bind_tools 未被调用，"
+        f"说明 audit agent 走了无工具路径"
+    )
+    assert any(
+        name.startswith("query_") for name in tool_names_bound
+    ), f"audit agent 工具应包含 query_* 前缀，实际: {tool_names_bound}"

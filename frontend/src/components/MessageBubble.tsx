@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Message } from '../hooks/useChat'
+import type { Message, ToolCallEntry } from '../hooks/useChat'
 import type { KnowledgeContext } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
@@ -19,6 +19,7 @@ interface Props {
   compactingCollapsed?: boolean
   childCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
+  toolCalls?: ToolCallEntry[]
   onToggleReasoning?: (messageId: string) => void
   onToggleCompacting?: (messageId: string) => void
   onToggleChild?: (messageId: string) => void
@@ -31,11 +32,18 @@ const roleLabels: Record<Message['role'], string> = {
   child_agent: '子 Agent',
 }
 
-const childAgentLabels: Record<string, string> = {
-  metrics_agent: '📊 Metrics 分析',
-  troubleshoot_agent: '🔍 故障排查',
-  patrol_agent: '🛡️ 巡检',
-  audit_agent: '📋 审计',
+const childAgentIcons: Record<string, string> = {
+  metrics_agent: '📊',
+  troubleshoot_agent: '🔍',
+  patrol_agent: '🛡️',
+  audit_agent: '📋',
+}
+
+const childAgentNames: Record<string, string> = {
+  metrics_agent: 'Metrics 分析',
+  troubleshoot_agent: '故障排查',
+  patrol_agent: '巡检',
+  audit_agent: '审计',
 }
 
 /** Try to parse child agent JSON report into sections */
@@ -84,6 +92,7 @@ export function MessageBubble({
   compactingCollapsed,
   childCollapsed,
   knowledgeContext,
+  toolCalls,
   onToggleReasoning,
   onToggleCompacting,
   onToggleChild,
@@ -93,7 +102,8 @@ export function MessageBubble({
   const isToolResult = role === 'tool_call'
   const isChildAgent = role === 'child_agent'
   const toolResultId = id ? `${id}-tool-result` : undefined
-  const childLabel = node ? (childAgentLabels[node] ?? roleLabels.child_agent) : roleLabels.child_agent
+  const childIcon = node ? (childAgentIcons[node] ?? '🤖') : '🤖'
+  const childName = node ? (childAgentNames[node] ?? roleLabels.child_agent) : roleLabels.child_agent
   const childReport = isChildAgent ? parseChildReport(content) : null
 
   return (
@@ -214,25 +224,50 @@ export function MessageBubble({
           <MarkdownRenderer content={content} streaming={streaming} />
         </>
       ) : isChildAgent ? (
-        <div className={`child-agent-card ${childCollapsed ? 'collapsed' : ''} ${streaming ? 'streaming' : ''}`}>
+        <div className={`child-agent-card ${childCollapsed ? 'collapsed' : ''} ${streaming ? 'streaming' : ''}`} data-agent={node}>
           <button
             type="button"
             className="child-agent-header"
             onClick={() => onToggleChild?.(id)}
             aria-expanded={!childCollapsed}
           >
-            <span className="child-agent-label">{childLabel}</span>
-            {streaming && <span className="child-agent-badge streaming">运行中</span>}
-            {!streaming && childReport?.status === 'failed' && (
-              <span className="child-agent-badge failed">失败</span>
-            )}
-            {!streaming && childReport?.status === 'completed' && (
-              <span className="child-agent-badge completed">完成</span>
-            )}
+            <span className="child-agent-identity">
+              <span className="child-agent-icon">{childIcon}</span>
+              <span className="child-agent-name">{childName}</span>
+            </span>
+            <span className={`child-agent-status${childReport?.status === 'failed' ? ' is-failed' : ''}`}>
+              <span className="child-agent-status-dot" />
+              {streaming ? '运行中' : childReport?.status === 'failed' ? '失败' : childReport?.status === 'completed' ? '完成' : ''}
+            </span>
             <span className="child-agent-toggle">{childCollapsed ? '展开' : '收起'}</span>
           </button>
           {!childCollapsed && (
             <div className="child-agent-body">
+              {/* Tool calls inside child agent card */}
+              {toolCalls && toolCalls.length > 0 && (
+                <div className="child-agent-tool-calls">
+                  {toolCalls.map((tc, i) => (
+                    <details
+                      key={i}
+                      className="child-agent-tool-call"
+                      open={tc.streaming && !tc.result}
+                    >
+                      <summary className="child-agent-tool-call-summary">
+                        <span className="child-agent-tool-call-name">🔧 {tc.name}</span>
+                        {tc.streaming && !tc.result && (
+                          <span className="child-agent-tool-call-running">执行中...</span>
+                        )}
+                        {tc.result && (
+                          <span className="child-agent-tool-call-done">✓</span>
+                        )}
+                      </summary>
+                      {tc.result && (
+                        <pre className="child-agent-tool-call-result">{tc.result}</pre>
+                      )}
+                    </details>
+                  ))}
+                </div>
+              )}
               {childReport ? (
                 <>
                   {childReport.error && (
@@ -264,7 +299,13 @@ export function MessageBubble({
                   )}
                   {childReport.confidence !== null && (
                     <div className="child-agent-confidence">
-                      置信度 {(childReport.confidence * 100).toFixed(0)}%
+                      <span>置信度 {(childReport.confidence * 100).toFixed(0)}%</span>
+                      <div className="child-agent-confidence-bar">
+                        <div
+                          className="child-agent-confidence-fill"
+                          style={{ width: `${Math.round(childReport.confidence * 100)}%` }}
+                        />
+                      </div>
                     </div>
                   )}
                   {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
