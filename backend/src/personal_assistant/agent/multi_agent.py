@@ -222,6 +222,8 @@ def compile_multi_agent(
     intent_llm=None,    # LLM for Tier 2 intent classification
     # ── Child agent LLM ────────────────────────────────────────────────
     child_llm_config: LLMConfig | None = None,
+    # ── Hybrid RAG retrieval ───────────────────────────────────────────
+    hybrid_retriever=None,  # HybridRetriever | None
 ):
     llm = build_llm(settings, llm_config)
 
@@ -321,7 +323,11 @@ def compile_multi_agent(
         state: AgentState,
         config: RunnableConfig | None = None,
     ) -> AgentState:
-        context = await _retrieve_user_vector_context(settings, state.get("rewritten_query", ""))
+        context = await _retrieve_user_vector_context(
+            settings,
+            state.get("rewritten_query", ""),
+            hybrid_retriever=hybrid_retriever,
+        )
         await _record_multiagent_log(memory, config, "user_vector_retrieval", output=context)
         return {"user_vector_context": context}
 
@@ -620,7 +626,25 @@ def _last_human_text(state: AgentState) -> str:
     return ""
 
 
-async def _retrieve_user_vector_context(settings: Settings, query: str) -> dict[str, Any]:
+async def _retrieve_user_vector_context(
+    settings: Settings, query: str, *, hybrid_retriever=None,
+) -> dict[str, Any]:
+    # ── Hybrid path (vector + BM25 + relevance filter) ─────────────────
+    if hybrid_retriever is not None:
+        try:
+            result = await hybrid_retriever.retrieve(query)
+            formatted = hybrid_retriever.format_for_llm(result)
+            return {
+                "status": result.status,
+                "documents": [d.model_dump() for d in result.documents],
+                "formatted": formatted,
+                "trust_signal": getattr(result, "trust_signal", ""),
+            }
+        except Exception as exc:
+            # Fall through to legacy path on hybrid failure
+            pass
+
+    # ── Legacy path: raw Qdrant vector search ──────────────────────────
     if not getattr(settings, "user_vector_retrieval_enabled", False):
         return {
             "status": "skipped",

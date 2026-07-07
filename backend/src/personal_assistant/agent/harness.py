@@ -825,6 +825,20 @@ class AgentHarness:
             )
         kwargs["child_llm_config"] = child_llm_config
 
+        # ── Wire up hybrid retriever (vector + BM25 + relevance filter) ──
+        if getattr(self.settings, "knowledge_hybrid_enabled", False):
+            from personal_assistant.knowledge import build_hybrid_retriever
+            try:
+                hybrid_retriever = build_hybrid_retriever(self.settings)
+                if hybrid_retriever is not None:
+                    kwargs["hybrid_retriever"] = hybrid_retriever
+            except Exception as exc:
+                logger.warning(
+                    "Failed to build hybrid retriever: %s — falling back to legacy",
+                    exc,
+                    exc_info=True,
+                )
+
         return multi_agent_module.compile_multi_agent(
             self.settings,
             self.registry,
