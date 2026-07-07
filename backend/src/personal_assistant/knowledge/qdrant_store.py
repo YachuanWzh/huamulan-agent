@@ -190,6 +190,36 @@ class QdrantKnowledgeStore:
 
     # ── List ─────────────────────────────────────────────────────────
 
+    def scroll_chunks(self) -> list[tuple[str, str]]:
+        """Scroll all points and return ``(chunk_id, content)`` pairs.
+
+        Used to populate the BM25 keyword index with actual chunk text.
+        Returns raw content (not context-buffered) when available.
+        """
+        response = self._scroll_sync()
+        result = response.get("result", {})
+        points = result.get("points", []) if isinstance(result, dict) else []
+        if not isinstance(points, list):
+            return []
+
+        chunks: list[tuple[str, str]] = []
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            payload = point.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            chunk_id = str(payload.get("chunk_id") or "")
+            # Prefer raw_content (no context buffer) for keyword matching
+            content = str(
+                payload.get("raw_content")
+                or payload.get("content")
+                or ""
+            )
+            if chunk_id and content:
+                chunks.append((chunk_id, content))
+        return chunks
+
     def list_docs(self) -> list[DocMeta]:
         """Scroll all points and return deduplicated document metadata."""
         response = self._scroll_sync()

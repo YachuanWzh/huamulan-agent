@@ -1,8 +1,11 @@
 import json
+import logging
 import re
 import urllib.error
 import urllib.request
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -641,8 +644,10 @@ async def _retrieve_user_vector_context(
                 "trust_signal": getattr(result, "trust_signal", ""),
             }
         except Exception as exc:
-            # Fall through to legacy path on hybrid failure
-            pass
+            logger.warning(
+                "Hybrid retrieval failed, falling back to legacy: %s", exc,
+                exc_info=True,
+            )
 
     # ── Legacy path: raw Qdrant vector search ──────────────────────────
     if not getattr(settings, "user_vector_retrieval_enabled", False):

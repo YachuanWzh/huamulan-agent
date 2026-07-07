@@ -130,17 +130,20 @@ class TestRelevanceFilter:
 
     @pytest.mark.asyncio
     async def test_filter_handles_llm_error(self):
-        """LLM call fails → pass all docs through (fail-open for safety)."""
+        """LLM call fails with 2+ docs → pass all docs through (fail-open for safety)."""
         llm = MagicMock()
         llm.ainvoke = AsyncMock(side_effect=RuntimeError("API timeout"))
 
-        docs = [make_doc(0, "告警分级", "knowledge/01-alert.md")]
+        docs = [
+            make_doc(0, "告警分级", "knowledge/01-alert.md"),
+            make_doc(1, "Trace查询", "knowledge/04-trace.md"),
+        ]
         f = RelevanceFilter(llm=llm)
         result = await f.filter("P0告警处理", docs)
 
-        # Fail-open: pass all docs through
+        # Fail-open: pass all docs through (both documents)
         assert result.all_relevant is True
-        assert len(result.filtered_documents) == 1
+        assert len(result.filtered_documents) == 2
 
     def test_build_prompt_includes_metadata(self):
         """Prompt should contain document titles and source files."""

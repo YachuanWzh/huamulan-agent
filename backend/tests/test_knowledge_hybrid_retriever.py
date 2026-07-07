@@ -57,9 +57,6 @@ class TestHybridRetriever:
             metadata={"source_file": f"knowledge/0{idx}.md", "category": "apm_knowledge"},
         )
 
-    def _make_doc_tuple(self, idx: int, title: str) -> tuple[str, str]:
-        return (f"doc-{idx}#chunk-{idx:03d}", f"Content {idx}: {title}")
-
     @pytest.mark.asyncio
     async def test_retrieve_hybrid_success(self):
         """Happy path: vector + BM25 → RRF → filter → results."""

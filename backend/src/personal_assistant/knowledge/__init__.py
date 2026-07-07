@@ -109,6 +109,17 @@ def build_hybrid_retriever(settings, llm=None) -> "HybridRetriever | None":
 
     bm25 = BM25Searcher()
 
+    # Populate BM25 index from existing Qdrant chunk content
+    try:
+        collection = getattr(settings, "knowledge_qdrant_collection", "apm_knowledge")
+        chunks = base.store.scroll_chunks()
+        if chunks:
+            bm25.index(collection, chunks)
+    except Exception:
+        # BM25 index population is best-effort; hybrid degrades to
+        # vector-only search when the index is cold
+        pass
+
     relevance_filter = None
     filter_enabled = bool(getattr(settings, "knowledge_relevance_filter_enabled", True))
     if filter_enabled and llm is not None:
