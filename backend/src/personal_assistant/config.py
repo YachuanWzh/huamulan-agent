@@ -216,6 +216,15 @@ class Settings(BaseSettings):
         default=None,
         alias="MULTI_AGENT_INTENT_LLM_MODEL",
     )
+    multi_agent_child_llm_model: str | None = Field(
+        default=None,
+        alias="MULTI_AGENT_CHILD_LLM_MODEL",
+        description=(
+            "子 Agent 使用的 LLM 模型。"
+            "默认 None 时回退到主 LLM_MODEL；"
+            "设为 'deepseek-v4-flash' 可减少子 Agent 思考延迟。"
+        ),
+    )
     evaluation_judge_enabled: bool = Field(
         default=True,
         alias="EVALUATION_JUDGE_ENABLED",
