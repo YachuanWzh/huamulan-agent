@@ -806,6 +806,16 @@ class AgentHarness:
                     exc_info=True,
                 )
 
+        # ── Build child agent LLM config ──────────────────────────────
+        child_llm_config = None
+        child_model = getattr(self.settings, "multi_agent_child_llm_model", None)
+        if child_model:
+            child_llm_config = LLMConfig(
+                model=child_model,
+                temperature=0.1,  # 子 agent 用低温度确保结构化输出稳定
+            )
+        kwargs["child_llm_config"] = child_llm_config
+
         return multi_agent_module.compile_multi_agent(
             self.settings,
             self.registry,
