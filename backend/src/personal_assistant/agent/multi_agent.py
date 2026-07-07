@@ -7,7 +7,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
+from langgraph.types import Send
 
+from personal_assistant.agent.child_agent_protocol import SubAgentInput, SubAgentReport
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import OllamaBgeM3EmbeddingProvider
 from personal_assistant.agent.state import AgentState
@@ -17,6 +19,30 @@ from personal_assistant.skills import SkillRegistry
 
 
 APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
+
+_CHILD_AGENT_SYSTEM_PROMPT = """\
+You are an APM child agent. Your role is strictly analytical — report findings, \
+evidence, and recommendations.
+
+## Rules
+- Return ONLY the structured JSON output. No markdown, no explanations.
+- If you cannot determine something, set confidence low (0.0-0.3) and explain in error.
+- Cite specific evidence (metric values, trace IDs, log lines) — never fabricate data.
+- Use tools_used to list every tool you called.
+- Status must be "completed" or "failed" — use "failed" ONLY when a tool or data source is unreachable.
+
+## Output Schema
+{
+  "agent": "<your name>",
+  "task_id": "<assigned task ID>",
+  "status": "completed|failed",
+  "findings": ["finding 1", "finding 2", ...],
+  "evidence": ["evidence 1", "evidence 2", ...],
+  "recommendations": ["recommendation 1", ...],
+  "confidence": 0.0-1.0,
+  "tools_used": ["tool_name_1", ...],
+  "error": null
+}"""
 
 
 def rewrite_query_and_slots(query: str) -> dict[str, Any]:
@@ -67,8 +93,24 @@ def compile_multi_agent(
     # ── Hybrid intent routing (3-tier funnel) ──────────────────────────
     intent_index=None,  # IntentEmbeddingIndex | None
     intent_llm=None,    # LLM for Tier 2 intent classification
+    # ── Child agent LLM ────────────────────────────────────────────────
+    child_llm_config: LLMConfig | None = None,
 ):
     llm = build_llm(settings, llm_config)
+
+    # ── 构建子 Agent 专用 LLM ──────────────────────────────────────────
+    if child_llm_config is not None:
+        child_llm = build_llm(settings, child_llm_config)
+    elif getattr(settings, "multi_agent_child_llm_model", None):
+        child_llm = build_llm(
+            settings,
+            LLMConfig(
+                model=settings.multi_agent_child_llm_model,
+                temperature=0.1,
+            ),
+        )
+    else:
+        child_llm = llm  # 回退到主 LLM（保持向后兼容）
 
     # Read multi-agent intent routing config (use getattr for test compatibility)
     regex_threshold = float(getattr(settings, "multi_agent_intent_regex_threshold", 0.80) or 0.80)
@@ -128,39 +170,105 @@ def compile_multi_agent(
         return {"user_vector_context": context}
 
     async def child_agent(state: AgentState, config: RunnableConfig | None = None, *, name: str) -> AgentState:
-        payload = {
-            "agent": name,
-            "query": state.get("rewritten_query", ""),
-            "intent_slots": state.get("intent_slots", {}),
-            "user_vector_context": state.get("user_vector_context", {}),
-            "plan": state.get("multiagent_plan", {}),
-            "communication_contract": {
-                "format": "json",
-                "required_fields": ["agent", "findings", "evidence", "recommendations"],
-            },
-        }
-        response = await llm.ainvoke(
-            [
-                SystemMessage(
-                    content=(
-                        "You are an APM child agent. Return only a JSON object with "
-                        "agent (string), findings (string[]), evidence (string[]), "
-                        "recommendations (string[]), and confidence (float 0.0–1.0)."
-                    )
-                ),
-                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-            ],
-            config=config,
+        # 构造结构化输入
+        task_input = SubAgentInput(
+            task_id=f"{name}-{_tid(config)}",
+            agent=name,
+            query=state.get("rewritten_query", ""),
+            intent_slots=state.get("intent_slots", {}),
+            user_vector_context=state.get("user_vector_context", {}),
+            plan_hint=state.get("multiagent_plan", {}),
         )
-        report = _coerce_report(name, getattr(response, "content", response))
-        await _record_multiagent_log(memory, config, f"{name}_agent", input=payload, output=report)
-        return {"apm_reports": [report]}
+
+        # 尝试 structured output，失败时回退到旧路径（兼容测试 FakeLLM）
+        try:
+            structured_llm = child_llm.with_structured_output(SubAgentReport)
+            report: SubAgentReport = await structured_llm.ainvoke(
+                [
+                    SystemMessage(content=_CHILD_AGENT_SYSTEM_PROMPT),
+                    HumanMessage(content=task_input.model_dump_json()),
+                ],
+                config=config,
+            )
+            report_dict = report.model_dump()
+        except (AttributeError, Exception):
+            # Fallback: 旧路径 — 手动 JSON coercion（测试 FakeLLM / 不支持的模型）
+            response = await child_llm.ainvoke(
+                [
+                    SystemMessage(
+                        content=(
+                            "You are an APM child agent. Return only a JSON object with "
+                            "agent (string), findings (string[]), evidence (string[]), "
+                            "recommendations (string[]), and confidence (float 0.0–1.0)."
+                        )
+                    ),
+                    HumanMessage(content=task_input.model_dump_json()),
+                ],
+                config=config,
+            )
+            report_dict = _coerce_report(name, getattr(response, "content", response))
+            # 注入 task_id 以保持兼容
+            report_dict.setdefault("task_id", task_input.task_id)
+            report_dict.setdefault("status", "completed")
+            report_dict.setdefault("tools_used", [])
+            report_dict.setdefault("error", None)
+
+        await _record_multiagent_log(memory, config, f"{name}_agent", input=task_input.model_dump(), output=report_dict)
+        return {
+            "apm_reports": [report_dict],
+            "child_agent_tasks": [{
+                "task_id": task_input.task_id,
+                "agent_name": name,
+                "status": report_dict.get("status", "completed"),
+                "completed_at": _utc_now_iso(),
+                "error": report_dict.get("error"),
+            }],
+        }
 
     def child_node(name: str):
         async def run_child(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
             return await child_agent(state, config, name=name)
 
         return run_child
+
+    async def gate_node(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
+        """栅栏节点：确认所有 dispatched 子 agent 已完成。
+
+        LangGraph Send API 的 fan-out 边提供隐式 barrier — 所有 fan-out
+        节点完成后才进入下游。本节点记录完成状态日志，不做实际等待。
+        """
+        tasks = state.get("child_agent_tasks", [])
+        reports = state.get("apm_reports", [])
+        plan = state.get("multiagent_plan", {})
+        expected = set(plan.get("subagents", list(APM_SUBAGENTS)))
+        completed = {t.get("agent_name") for t in tasks if t.get("status") in ("completed", "failed")}
+        missing = expected - completed
+
+        await _record_multiagent_log(memory, config, "gate", output={
+            "expected": sorted(expected),
+            "completed": sorted(completed),
+            "missing": sorted(missing),
+            "report_count": len(reports),
+        })
+        return {}
+
+    def _supervisor_router(state: AgentState) -> list[Send]:
+        """条件路由：仅 dispatch supervisor plan 中选中的子 agent。"""
+        plan = state.get("multiagent_plan", {})
+        selected = plan.get("subagents", list(APM_SUBAGENTS))
+        return [
+            Send(
+                f"{name}_agent",
+                {
+                    "child_agent_tasks": [{
+                        "task_id": f"{name}-{_tid_from_state(state)}",
+                        "agent_name": name,
+                        "status": "pending",
+                    }],
+                },
+            )
+            for name in selected
+        ]
 
     async def synthesize(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         payload = {
@@ -193,14 +301,22 @@ def compile_multi_agent(
     graph.add_node("troubleshoot_agent", child_node("troubleshoot"))
     graph.add_node("patrol_agent", child_node("patrol"))
     graph.add_node("audit_agent", child_node("audit"))
+    graph.add_node("gate", gate_node)
     graph.add_node("synthesize", synthesize)
+
     graph.set_entry_point("rewrite_intent")
     graph.add_edge("rewrite_intent", "retrieve_user_vector_context")
     graph.add_edge("retrieve_user_vector_context", "supervisor")
+
+    # 条件路由：supervisor → Send API 仅 dispatch 选中的子 agent
+    graph.add_conditional_edges("supervisor", _supervisor_router)
+
+    # 所有子 agent 完成后 → gate → synthesize
     for agent_name in ("metrics_agent", "troubleshoot_agent", "patrol_agent", "audit_agent"):
-        graph.add_edge("supervisor", agent_name)
-        graph.add_edge(agent_name, "synthesize")
+        graph.add_edge(agent_name, "gate")
+    graph.add_edge("gate", "synthesize")
     graph.add_edge("synthesize", END)
+
     checkpointer = getattr(memory, "checkpointer", None)
     return graph.compile(checkpointer=checkpointer)
 
@@ -412,6 +528,25 @@ def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
         return None
     thread_id = configurable.get("thread_id")
     return thread_id if isinstance(thread_id, str) else None
+
+
+def _tid(config: RunnableConfig | None) -> str:
+    """Extract thread_id from config, returning 'unknown' on failure."""
+    return _thread_id_from_config(config) or "unknown"
+
+
+def _tid_from_state(state: AgentState) -> str:
+    """Extract thread_id from state messages for use when config is unavailable."""
+    for message in reversed(state.get("messages", [])):
+        if hasattr(message, "id") and message.id:
+            return str(message.id)[:8]
+    return "unknown"
+
+
+def _utc_now_iso() -> str:
+    """Return current UTC timestamp as ISO 8601 string."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _looks_like_apm(text: str) -> bool:

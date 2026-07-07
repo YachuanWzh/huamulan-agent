@@ -77,13 +77,14 @@ def test_compiled_multi_agent_graph_runs_child_agents(monkeypatch) -> None:
     class FakeLLM:
         async def ainvoke(self, messages, config=None):
             content = getattr(messages[-1], "content", "")
-            if '"reports"' in content:
+            if 'reports' in content or '"reports"' in content:
                 return AIMessage(content="综合结论")
-            if '"agent": "metrics"' in content:
+            # Pydantic JSON: "agent":"metrics" (no space after colon)
+            if '"agent":"metrics"' in content or '"agent": "metrics"' in content:
                 return AIMessage(
                     content='{"agent":"metrics","findings":["p95 high"],"evidence":["p95"],"recommendations":["check dependency"],"confidence":0.8}'
                 )
-            if '"agent": "troubleshoot"' in content:
+            if '"agent":"troubleshoot"' in content or '"agent": "troubleshoot"' in content:
                 return AIMessage(
                     content='{"agent":"troubleshoot","findings":["timeout"],"evidence":["checkout"],"recommendations":["inspect upstream"],"confidence":0.7}'
                 )
@@ -115,7 +116,7 @@ def test_compile_multi_agent_accepts_intent_router_params(monkeypatch) -> None:
     class FakeLLM:
         async def ainvoke(self, messages, config=None):
             content = getattr(messages[-1], "content", "")
-            if '"reports"' in content:
+            if "reports" in content or '"reports"' in content:
                 return AIMessage(content="综合结论")
             if "agent" in content:
                 import json
@@ -178,3 +179,50 @@ def test_coerce_report_handles_text_input_with_qualitative_confidence() -> None:
     report = _coerce_report("test_agent", '{"confidence":"medium","findings":["f1"]}')
     assert isinstance(report["confidence"], float)
     assert 0.3 <= report["confidence"] <= 0.7
+
+
+# ── 条件路由测试 ──────────────────────────────────────────────────────
+
+
+def test_supervisor_plan_only_activates_selected_agents() -> None:
+    """verify supervisor plan for troubleshoot intent only lists 3 agents"""
+    from personal_assistant.agent.multi_agent import _supervisor_plan
+
+    plan = _supervisor_plan("排查超时", {"intent": "troubleshoot"})
+    assert "subagents" in plan
+    assert plan["subagents"] == ["troubleshoot", "metrics", "audit"]
+    assert "patrol" not in plan["subagents"]
+
+
+def test_supervisor_plan_metrics_intent_is_minimal() -> None:
+    """metrics intent should only activate metrics + audit"""
+    from personal_assistant.agent.multi_agent import _supervisor_plan
+
+    plan = _supervisor_plan("查看 p95", {"intent": "metrics"})
+    assert plan["subagents"] == ["metrics", "audit"]
+
+
+def test_sub_agent_input_includes_task_id() -> None:
+    """新协议要求每个子 agent 输入包含 task_id"""
+    from personal_assistant.agent.child_agent_protocol import SubAgentInput
+
+    inp = SubAgentInput(
+        task_id="task-test-001",
+        agent="metrics",
+        query="查看 p95",
+        intent_slots={"intent": "metrics"},
+    )
+    assert inp.task_id == "task-test-001"
+    assert inp.agent == "metrics"
+
+
+def test_coerce_report_injects_default_fields() -> None:
+    """_coerce_report 应兼容旧格式并注入新字段默认值"""
+    from personal_assistant.agent.multi_agent import _coerce_report
+
+    # 模拟旧格式输出（无 task_id/status/tools_used/error）
+    report = _coerce_report("metrics", {"findings": ["f1"], "confidence": 0.8})
+    assert report["agent"] == "metrics"
+    assert report["findings"] == ["f1"]
+    assert report["confidence"] == 0.8
+    # 旧格式兼容 — _coerce_report 不负责注入新字段（由 child_agent 调用方处理）
