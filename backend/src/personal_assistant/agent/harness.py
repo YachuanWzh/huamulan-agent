@@ -1211,6 +1211,30 @@ def _compaction_input_should_emit(value: Any) -> bool:
     return human_count + max(0, additional_turns) > 20 or token_estimate > 900_000
 
 
+_CHILD_AGENT_NODES = frozenset({
+    "metrics_agent", "troubleshoot_agent", "patrol_agent", "audit_agent",
+})
+_ORCHESTRATOR_NODES = frozenset({
+    "supervisor", "synthesize", "rewrite_intent", "gate",
+})
+
+
+def _agent_role_for_node(name: str) -> str:
+    """Classify a graph node's role for frontend display.
+
+    Returns "child" for sub-agent nodes, "orchestrator" for coordinator
+    nodes, and "system" for all others (including single-agent nodes).
+
+    This is purely additive — single-agent nodes all get "system" which
+    the frontend can safely ignore.
+    """
+    if name in _CHILD_AGENT_NODES:
+        return "child"
+    if name in _ORCHESTRATOR_NODES:
+        return "orchestrator"
+    return "system"
+
+
 def _node_started_payload(event: dict[str, Any]) -> dict[str, Any] | None:
     """Extract payload for graph node start events to show in topology view."""
     name = event.get("name")
@@ -1224,6 +1248,7 @@ def _node_started_payload(event: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "node": name,
         "timestamp": time.time(),
+        "agent_role": _agent_role_for_node(name),
     }
 
 
@@ -1248,6 +1273,7 @@ def _node_finished_payload(event: dict[str, Any]) -> dict[str, Any] | None:
         "node": name,
         "timestamp": time.time(),
         "duration_ms": duration,
+        "agent_role": _agent_role_for_node(name),
     }
 
 
