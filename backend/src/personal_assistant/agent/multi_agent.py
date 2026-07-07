@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
-from personal_assistant.agent.child_agent_protocol import SubAgentInput, SubAgentReport
+from personal_assistant.agent.child_agent_protocol import SubAgentInput
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import OllamaBgeM3EmbeddingProvider
 from personal_assistant.agent.state import AgentState
@@ -21,24 +21,24 @@ from personal_assistant.skills import SkillRegistry
 APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
 
 _CHILD_AGENT_SYSTEM_PROMPT = """\
-You are an APM child agent. Your role is strictly analytical — report findings, \
-evidence, and recommendations.
+你是一个 APM 子分析 Agent。你的职责是严格分析数据并输出结构化 JSON 报告。
 
-## Rules
-- Return ONLY the structured JSON output. No markdown, no explanations.
-- If you cannot determine something, set confidence low (0.0-0.3) and explain in error.
-- Cite specific evidence (metric values, trace IDs, log lines) — never fabricate data.
-- Use tools_used to list every tool you called.
-- Status must be "completed" or "failed" — use "failed" ONLY when a tool or data source is unreachable.
+## 规则
+- 只返回结构化 JSON 对象。不要 Markdown、不要解释。
+- findings（发现）、evidence（证据）、recommendations（建议）必须使用中文输出。
+- 无法确定时，confidence 设为较低值 (0.0-0.3) 并在 error 中说明原因。
+- 引用具体证据（指标数值、Trace ID、日志片段）—— 禁止编造数据。
+- tools_used 列出你实际调用的每个工具名称。
+- status 只能是 "completed" 或 "failed"——仅当工具/数据源不可达时用 "failed"。
 
-## Output Schema
+## 输出 Schema
 {
-  "agent": "<your name>",
-  "task_id": "<assigned task ID>",
+  "agent": "<你的 agent 名称>",
+  "task_id": "<分配的任务 ID>",
   "status": "completed|failed",
-  "findings": ["finding 1", "finding 2", ...],
-  "evidence": ["evidence 1", "evidence 2", ...],
-  "recommendations": ["recommendation 1", ...],
+  "findings": ["发现 1（中文）", "发现 2（中文）", ...],
+  "evidence": ["证据 1（中文，含具体数值）", ...],
+  "recommendations": ["建议 1（中文）", ...],
   "confidence": 0.0-1.0,
   "tools_used": ["tool_name_1", ...],
   "error": null
@@ -180,38 +180,20 @@ def compile_multi_agent(
             plan_hint=state.get("multiagent_plan", {}),
         )
 
-        # 尝试 structured output，失败时回退到旧路径（兼容测试 FakeLLM）
-        try:
-            structured_llm = child_llm.with_structured_output(SubAgentReport)
-            report: SubAgentReport = await structured_llm.ainvoke(
-                [
-                    SystemMessage(content=_CHILD_AGENT_SYSTEM_PROMPT),
-                    HumanMessage(content=task_input.model_dump_json()),
-                ],
-                config=config,
-            )
-            report_dict = report.model_dump()
-        except (AttributeError, Exception):
-            # Fallback: 旧路径 — 手动 JSON coercion（测试 FakeLLM / 不支持的模型）
-            response = await child_llm.ainvoke(
-                [
-                    SystemMessage(
-                        content=(
-                            "You are an APM child agent. Return only a JSON object with "
-                            "agent (string), findings (string[]), evidence (string[]), "
-                            "recommendations (string[]), and confidence (float 0.0–1.0)."
-                        )
-                    ),
-                    HumanMessage(content=task_input.model_dump_json()),
-                ],
-                config=config,
-            )
-            report_dict = _coerce_report(name, getattr(response, "content", response))
-            # 注入 task_id 以保持兼容
-            report_dict.setdefault("task_id", task_input.task_id)
-            report_dict.setdefault("status", "completed")
-            report_dict.setdefault("tools_used", [])
-            report_dict.setdefault("error", None)
+        # 常规 ainvoke — token 会正常流式输出到 SSE，前端可实时看到子 agent 工作内容
+        response = await child_llm.ainvoke(
+            [
+                SystemMessage(content=_CHILD_AGENT_SYSTEM_PROMPT),
+                HumanMessage(content=task_input.model_dump_json()),
+            ],
+            config=config,
+        )
+        report_dict = _coerce_report(name, getattr(response, "content", response))
+        # 注入新版协议字段
+        report_dict.setdefault("task_id", task_input.task_id)
+        report_dict.setdefault("status", "completed")
+        report_dict.setdefault("tools_used", [])
+        report_dict.setdefault("error", None)
 
         await _record_multiagent_log(memory, config, f"{name}_agent", input=task_input.model_dump(), output=report_dict)
         return {
@@ -281,8 +263,8 @@ def compile_multi_agent(
             [
                 SystemMessage(
                     content=(
-                        "You are the main APM supervisor. Synthesize child JSON reports "
-                        "into a concise user-facing answer. Preserve concrete evidence."
+                        "你是 APM 主监督 Agent。请将子 Agent 的 JSON 报告综合成简洁的面向用户的回答。"
+                        "保留具体证据和数值，使用中文输出。"
                     )
                 ),
                 HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
