@@ -918,7 +918,7 @@ class PostgresMemory:
                     rca_status, rca_thread_id, rca_pending_approvals,
                     rca_result_text, metadata
                 ) VALUES (
-                    %s, now(), now(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, now(), now(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     updated_at = now(),
@@ -1220,7 +1220,17 @@ def _alert_row_to_dict(row: Any) -> dict:
 
 
 def _jsonable(value: Any) -> Any:
-    return jsonable_encoder(value)
+    return jsonable_encoder(value, custom_encoder=_SEND_CUSTOM_ENCODER)
+
+
+# Lazily built custom encoder for LangGraph Send objects
+_SEND_CUSTOM_ENCODER: dict[type, Any] = {}
+try:
+    from langgraph.types import Send as _SendType
+
+    _SEND_CUSTOM_ENCODER[_SendType] = lambda obj: {"node": obj.node, "arg": obj.arg}
+except ImportError:
+    pass
 
 
 def _normalized_score(value: Any) -> float:
