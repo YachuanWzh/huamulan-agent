@@ -31,8 +31,11 @@ CHILD_AGENT_SKILLS: dict[str, list[str]] = {
     "audit": ["audit-sop"],
 }
 
-# 子 agent ReAct 循环最大迭代次数（防止无限循环）
-MAX_CHILD_AGENT_ITERATIONS = 8
+# 子 agent ReAct 循环最大迭代次数（防止无限循环及上下文爆炸）
+MAX_CHILD_AGENT_ITERATIONS = 4
+
+# 子 agent 工具返回值最大字符数（超出截断，防止 context 超限）
+MAX_TOOL_RESULT_CHARS = 2000
 
 _CHILD_AGENT_SYSTEM_PROMPT = """\
 你是一个 APM 子分析 Agent。你的职责是调用工具获取实际数据，然后基于数据输出结构化 JSON 报告。
@@ -266,9 +269,17 @@ def compile_multi_agent(
                         continue
                     try:
                         result = await tool.ainvoke(tool_args, config=config)
+                        content = str(result)
+                        original_len = len(content)
+                        # 截断过长工具返回值防止 context 爆炸
+                        if original_len > MAX_TOOL_RESULT_CHARS:
+                            content = (
+                                content[:MAX_TOOL_RESULT_CHARS]
+                                + f"\n...(已截断，原始长度 {original_len} 字符)"
+                            )
                         messages.append(ToolMessage(
                             tool_call_id=str(tc.get("id") or ""),
-                            content=str(result),
+                            content=content,
                         ))
                     except Exception as exc:
                         messages.append(ToolMessage(
