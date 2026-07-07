@@ -191,6 +191,19 @@ class Settings(BaseSettings):
         default="knowledge",
         alias="KNOWLEDGE_DIR",
     )
+    # ── Knowledge Hybrid Retrieval (vector + BM25 + relevance filter) ───
+    knowledge_hybrid_enabled: bool = Field(
+        default=False,
+        alias="KNOWLEDGE_HYBRID_ENABLED",
+    )
+    knowledge_relevance_filter_enabled: bool = Field(
+        default=True,
+        alias="KNOWLEDGE_RELEVANCE_FILTER_ENABLED",
+    )
+    knowledge_relevance_filter_model: str = Field(
+        default="deepseek-v4-flash",
+        alias="KNOWLEDGE_RELEVANCE_FILTER_MODEL",
+    )
     # ── Multi-agent Hybrid Intent Routing ──────────────────────────────
     multi_agent_intent_regex_threshold: float = Field(
         default=0.80,
