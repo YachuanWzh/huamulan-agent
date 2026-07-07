@@ -506,14 +506,17 @@ class AgentHarness:
                     yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
-                    reasoning = _extract_reasoning_content(chunk)
-                    if reasoning:
-                        yield _sse_event("reasoning", {"content": reasoning})
+                    node = _current_node_from_event(event)
+                    # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
+                    if node not in _CHILD_AGENT_NODES:
+                        reasoning = _extract_reasoning_content(chunk)
+                        if reasoning:
+                            yield _sse_event("reasoning", {"content": reasoning, "node": node})
                     if chunk.content:
-                        yield _sse_event("token", {"content": chunk.content})
+                        yield _sse_event("token", {"content": chunk.content, "node": node, "agent_role": _agent_role_for_node(node)})
                     elif chunk.tool_call_chunks:
                         # 工具调用参数生成阶段，避免静默
-                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks, "node": node, "agent_role": _agent_role_for_node(node)})
 
             # After streaming, inspect final state
             state = await app.aget_state(config)
@@ -595,14 +598,17 @@ class AgentHarness:
                     yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
-                    reasoning = _extract_reasoning_content(chunk)
-                    if reasoning:
-                        yield _sse_event("reasoning", {"content": reasoning})
+                    node = _current_node_from_event(event)
+                    # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
+                    if node not in _CHILD_AGENT_NODES:
+                        reasoning = _extract_reasoning_content(chunk)
+                        if reasoning:
+                            yield _sse_event("reasoning", {"content": reasoning, "node": node})
                     if chunk.content:
-                        yield _sse_event("token", {"content": chunk.content})
+                        yield _sse_event("token", {"content": chunk.content, "node": node, "agent_role": _agent_role_for_node(node)})
                     elif chunk.tool_call_chunks:
                         # 工具调用参数生成阶段，避免静默
-                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks, "node": node, "agent_role": _agent_role_for_node(node)})
 
             state = await app.aget_state(config)
             values = state.values if state.values else {}
@@ -685,14 +691,17 @@ class AgentHarness:
                     yield _sse_event("tool_result", _tool_result_payload(event))
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
-                    reasoning = _extract_reasoning_content(chunk)
-                    if reasoning:
-                        yield _sse_event("reasoning", {"content": reasoning})
+                    node = _current_node_from_event(event)
+                    # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
+                    if node not in _CHILD_AGENT_NODES:
+                        reasoning = _extract_reasoning_content(chunk)
+                        if reasoning:
+                            yield _sse_event("reasoning", {"content": reasoning, "node": node})
                     if chunk.content:
-                        yield _sse_event("token", {"content": chunk.content})
+                        yield _sse_event("token", {"content": chunk.content, "node": node, "agent_role": _agent_role_for_node(node)})
                     elif chunk.tool_call_chunks:
                         # 工具调用参数生成阶段，避免静默
-                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks})
+                        yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks, "node": node, "agent_role": _agent_role_for_node(node)})
 
             state = await app.aget_state(config)
             values = state.values if state.values else {}
@@ -1233,6 +1242,14 @@ def _agent_role_for_node(name: str) -> str:
     if name in _ORCHESTRATOR_NODES:
         return "orchestrator"
     return "system"
+
+
+def _current_node_from_event(event: dict[str, Any]) -> str:
+    """Extract the langgraph node name from an astream_events v2 event metadata."""
+    metadata = event.get("metadata", {})
+    if isinstance(metadata, dict):
+        return str(metadata.get("langgraph_node") or "")
+    return ""
 
 
 def _node_started_payload(event: dict[str, Any]) -> dict[str, Any] | None:
