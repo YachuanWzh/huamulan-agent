@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
@@ -20,25 +20,45 @@ from personal_assistant.skills import SkillRegistry
 
 APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
 
+# ── 子 Agent → Skill 映射 ──────────────────────────────────────────────
+# 每个子 agent 挂载的 skill 列表，skill 提供具体的工具（查询 Jaeger、
+# Prometheus、执行日志等）。未列出的 agent 默认无工具。
+
+CHILD_AGENT_SKILLS: dict[str, list[str]] = {
+    "metrics": ["apm-metrics", "otel-query"],
+    "troubleshoot": ["troubleshoot", "troubleshoot-runbook", "otel-query"],
+    "patrol": [],
+    "audit": ["audit-sop"],
+}
+
+# 子 agent ReAct 循环最大迭代次数（防止无限循环）
+MAX_CHILD_AGENT_ITERATIONS = 8
+
 _CHILD_AGENT_SYSTEM_PROMPT = """\
-你是一个 APM 子分析 Agent。你的职责是严格分析数据并输出结构化 JSON 报告。
+你是一个 APM 子分析 Agent。你的职责是调用工具获取实际数据，然后基于数据输出结构化 JSON 报告。
+
+## 工作流程
+1. 先调用可用的工具获取数据（查询 Trace、Metrics、执行日志等）
+2. 基于工具返回的实际数据进行分析
+3. 最后输出结构化 JSON 报告
 
 ## 规则
+- **先查数据再分析**：不要凭空编造，必须调用工具获取真实数据后再输出报告。
 - 只返回结构化 JSON 对象。不要 Markdown、不要解释。
 - findings（发现）、evidence（证据）、recommendations（建议）必须使用中文输出。
-- 无法确定时，confidence 设为较低值 (0.0-0.3) 并在 error 中说明原因。
+- 无法获取数据时，confidence 设为较低值 (0.0-0.3) 并在 error 中说明具体原因。
 - 引用具体证据（指标数值、Trace ID、日志片段）—— 禁止编造数据。
 - tools_used 列出你实际调用的每个工具名称。
-- status 只能是 "completed" 或 "failed"——仅当工具/数据源不可达时用 "failed"。
+- status 只能是 "completed" 或 "failed"——仅当所有工具都不可达时用 "failed"。
 
 ## 输出 Schema
 {
   "agent": "<你的 agent 名称>",
   "task_id": "<分配的任务 ID>",
   "status": "completed|failed",
-  "findings": ["发现 1（中文）", "发现 2（中文）", ...],
-  "evidence": ["证据 1（中文，含具体数值）", ...],
-  "recommendations": ["建议 1（中文）", ...],
+  "findings": ["发现 1（中文，附具体数值）", "发现 2（中文，附具体数值）", ...],
+  "evidence": ["证据 1（中文，含日志/Trace/指标原文）", ...],
+  "recommendations": ["建议 1（中文，可执行）", ...],
   "confidence": 0.0-1.0,
   "tools_used": ["tool_name_1", ...],
   "error": null
@@ -112,6 +132,26 @@ def compile_multi_agent(
     else:
         child_llm = llm  # 回退到主 LLM（保持向后兼容）
 
+    # ── 为每个子 Agent 预加载 Skill 并构建工具 ─────────────────────────
+    child_agent_tools: dict[str, list] = {}
+    _registry_ok = hasattr(registry, "tool_map_for_skills") and hasattr(registry, "load_skill")
+    for agent_name in APM_SUBAGENTS:
+        skill_names = CHILD_AGENT_SKILLS.get(agent_name, [])
+        tools: list = []
+        if skill_names and _registry_ok:
+            for skill_name in skill_names:
+                try:
+                    if skill_name not in registry._skills:  # type: ignore[union-attr]
+                        continue
+                    registry.load_skill(skill_name)  # type: ignore[union-attr]
+                except Exception:
+                    continue
+            try:
+                tools = list(registry.tool_map_for_skills(skill_names).values())  # type: ignore[union-attr]
+            except Exception:
+                pass
+        child_agent_tools[agent_name] = tools
+
     # Read multi-agent intent routing config (use getattr for test compatibility)
     regex_threshold = float(getattr(settings, "multi_agent_intent_regex_threshold", 0.80) or 0.80)
     semantic_enabled = bool(getattr(settings, "multi_agent_intent_semantic_enabled", True))
@@ -180,19 +220,68 @@ def compile_multi_agent(
             plan_hint=state.get("multiagent_plan", {}),
         )
 
-        # 常规 ainvoke — token 会正常流式输出到 SSE，前端可实时看到子 agent 工作内容
-        response = await child_llm.ainvoke(
-            [
+        tools = child_agent_tools.get(name, [])
+        if not tools:
+            # 无工具：单次调用，token 流式输出到 SSE
+            response = await child_llm.ainvoke(
+                [
+                    SystemMessage(content=_CHILD_AGENT_SYSTEM_PROMPT),
+                    HumanMessage(content=task_input.model_dump_json()),
+                ],
+                config=config,
+            )
+            report_dict = _coerce_report(name, getattr(response, "content", response))
+        else:
+            # 有工具：mini ReAct 循环（最多 MAX_CHILD_AGENT_ITERATIONS 轮）
+            tool_map = {t.name: t for t in tools}
+            messages: list = [
                 SystemMessage(content=_CHILD_AGENT_SYSTEM_PROMPT),
                 HumanMessage(content=task_input.model_dump_json()),
-            ],
-            config=config,
-        )
-        report_dict = _coerce_report(name, getattr(response, "content", response))
+            ]
+            tools_used: list[str] = []
+
+            for _ in range(MAX_CHILD_AGENT_ITERATIONS):
+                response = await child_llm.bind_tools(tools).ainvoke(messages, config=config)
+                messages.append(response)
+
+                tool_calls = getattr(response, "tool_calls", None) or []
+                if not tool_calls:
+                    # LLM 输出了最终 JSON 报告（无进一步 tool call）
+                    break
+
+                # 执行工具调用
+                for tc in tool_calls:
+                    tool_name = str(tc.get("name") or "")
+                    tool_args = tc.get("args", {})
+                    if not isinstance(tool_args, dict):
+                        tool_args = {"input": tool_args}
+                    tools_used.append(tool_name)
+
+                    tool = tool_map.get(tool_name)
+                    if tool is None:
+                        messages.append(ToolMessage(
+                            tool_call_id=str(tc.get("id") or ""),
+                            content=f"Error: unknown tool '{tool_name}'",
+                        ))
+                        continue
+                    try:
+                        result = await tool.ainvoke(tool_args, config=config)
+                        messages.append(ToolMessage(
+                            tool_call_id=str(tc.get("id") or ""),
+                            content=str(result),
+                        ))
+                    except Exception as exc:
+                        messages.append(ToolMessage(
+                            tool_call_id=str(tc.get("id") or ""),
+                            content=f"Error: {exc}",
+                        ))
+
+            report_dict = _coerce_report(name, getattr(response, "content", response))
+            report_dict.setdefault("tools_used", tools_used)
+
         # 注入新版协议字段
         report_dict.setdefault("task_id", task_input.task_id)
         report_dict.setdefault("status", "completed")
-        report_dict.setdefault("tools_used", [])
         report_dict.setdefault("error", None)
 
         await _record_multiagent_log(memory, config, f"{name}_agent", input=task_input.model_dump(), output=report_dict)
