@@ -236,11 +236,11 @@ export function MessageBubble({
               {childReport ? (
                 <>
                   {childReport.error && (
-                    <div className="child-agent-error">❌ {childReport.error}</div>
+                    <div className="child-agent-error">{childReport.error}</div>
                   )}
                   {childReport.findings.length > 0 && (
                     <div className="child-agent-section">
-                      <h4>🔎 发现</h4>
+                      <h4>发现</h4>
                       <ul>
                         {childReport.findings.map((f, i) => <li key={i}>{f}</li>)}
                       </ul>
@@ -248,7 +248,7 @@ export function MessageBubble({
                   )}
                   {childReport.evidence.length > 0 && (
                     <div className="child-agent-section">
-                      <h4>📋 证据</h4>
+                      <h4>证据</h4>
                       <ul>
                         {childReport.evidence.map((e, i) => <li key={i}>{e}</li>)}
                       </ul>
@@ -256,7 +256,7 @@ export function MessageBubble({
                   )}
                   {childReport.recommendations.length > 0 && (
                     <div className="child-agent-section">
-                      <h4>💡 建议</h4>
+                      <h4>建议</h4>
                       <ul>
                         {childReport.recommendations.map((r, i) => <li key={i}>{r}</li>)}
                       </ul>
@@ -264,14 +264,16 @@ export function MessageBubble({
                   )}
                   {childReport.confidence !== null && (
                     <div className="child-agent-confidence">
-                      置信度：{(childReport.confidence * 100).toFixed(0)}%
+                      置信度 {(childReport.confidence * 100).toFixed(0)}%
                     </div>
                   )}
+                  {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
                 </>
+              ) : streaming ? (
+                <div className="child-agent-streaming">{content || '…'}</div>
               ) : (
-                <pre className="child-agent-raw">{content || '(等待输出...)'}</pre>
+                <div className="child-agent-raw">{content || '(无输出)'}</div>
               )}
-              {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
             </div>
           )}
         </div>
