@@ -30,8 +30,8 @@ frontend/dist/
 .memory
 .transcripts
 
-# RAG doc
-knowledge/
+# RAG doc (raw markdown knowledge documents directory)
+backend/knowledge/*.md
 
 # Other
 test.md
