@@ -7,6 +7,8 @@ interface RcaEntry {
   threadId: string
   status: RcaStatus
   pendingApprovals?: ToolCallApproval[]
+  /** Human-readable error message when status is 'failed' */
+  error?: string
 }
 
 interface ToolCallApproval {
@@ -44,6 +46,9 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     }
     const mappedStatus = statusMap[alert.rca_status] || 'idle'
 
+    console.log('[RCA] SSE sync for alert %s: backend_status=%s → mapped=%s thread=%s',
+      alert.id, alert.rca_status, mappedStatus, alert.rca_thread_id || '(none)')
+
     setRcaStates((prev) => ({
       ...prev,
       [alert.id]: {
@@ -71,36 +76,12 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     setLoading(false)
   }, [syncRcaFromBackend])
 
-  // Poll RCA thread statuses
-  useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      setRcaStates((prev) => {
-        const updated = { ...prev }
-        let changed = false
-        const promises: Promise<void>[] = []
-        for (const [alertId, entry] of Object.entries(prev)) {
-          if (entry.status === 'analyzing') {
-            promises.push(
-              api.getExecutionSummary(entry.threadId).then((summary) => {
-                if (summary && summary.total_events > 0) {
-                  // A completed analysis has events logged
-                  updated[alertId] = { ...entry, status: 'completed' }
-                  changed = true
-                }
-              }).catch(() => {
-                // If we can't fetch, mark as failed if it's been more than 5 min
-              })
-            )
-          }
-        }
-        Promise.allSettled(promises).then(() => {
-          if (changed) setRcaStates({ ...updated })
-        })
-        return prev // return unchanged ref if nothing changed
-      })
-    }, 5000)
-    return () => clearInterval(pollInterval)
-  }, [])
+  // Note: RCA status transitions (analyzing → completed/failed) are driven
+  // entirely by SSE broadcasts from the backend.  The previous 5-second poll
+  // using getExecutionSummary was removed because `total_events > 0` fires as
+  // soon as the agent starts (the "turn started" log), causing the
+  // "View Analysis" button to appear while the agent is still running —
+  // leading to an empty chat page (0 messages in the in-progress checkpoint).
 
   // SSE subscription — backend drives RCA for P0; frontend observes status
   useEffect(() => {
@@ -143,6 +124,7 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     if (triggeredRef.current.has(alert.id)) return
     triggeredRef.current.add(alert.id)
 
+    console.log('[RCA] Triggering analysis for alert %s (mode=%s)', alert.id, agentMode)
     setRcaStates((prev) => ({
       ...prev,
       [alert.id]: { threadId: '', status: 'analyzing' },
@@ -151,6 +133,12 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
     try {
       // Call backend analyze endpoint (uses auto-approval like P0 RCA)
       const result = await api.analyzeOtelAlert(alert.id, agentMode)
+
+      console.log('[RCA] Analyze response for alert %s:', alert.id, {
+        thread_id: result.thread_id,
+        status: result.status,
+        has_approvals: (result.approvals?.length ?? 0) > 0,
+      })
 
       const newState: RcaEntry = {
         threadId: result.thread_id,
@@ -167,15 +155,25 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
 
       // Auto-navigate to chat view with the new thread
       if (result.thread_id && onViewAnalysis) {
+        console.log('[RCA] Auto-navigating to thread %s', result.thread_id)
         onViewAnalysis(result.thread_id)
+      } else {
+        console.warn('[RCA] Skip auto-navigation: thread_id=%s onViewAnalysis=%s',
+          result.thread_id, typeof onViewAnalysis)
       }
 
       // Poll for completion via SSE updates (backend broadcasts status changes)
     } catch (err) {
-      console.error('Analyze trigger failed:', err)
+      const errorMessage = err instanceof Error ? err.message : String(err)
+      console.error('[RCA] Analyze trigger failed for alert %s: %s', alert.id, errorMessage)
       setRcaStates((prev) => ({
         ...prev,
-        [alert.id]: { ...prev[alert.id], status: 'failed' },
+        [alert.id]: {
+          threadId: prev[alert.id]?.threadId ?? '',
+          status: 'failed' as const,
+          pendingApprovals: prev[alert.id]?.pendingApprovals,
+          error: errorMessage,
+        },
       }))
     }
   }, [agentMode, onViewAnalysis])
@@ -191,7 +189,11 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
 
     setRcaStates((prev) => ({
       ...prev,
-      [alertId]: { ...prev[alertId], status: 'analyzing' },
+      [alertId]: {
+        threadId: prev[alertId]?.threadId ?? entry.threadId,
+        status: 'analyzing' as const,
+        pendingApprovals: prev[alertId]?.pendingApprovals,
+      },
     }))
 
     try {
@@ -205,13 +207,19 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
       console.error('RCA approval failed:', err)
       setRcaStates((prev) => ({
         ...prev,
-        [alertId]: { ...prev[alertId], status: 'failed' },
+        [alertId]: {
+          threadId: prev[alertId]?.threadId ?? entry.threadId,
+          status: 'failed' as const,
+          pendingApprovals: prev[alertId]?.pendingApprovals,
+        },
       }))
     }
   }, [rcaStates])
 
   /** Open an existing thread in chat view */
   const handleViewAnalysis = useCallback((tid: string) => {
+    console.log('[RCA] View Analysis clicked: thread=%s onViewAnalysis=%s',
+      tid, typeof onViewAnalysis)
     if (onViewAnalysis) {
       onViewAnalysis(tid)
     } else {
@@ -394,7 +402,7 @@ function RcaAction({
   if (rca.status === 'failed') {
     return (
       <span className="alert-failed">
-        ❌ RCA failed &mdash;
+        ❌ RCA failed{rca.error ? `: ${rca.error}` : ''} &mdash;
         <button type="button" className="alert-retry-btn" onClick={onAnalyze}>
           Retry
         </button>

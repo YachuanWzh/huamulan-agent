@@ -97,6 +97,7 @@ function App() {
               setActivePanel('chat')
             }}
             onViewOtelAnalysis={(tid) => {
+              console.log('[App] OTEL analysis navigation: thread=%s → chat panel', tid)
               localStorage.setItem('threadId', tid)
               setThreadId(tid)
               setConversationKey(tid)

@@ -543,7 +543,17 @@ async def approve_batch_stream(request: ApprovalBatchDecision) -> StreamingRespo
 
 @app.get("/api/threads/{thread_id}/replay", response_model=ReplayResponse)
 async def replay(thread_id: str) -> ReplayResponse:
-    return ReplayResponse(thread_id=thread_id, states=await harness.replay(thread_id))
+    states = await harness.replay(thread_id)
+    if thread_id.startswith("rca-"):
+        msg_count = 0
+        if states:
+            last = states[-1]
+            msg_count = len(last.get("messages", []))
+        logger.info(
+            "RCA replay: thread=%s states=%d messages=%d",
+            thread_id, len(states), msg_count,
+        )
+    return ReplayResponse(thread_id=thread_id, states=states)
 
 
 @app.get("/api/threads/{thread_id}/execution-logs", response_model=list[ExecutionLog])
@@ -860,11 +870,21 @@ async def analyze_otel_alert(alert_id: str, request: AnalyzeAlertRequest | None 
     rca_result_text = None
     try:
         prompt = _build_rca_prompt(alert_data)
+        logger.info(
+            "P2/P3 RCA starting: alert=%s thread=%s mode=%s prompt_len=%d",
+            alert_id, thread_id, agent_mode, len(prompt),
+        )
         response = await harness.run_user_turn(
             thread_id,
             prompt,
             agent_mode=agent_mode,
             requires_approval=requires_rca_tool_approval,
+        )
+
+        logger.info(
+            "P2/P3 RCA completed: alert=%s thread=%s status=%s msg_len=%d",
+            alert_id, thread_id, response.status,
+            len(response.message or ""),
         )
 
         if response.status == "requires_approval":
@@ -896,7 +916,7 @@ async def analyze_otel_alert(alert_id: str, request: AnalyzeAlertRequest | None 
         }
 
     except Exception:
-        logger.exception("Analysis failed for alert %s", alert_id)
+        logger.exception("P2/P3 RCA FAILED for alert %s (thread=%s)", alert_id, thread_id)
         _update_alert_rca_status(alert_data, rca_status="failed")
         await _broadcast_otel_alert(alert_data)
         raise HTTPException(status_code=500, detail="Analysis failed")

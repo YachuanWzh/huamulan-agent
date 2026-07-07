@@ -70,16 +70,33 @@ export function useChat(
     let cancelled = false
     const loadHistory = async () => {
       try {
+        console.log('[Chat] Loading history for thread %s', threadId)
         const result = await api.replay(threadId)
         if (cancelled) return
 
-        // Each LangGraph checkpoint contains the full accumulated message
-        // history, so we only take messages from the latest state to avoid
-        // triplicating them across __start__ → agent → __end__ states.
-        const lastState = result.states[result.states.length - 1]
-        if (lastState) {
-          const historyMessages: Message[] = lastState.messages.map((msg, i) => ({
-            id: `history-${lastState.checkpoint_id}-${i}`,
+        console.log('[Chat] Replay returned %d states for thread %s',
+          result.states.length, threadId)
+
+        // LangGraph's checkpointer.alist() returns checkpoints in
+        // REVERSE chronological order (newest first).  Each checkpoint's
+        // `channel_values.messages` contains the ACCUMULATED message
+        // history at that point — not deltas.  So the newest checkpoint
+        // with messages IS the complete conversation.
+        //
+        // We search forward (newest → oldest) and take the FIRST state
+        // that has messages.  This avoids duplicates from flatMapping
+        // across multiple accumulated snapshots.
+        let bestState = null
+        for (const state of result.states) {
+          if (state.messages?.length > 0) {
+            bestState = state
+            break
+          }
+        }
+
+        if (bestState) {
+          const historyMessages: Message[] = bestState.messages.map((msg, i) => ({
+            id: `history-${bestState.checkpoint_id}-${i}`,
             role: msg.role,
             content: msg.content,
             reasoning: msg.reasoning,
@@ -88,20 +105,57 @@ export function useChat(
             compactingStreaming: false,
           }))
 
-          if (historyMessages.length > 0) {
-            setMessages(historyMessages)
-            idRef.current = historyMessages.length
-          }
+          console.log('[Chat] Loaded %d messages from newest state with messages (checkpoint=%s, %d states total)',
+            historyMessages.length, bestState.checkpoint_id, result.states.length)
+
+          setMessages(historyMessages)
+          idRef.current = historyMessages.length
+        } else if (threadId.startsWith('rca-')) {
+          console.warn('[Chat] RCA thread %s has %d states but ALL have 0 messages', threadId, result.states.length)
+          setMessages([{
+            id: `rca-empty-${threadId}`,
+            role: 'assistant' as const,
+            content: '⚠️ RCA 分析线程已创建但未产生任何消息结果。可能原因：\n' +
+              '- 后端 agent 运行失败（请检查后端日志中的 `Analysis failed` 错误）\n' +
+              '- LLM API 不可用\n' +
+              '- otel-query skill 未正确配置\n\n' +
+              '请回到告警面板点击 **Retry** 重试分析。',
+          }])
         }
 
-        // Restore pending approvals if any
+        if (result.states.length === 0 && threadId.startsWith('rca-')) {
+          console.warn('[Chat] RCA thread %s has 0 states — no checkpoints saved (agent likely failed)', threadId)
+          setMessages([{
+            id: `rca-no-checkpoint-${threadId}`,
+            role: 'assistant' as const,
+            content: '⚠️ RCA 分析线程 `' + threadId + '` 没有找到任何检查点。\n\n' +
+              '这通常意味着后端 agent 运行失败，没有保存任何执行结果。\n' +
+              '请检查：\n' +
+              '1. 后端日志中是否有 `Analysis failed` 错误\n' +
+              '2. LLM API 是否正常运行\n' +
+              '3. otel-query skill 是否已安装并配置正确\n\n' +
+              '请回到告警面板点击 **Retry** 重试分析。',
+          }])
+        }
+
+        // Restore pending approvals from the truly-last state
+        const lastState = result.states[result.states.length - 1]
         if (lastState?.values?.pending_approvals) {
           const approvals = lastState.values.pending_approvals
           setPendingApprovals(approvals.filter((a) => !isMemoryApproval(a)))
           setMemoryApprovals(approvals.filter(isMemoryApproval))
         }
-      } catch {
+      } catch (err) {
         // Thread may not exist yet (fresh thread) — that's fine
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        console.warn('[Chat] Replay failed for thread %s: %s', threadId, errorMessage)
+        if (threadId.startsWith('rca-')) {
+          setMessages([{
+            id: `rca-error-${threadId}`,
+            role: 'assistant' as const,
+            content: `⚠️ 加载 RCA 分析结果失败: ${errorMessage}\n\n请回到告警面板点击 **Retry** 重试分析。`,
+          }])
+        }
       }
     }
 
