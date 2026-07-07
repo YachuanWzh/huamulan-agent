@@ -17,4 +17,5 @@ class AgentState(TypedDict, total=False):
     user_vector_context: dict[str, Any]
     multiagent_plan: dict[str, Any]
     apm_reports: Annotated[list[dict[str, Any]], operator.add]
+    child_agent_tasks: list[dict[str, Any]]  # 子 agent 任务状态列表 (multi-agent only)
     knowledge_context: dict[str, Any]
