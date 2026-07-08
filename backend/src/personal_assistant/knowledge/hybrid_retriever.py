@@ -107,12 +107,22 @@ class HybridRetriever:
         vector_scored = [(d.chunk_id, d.score) for d in vector_docs]
         fused = reciprocal_rank_fusion(vector_scored, bm25_scored)
 
+        bm25_ids = {cid for cid, _ in bm25_scored}
+        vector_ids = {cid for cid, _ in vector_scored}
+        bm25_only_ids = bm25_ids - vector_ids
+        overlap_ids = bm25_ids & vector_ids
+
         # Step 4: Map fused back to SearchResult objects
         doc_map: dict[str, SearchResult] = {d.chunk_id: d for d in vector_docs}
         merged: list[SearchResult] = []
+        bm25_only_merged = 0
+        overlap_merged = 0
         for chunk_id, rrf_score in fused[:self.top_k]:
             if chunk_id in doc_map:
                 doc = doc_map[chunk_id]
+                is_overlap = chunk_id in overlap_ids
+                if is_overlap:
+                    overlap_merged += 1
                 merged.append(SearchResult(
                     chunk_id=doc.chunk_id,
                     doc_id=doc.doc_id,
@@ -124,6 +134,7 @@ class HybridRetriever:
                 ))
             else:
                 # BM25-only result: limited metadata
+                bm25_only_merged += 1
                 merged.append(SearchResult(
                     chunk_id=chunk_id,
                     doc_id=chunk_id.rsplit("#", 1)[0] if "#" in chunk_id else chunk_id,
@@ -133,6 +144,15 @@ class HybridRetriever:
                     source_attribution="",
                     metadata={},
                 ))
+
+        logger.info(
+            "Hybrid retrieval: vector=%d BM25=%d fused=%d | "
+            "BM25-only=%d overlap=%d | top_k_final=(bm25_only=%d overlap=%d vector_only=%d)",
+            len(vector_scored), len(bm25_scored), len(fused),
+            len(bm25_only_ids), len(overlap_ids),
+            bm25_only_merged, overlap_merged,
+            len(merged) - bm25_only_merged - overlap_merged,
+        )
 
         # Step 5: Relevance filter
         if self._filter and merged:
