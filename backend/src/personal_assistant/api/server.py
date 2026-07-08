@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from personal_assistant.agent.agent import (
     build_skill_router_components,
+    warmup_skill_routing,
 )
 from personal_assistant.agent.harness import AgentHarness
 from personal_assistant.agent.harness import scan_prompt_guard, scan_prompt_guard_with_llm, scan_tool_guard
@@ -423,6 +424,9 @@ async def lifespan(_: FastAPI):
 
     await postgres_memory.start()
     registry.start_watching()
+    # Pre-warm Qdrant skill vector index at startup so the first user request
+    # does not block on embedding generation.
+    await warmup_skill_routing(settings, registry)
     # Production agent harness initializes its own routing components internally, no extra warmup needed here.
     # Quick eval skips startup Qdrant sync intentionally; sync happens lazily on first semantic search if needed.
 

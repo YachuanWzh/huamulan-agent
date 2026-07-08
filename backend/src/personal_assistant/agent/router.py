@@ -497,14 +497,33 @@ class QdrantSkillVectorIndex:
         collection: str,
         api_key: str | None = None,
         timeout_seconds: float = 10.0,
+        vector_size: int = 1024,
     ) -> None:
         self.embedding_provider = embedding_provider
         self.url = url.rstrip("/")
         self.collection = collection
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
+        self.vector_size = vector_size
         self._synced_hashes: dict[str, str | None] = {}
         self._remote_hashes_loaded = False
+
+    def ensure_collection(self) -> None:
+        """Create the collection if it does not exist (distance=Cosine)."""
+        try:
+            self._request_json("GET", f"/collections/{self.collection}")
+        except RuntimeError:
+            # Collection doesn't exist — create it
+            self._request_json(
+                "PUT",
+                f"/collections/{self.collection}",
+                {
+                    "vectors": {
+                        "size": self.vector_size,
+                        "distance": "Cosine",
+                    },
+                },
+            )
 
     async def warmup(self, registry: SkillRegistry) -> None:
         await self._sync_skills(registry)
@@ -568,6 +587,7 @@ class QdrantSkillVectorIndex:
         return candidates
 
     async def _sync_skills(self, registry: SkillRegistry) -> None:
+        await asyncio.to_thread(self.ensure_collection)
         logger.info(
             "Qdrant skill vector sync started: collection=%s skills=%s",
             self.collection,
@@ -664,8 +684,8 @@ class QdrantSkillVectorIndex:
             },
         )
 
-    def _request_json(self, method: str, path: str, payload: dict) -> dict:
-        body = json.dumps(payload).encode("utf-8")
+    def _request_json(self, method: str, path: str, payload: dict | None = None) -> dict:
+        body = json.dumps(payload).encode("utf-8") if payload else None
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["api-key"] = self.api_key

@@ -381,6 +381,9 @@ class FakeQdrantSkillVectorIndex(QdrantSkillVectorIndex):
         self.search_results = search_results or []
         self.upserted_points: list[dict] = []
 
+    def ensure_collection(self) -> None:
+        pass  # No-op for tests — no real HTTP calls
+
     def _scroll_sync(self) -> dict:
         return {"result": {"points": self.existing_points}}
 
