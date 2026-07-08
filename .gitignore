@@ -25,6 +25,7 @@ frontend/dist/
 
 # Local implementation worktrees
 .worktrees/
+.claude/worktrees/
 
 # Local Memory
 .memory
