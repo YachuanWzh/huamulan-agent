@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from personal_assistant.consumers.alert_consumer import _parse_alert_message
+from personal_assistant.consumers.alert_consumer import (
+    AlertKafkaConsumer,
+    _parse_alert_message,
+)
 
 
 SAMPLE_P2_MESSAGE = json.dumps({
@@ -100,3 +103,34 @@ def test_parse_alert_message_unknown_severity_defaults_to_p3():
     result = _parse_alert_message(msg)
     assert result is not None
     assert result["level"] == "P3"
+
+
+# ── AlertKafkaConsumer __init__ tests ─────────────────────────────────
+
+
+class TestAlertKafkaConsumerInit:
+    """Test AlertKafkaConsumer initialization and config wiring."""
+
+    def test_defaults_from_settings(self):
+        """Consumer picks up defaults from config when no args given."""
+        consumer = AlertKafkaConsumer()
+        assert consumer.topic == "otel-alerts"
+        assert consumer.p2_interval == 300
+        assert consumer.p3_interval == 1800
+        assert consumer.max_messages == 100
+        assert consumer.brokers != ""  # from OTEL_KAFKA_BROKERS
+
+    def test_explicit_args_override_settings(self):
+        """Explicit constructor args take precedence."""
+        consumer = AlertKafkaConsumer(
+            brokers="kafka:9092",
+            topic="custom-alerts",
+            p2_interval=60,
+            p3_interval=120,
+            max_messages=50,
+            consumer_group="test-group",
+        )
+        assert consumer.topic == "custom-alerts"
+        assert consumer.p2_interval == 60
+        assert consumer.p3_interval == 120
+        assert consumer.max_messages == 50

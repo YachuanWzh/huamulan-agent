@@ -91,3 +91,67 @@ def _parse_alert_message(raw: str | bytes) -> dict[str, Any] | None:
         "metadata": {},
     }
     return alert_data
+
+
+# ── AlertKafkaConsumer ────────────────────────────────────────────────
+
+
+class AlertKafkaConsumer:
+    """Cron-driven Kafka consumer for P2/P3 OTEL alerts.
+
+    Two background ``asyncio.Task`` loops poll a shared Kafka topic at
+    independently configurable intervals:
+
+    - **P2 loop**: polls every ``p2_interval`` seconds, processes only
+      messages whose ``level`` is ``"P2"``.
+    - **P3 loop**: polls every ``p3_interval`` seconds, processes only
+      messages whose ``level`` is ``"P3"``.
+
+    Each consumed alert flows through the same pipeline as the webhook
+    handler: in-memory deque append → ``AlertPersistence.save_alert()``
+    → SSE broadcast callback.
+
+    Usage::
+
+        consumer = AlertKafkaConsumer(
+            on_alert=my_persist_and_broadcast_coro,
+        )
+        await consumer.start()
+        # ... server runs ...
+        await consumer.stop()
+    """
+
+    def __init__(
+        self,
+        *,
+        on_alert: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        brokers: str | None = None,
+        topic: str | None = None,
+        p2_interval: int | None = None,
+        p3_interval: int | None = None,
+        max_messages: int | None = None,
+        consumer_group: str | None = None,
+    ):
+        settings = get_settings()
+        self.brokers = brokers or settings.otel_kafka_brokers
+        self.topic = topic or settings.otel_alert_kafka_topic
+        self.p2_interval = (
+            p2_interval if p2_interval is not None
+            else settings.otel_alert_p2_poll_seconds
+        )
+        self.p3_interval = (
+            p3_interval if p3_interval is not None
+            else settings.otel_alert_p3_poll_seconds
+        )
+        self.max_messages = (
+            max_messages if max_messages is not None
+            else settings.otel_alert_kafka_max_messages
+        )
+        self.consumer_group = consumer_group or settings.otel_kafka_consumer_group
+
+        self._on_alert = on_alert
+
+        # Lifecycle state
+        self._running = False
+        self._p2_task: asyncio.Task | None = None
+        self._p3_task: asyncio.Task | None = None
