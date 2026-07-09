@@ -256,3 +256,60 @@ class AlertKafkaConsumer:
                 "Alert consumer: processed %d %s alerts from Kafka topic %s",
                 count, level, self.topic,
             )
+
+    async def _run_loop(self, level: str, interval: int) -> None:
+        """Background loop: poll for *level* alerts every *interval* seconds."""
+        while self._running:
+            try:
+                await self._poll_for_level(level)
+            except Exception:
+                logger.exception(
+                    "Alert consumer: %s poll cycle failed, will retry", level
+                )
+            # Sleep in 1-second chunks so shutdown is responsive
+            for _ in range(max(1, interval)):
+                if not self._running:
+                    break
+                await asyncio.sleep(1)
+
+    async def start(self) -> None:
+        """Start the background poll loops for P2 and P3.
+
+        Safe to call multiple times — subsequent calls are no-ops if
+        already running.
+        """
+        if self._running:
+            return
+        self._running = True
+        self._p2_task = asyncio.create_task(
+            self._run_loop("P2", self.p2_interval)
+        )
+        self._p3_task = asyncio.create_task(
+            self._run_loop("P3", self.p3_interval)
+        )
+        logger.info(
+            "Alert consumer started: topic=%s P2_every=%ds P3_every=%ds",
+            self.topic, self.p2_interval, self.p3_interval,
+        )
+
+    async def stop(self) -> None:
+        """Stop the background poll loops.
+
+        Safe to call multiple times — subsequent calls are no-ops if
+        already stopped.
+        """
+        if not self._running:
+            return
+        self._running = False
+
+        for task in (self._p2_task, self._p3_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        self._p2_task = None
+        self._p3_task = None
+        logger.info("Alert consumer stopped")

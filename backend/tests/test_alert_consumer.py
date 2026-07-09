@@ -1,4 +1,5 @@
 """Tests for alert_consumer.py — P2/P3 Kafka alert consumer."""
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -241,3 +242,66 @@ class TestAlertKafkaConsumerPollCycle:
             await consumer._poll_for_level("P2")
 
         assert len(processed) == 0
+
+
+# ── Lifecycle tests ───────────────────────────────────────────────────
+
+
+class TestAlertKafkaConsumerLifecycle:
+    """Test start/stop lifecycle management."""
+
+    @pytest.mark.asyncio
+    async def test_start_creates_background_tasks(self):
+        """start() creates two asyncio Tasks for P2 and P3 loops."""
+        consumer = AlertKafkaConsumer(brokers="localhost:9092")
+
+        # Mock _poll_for_level so the loop doesn't actually contact Kafka
+        with patch.object(consumer, "_poll_for_level", new_callable=AsyncMock) as mock_poll:
+            await consumer.start()
+
+            assert consumer._running is True
+            assert consumer._p2_task is not None
+            assert consumer._p3_task is not None
+
+            # Give the loop one tick to call the mock at least once
+            await asyncio.sleep(0.05)
+
+            await consumer.stop()
+
+        # Should have been called at least once per level
+        p2_calls = [c for c in mock_poll.call_args_list if c.args == ("P2",)]
+        p3_calls = [c for c in mock_poll.call_args_list if c.args == ("P3",)]
+        assert len(p2_calls) >= 1
+        assert len(p3_calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_stop_cancels_tasks(self):
+        """stop() cancels both background tasks and sets _running=False."""
+        consumer = AlertKafkaConsumer(brokers="localhost:9092")
+
+        with patch.object(consumer, "_poll_for_level", new_callable=AsyncMock):
+            await consumer.start()
+            assert consumer._running is True
+
+            await consumer.stop()
+
+            assert consumer._running is False
+            assert consumer._p2_task is None
+            assert consumer._p3_task is None
+
+    @pytest.mark.asyncio
+    async def test_double_start_is_safe(self):
+        """Calling start() twice does not create duplicate tasks."""
+        consumer = AlertKafkaConsumer(brokers="localhost:9092")
+
+        with patch.object(consumer, "_poll_for_level", new_callable=AsyncMock):
+            await consumer.start()
+            p2_first = consumer._p2_task
+            p3_first = consumer._p3_task
+
+            await consumer.start()  # second call — no-op
+
+            assert consumer._p2_task is p2_first
+            assert consumer._p3_task is p3_first
+
+            await consumer.stop()
