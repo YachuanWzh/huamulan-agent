@@ -125,7 +125,8 @@ class TestRunPatrol:
         ):
             result = run_patrol(window="5m", topic="test", limit=10)
             assert result == {"status": "ok", "alerts_posted": 0, "traces_consumed": 0,
-                              "anomalies_detected": 0, "errors": []}
+                              "messages_consumed": 0, "anomalies_detected": 0,
+                              "metric_alerts_detected": 0, "errors": []}
 
     def test_posts_alerts_for_snapshots_with_anomalies(self):
         from run_patrol import run_patrol
@@ -223,6 +224,86 @@ class TestRunPatrol:
             assert result["alerts_posted"] == 0
             assert result["traces_consumed"] == 1
 
+    def test_posts_metric_alerts_from_otlp_metrics_topic(self):
+        from run_patrol import run_patrol
+
+        metric_alert = {
+            "level": "P2",
+            "service_name": "test-alert-generator",
+            "alert_name": "LatencyTrendRising",
+            "summary": "test-alert-generator P95 latency rising trend detected",
+            "description": "P95 latency histogram indicates rising trend.",
+        }
+
+        mock_alert_consumer = MagicMock()
+        mock_alert_consumer._fetch_alert_messages.return_value = [b"otlp"]
+        mock_trace_consumer = MagicMock()
+        mock_trace_consumer.consume_and_analyze.return_value = []
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"status": "accepted", "alerts": 1}'
+        mock_response.status = 200
+        mock_cm = MagicMock()
+        mock_cm.__enter__.return_value = mock_response
+
+        with patch(
+            "personal_assistant.consumers.alert_consumer.AlertKafkaConsumer",
+            return_value=mock_alert_consumer,
+        ):
+            with patch(
+                "personal_assistant.consumers.alert_consumer._parse_otlp_metrics",
+                return_value=[metric_alert],
+            ):
+                with patch(
+                    "personal_assistant.consumers.kafka_consumer.OtelKafkaConsumer",
+                    return_value=mock_trace_consumer,
+                ):
+                    with patch("urllib.request.urlopen", return_value=mock_cm) as mock_urlopen:
+                        result = run_patrol(window="5m", topic="otlp_metrics", limit=10)
+
+        assert result["status"] == "ok"
+        assert result["alerts_posted"] == 1
+        assert result["metric_alerts_detected"] == 1
+        posted_payload = json.loads(mock_urlopen.call_args.args[0].data.decode("utf-8"))
+        alert = posted_payload["alerts"][0]
+        assert alert["labels"]["severity"] == "info"
+        assert alert["labels"]["alertname"] == "LatencyTrendRising"
+        assert alert["labels"]["service_name"] == "test-alert-generator"
+
+    def test_deduplicates_repeated_metric_alerts_in_one_patrol_run(self):
+        from run_patrol import run_patrol
+
+        metric_alert = {
+            "level": "P2",
+            "service_name": "test-alert-generator",
+            "alert_name": "LatencyTrendRising",
+            "summary": "test-alert-generator P95 latency rising trend detected",
+            "description": "P95 latency histogram indicates rising trend.",
+        }
+
+        mock_alert_consumer = MagicMock()
+        mock_alert_consumer._fetch_alert_messages.return_value = [b"one", b"two"]
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"status": "accepted", "alerts": 1}'
+        mock_response.status = 200
+        mock_cm = MagicMock()
+        mock_cm.__enter__.return_value = mock_response
+
+        with patch(
+            "personal_assistant.consumers.alert_consumer.AlertKafkaConsumer",
+            return_value=mock_alert_consumer,
+        ):
+            with patch(
+                "personal_assistant.consumers.alert_consumer._parse_otlp_metrics",
+                return_value=[metric_alert],
+            ):
+                with patch("urllib.request.urlopen", return_value=mock_cm) as mock_urlopen:
+                    result = run_patrol(window="5m", topic="otlp_metrics", limit=10)
+
+        assert result["messages_consumed"] == 2
+        assert result["metric_alerts_detected"] == 2
+        assert result["alerts_posted"] == 1
+        assert mock_urlopen.call_count == 1
+
 
 class TestPatrolAgentSkills:
     """Verify patrol skill is mounted on patrol_agent in multi_agent.py."""
@@ -246,6 +327,11 @@ class TestPatrolAgentSkills:
     def test_patrol_is_registered_subagent(self):
         from personal_assistant.agent.multi_agent import APM_SUBAGENTS
         assert "patrol" in APM_SUBAGENTS
+
+    def test_patrol_skill_default_limit_covers_metrics_tail(self):
+        skill_md = SKILLS_DIR / "patrol" / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8")
+        assert "default: 500" in text
 
 
 class TestTriggerNonInterference:

@@ -255,6 +255,7 @@ class AgentHarness:
         self.callbacks = list(callbacks or [])
         self.cache = cache
         self.decisions: dict[str, bool] = {}
+        self._compiled_app_cache: dict[tuple[Any, ...], Any] = {}
         self._prompt_guard_llm: Any = prompt_guard_llm  # 注入的LLM安全判定实例，避免重复构建
 
     def _get_prompt_guard_llm(self):
@@ -454,10 +455,18 @@ class AgentHarness:
         requires_approval=None,
     ) -> AsyncGenerator[str, None]:
         """Stream the agent response as SSE events."""
+        request_started = time.perf_counter()
+        first_visible_chunk_sent = False
         try:
+            yield _ttft_phase_event("request_received", request_started)
             # Layer 1: 正则快速拦截
             match = scan_prompt_guard(message)
-            if not match:
+            stream_llm_guard_enabled = getattr(
+                getattr(self, "settings", None),
+                "prompt_guard_llm_stream_enabled",
+                False,
+            )
+            if not match and stream_llm_guard_enabled:
                 # Layer 2: LLM语义安全判定
                 guard_llm = self._get_prompt_guard_llm()
                 if guard_llm is not None:
@@ -466,18 +475,29 @@ class AgentHarness:
                         guard_llm,
                         confidence_threshold=self.settings.prompt_guard_llm_confidence_threshold,
                     )
+            yield _ttft_phase_event("prompt_guard_completed", request_started)
             if match:
                 await self._handle_prompt_guard_block(thread_id, message, match)
                 yield _sse_event("done", {"status": "completed", "message": _PROMPT_GUARD_MESSAGE})
                 yield "data: [DONE]\n\n"
                 return
             app = (
-                self._compile_multi_agent(llm_config, requires_approval=requires_approval)
+                self._compile_cached(
+                    llm_config,
+                    requires_approval=requires_approval,
+                    multi_agent=True,
+                )
                 if agent_mode == "multi"
-                else self._compile_without_memory_reflection(llm_config, requires_approval=requires_approval)
+                else self._compile_cached(
+                    llm_config,
+                    enable_memory_reflection=False,
+                    requires_approval=requires_approval,
+                )
             )
+            yield _ttft_phase_event("graph_compiled", request_started)
             config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
+            yield _ttft_phase_event("llm_stream_started", request_started)
             async for event in app.astream_events(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
@@ -513,9 +533,15 @@ class AgentHarness:
                         if reasoning:
                             yield _sse_event("reasoning", {"content": reasoning, "node": node})
                     if chunk.content:
+                        if not first_visible_chunk_sent:
+                            first_visible_chunk_sent = True
+                            yield _ttft_phase_event("first_visible_token", request_started)
                         yield _sse_event("token", {"content": chunk.content, "node": node, "agent_role": _agent_role_for_node(node)})
-                    elif chunk.tool_call_chunks:
+                    elif getattr(chunk, "tool_call_chunks", None):
                         # 工具调用参数生成阶段，避免静默
+                        if not first_visible_chunk_sent:
+                            first_visible_chunk_sent = True
+                            yield _ttft_phase_event("first_visible_tool_call", request_started)
                         yield _sse_event("tool_call_generating", {"chunks": chunk.tool_call_chunks, "node": node, "agent_role": _agent_role_for_node(node)})
 
             # After streaming, inspect final state
@@ -848,6 +874,60 @@ class AgentHarness:
             **kwargs,
         )
 
+    def _compile_cached(
+        self,
+        llm_config: LLMConfig | None,
+        *,
+        enable_memory_reflection: bool = True,
+        requires_approval=None,
+        multi_agent: bool = False,
+    ):
+        cache = getattr(self, "_compiled_app_cache", None)
+        if cache is None:
+            cache = {}
+            self._compiled_app_cache = cache
+        key = (
+            "multi" if multi_agent else "single",
+            enable_memory_reflection,
+            _llm_config_cache_key(llm_config),
+            id(requires_approval) if requires_approval is not None else None,
+        )
+        if key not in cache:
+            if multi_agent:
+                cache[key] = self._compile_multi_agent(
+                    llm_config,
+                    requires_approval=requires_approval,
+                )
+            else:
+                cache[key] = self._compile_single_compatible(
+                    llm_config,
+                    enable_memory_reflection=enable_memory_reflection,
+                    requires_approval=requires_approval,
+                )
+        return cache[key]
+
+    def _compile_single_compatible(
+        self,
+        llm_config: LLMConfig | None,
+        *,
+        enable_memory_reflection: bool,
+        requires_approval=None,
+    ):
+        signature = inspect.signature(self._compile)
+        parameters = signature.parameters
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        kwargs: dict[str, Any] = {}
+        if accepts_kwargs or "enable_memory_reflection" in parameters:
+            kwargs["enable_memory_reflection"] = enable_memory_reflection
+        if requires_approval is not None and (
+            accepts_kwargs or "requires_approval" in parameters
+        ):
+            kwargs["requires_approval"] = requires_approval
+        return self._compile(llm_config, **kwargs)
+
     def _schedule_memory_reflection(
         self,
         thread_id: str,
@@ -906,7 +986,11 @@ class AgentHarness:
 
     def _compile_without_memory_reflection(self, llm_config: LLMConfig | None, *, requires_approval=None):
         try:
-            return self._compile(llm_config, enable_memory_reflection=False, requires_approval=requires_approval)
+            return self._compile_cached(
+                llm_config,
+                enable_memory_reflection=False,
+                requires_approval=requires_approval,
+            )
         except TypeError as exc:
             if "enable_memory_reflection" not in str(exc):
                 raise
@@ -1564,6 +1648,31 @@ def _extract_last_ai_message(messages: list[Any]) -> str:
 
 def _sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _ttft_phase_event(phase: str, request_started: float) -> str:
+    return _sse_event(
+        "ttft_phase",
+        {
+            "phase": phase,
+            "elapsed_ms": int((time.perf_counter() - request_started) * 1000),
+        },
+    )
+
+
+def _llm_config_cache_key(llm_config: LLMConfig | None) -> tuple[Any, ...]:
+    if llm_config is None:
+        return (None,)
+    if hasattr(llm_config, "model_dump"):
+        data = llm_config.model_dump()
+    elif hasattr(llm_config, "dict"):
+        data = llm_config.dict()
+    else:
+        try:
+            return ("raw", hash(llm_config), repr(llm_config))
+        except TypeError:
+            data = vars(llm_config)
+    return tuple(sorted(data.items()))
 
 
 def _stream_error_message(exc: Exception) -> str:

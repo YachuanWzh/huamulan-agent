@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import socket
 import sys
 import urllib.error
 import urllib.request
@@ -34,6 +35,22 @@ LEVEL_TO_SEVERITY: dict[str, str] = {
     "P2": "info",
     "P3": "none",
 }
+
+
+def should_scan_metric_alerts(topic: str | None) -> bool:
+    """Return True when patrol should scan OTLP metric alert records."""
+    if topic is None or topic == "":
+        return True
+    normalized = topic.lower()
+    return "metric" in normalized or "alert" in normalized
+
+
+def should_scan_trace_snapshots(topic: str | None) -> bool:
+    """Return True when patrol should run trace snapshot anomaly detection."""
+    if topic is None or topic == "":
+        return True
+    normalized = topic.lower()
+    return "metric" not in normalized and "alert" not in normalized
 
 
 def anomaly_to_alert_level(severity: str) -> str:
@@ -146,6 +163,16 @@ def post_alerts(
                 "Alert %d/%d HTTP %d: %s",
                 i + 1, len(payloads), exc.code, error_body,
             )
+        except (TimeoutError, socket.timeout) as exc:
+            results.append({
+                "success": False,
+                "status_code": None,
+                "error": f"timeout: {exc}",
+            })
+            logger.error(
+                "Alert %d/%d timeout posting to %s",
+                i + 1, len(payloads), url,
+            )
         except urllib.error.URLError as exc:
             results.append({
                 "success": False,
@@ -164,7 +191,7 @@ def run_patrol(
     *,
     window: str = "15m",
     topic: str | None = None,
-    limit: int = 50,
+    limit: int = 500,
     server_url: str = "http://localhost:8000",
 ) -> dict[str, Any]:
     """Execute a full patrol cycle: consume Kafka → detect anomalies → post alerts.
@@ -181,18 +208,57 @@ def run_patrol(
     """
     from personal_assistant.consumers.kafka_consumer import OtelKafkaConsumer
 
-    consumer = OtelKafkaConsumer()
-    snapshots = consumer.consume_and_analyze(
-        window=window,
-        topic=topic,
-        limit=limit,
-    )
+    metric_alerts_detected = 0
+    messages_consumed = 0
+    snapshots = []
+    if should_scan_trace_snapshots(topic):
+        consumer = OtelKafkaConsumer()
+        snapshots = consumer.consume_and_analyze(
+            window=window,
+            topic=topic,
+            limit=limit,
+        )
 
     alerts_posted = 0
     anomalies_detected = 0
     errors: list[str] = []
 
     payloads: list[dict[str, Any]] = []
+    posted_metric_keys: set[tuple[str, str, str]] = set()
+    if should_scan_metric_alerts(topic):
+        from personal_assistant.consumers.alert_consumer import (
+            AlertKafkaConsumer,
+            _parse_otlp_metrics,
+        )
+
+        metric_consumer = AlertKafkaConsumer(
+            topic=topic or None,
+            max_messages=limit,
+        )
+        raw_messages = metric_consumer._fetch_alert_messages()
+        messages_consumed += len(raw_messages)
+        for raw in raw_messages:
+            for alert_data in _parse_otlp_metrics(raw):
+                level = alert_data.get("level", "P3")
+                if level not in ("P2", "P3"):
+                    continue
+                metric_alerts_detected += 1
+                service_name = alert_data.get("service_name", "unknown")
+                alert_name = alert_data.get("alert_name", "MetricAlert")
+                dedupe_key = (level, service_name, alert_name)
+                if dedupe_key in posted_metric_keys:
+                    continue
+                posted_metric_keys.add(dedupe_key)
+                payloads.append(
+                    build_alert_payload(
+                        service_name=service_name,
+                        alert_name=alert_name,
+                        summary=alert_data.get("summary", ""),
+                        level=level,
+                        description=alert_data.get("description", ""),
+                    )
+                )
+
     for snapshot in snapshots:
         if not snapshot.anomalies:
             continue
@@ -231,8 +297,10 @@ def run_patrol(
     return {
         "status": "ok" if not errors else "partial",
         "alerts_posted": alerts_posted,
+        "messages_consumed": messages_consumed,
         "traces_consumed": len(snapshots),
         "anomalies_detected": anomalies_detected,
+        "metric_alerts_detected": metric_alerts_detected,
         "errors": errors,
     }
 
@@ -251,8 +319,8 @@ def main() -> int:
         help="Kafka topic override (default: spans topic from config)",
     )
     parser.add_argument(
-        "--limit", type=int, default=50,
-        help="Max Kafka messages to consume (default: 50)",
+        "--limit", type=int, default=500,
+        help="Max Kafka messages to consume (default: 500)",
     )
     parser.add_argument(
         "--server-url", default="http://localhost:8000",

@@ -36,7 +36,7 @@ scripts:
       limit:
         type: integer
         description: "Maximum number of Kafka messages to consume."
-        default: 50
+        default: 500
       server_url:
         type: string
         description: "Base URL of the langgraph-claw server to post alerts to."

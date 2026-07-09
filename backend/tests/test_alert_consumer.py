@@ -114,11 +114,14 @@ class TestAlertKafkaConsumerInit:
 
     def test_defaults_from_settings(self):
         """Consumer picks up defaults from config when no args given."""
+        from personal_assistant.config import get_settings
+
+        settings = get_settings()
         consumer = AlertKafkaConsumer()
-        assert consumer.topic == "otel-alerts"
-        assert consumer.p2_interval == 300
-        assert consumer.p3_interval == 1800
-        assert consumer.max_messages == 100
+        assert consumer.topic == settings.otel_alert_kafka_topic
+        assert consumer.p2_interval == settings.otel_alert_p2_poll_seconds
+        assert consumer.p3_interval == settings.otel_alert_p3_poll_seconds
+        assert consumer.max_messages == settings.otel_alert_kafka_max_messages
         assert consumer.brokers != ""  # from OTEL_KAFKA_BROKERS
 
     def test_explicit_args_override_settings(self):

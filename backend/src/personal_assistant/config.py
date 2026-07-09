@@ -317,7 +317,7 @@ class Settings(BaseSettings):
         alias="OTEL_ALERT_P3_POLL_SECONDS",
     )
     otel_alert_kafka_max_messages: int = Field(
-        default=100,
+        default=500,
         alias="OTEL_ALERT_KAFKA_MAX_MESSAGES",
     )
     evaluation_judge_base_url: str | None = Field(
@@ -331,6 +331,10 @@ class Settings(BaseSettings):
     prompt_guard_llm_enabled: bool = Field(
         default=True,
         alias="PROMPT_GUARD_LLM_ENABLED",
+    )
+    prompt_guard_llm_stream_enabled: bool = Field(
+        default=False,
+        alias="PROMPT_GUARD_LLM_STREAM_ENABLED",
     )
     prompt_guard_llm_model: str = Field(
         default="deepseek-v4-flash",

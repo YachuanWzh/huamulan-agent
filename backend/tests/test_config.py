@@ -99,6 +99,18 @@ def test_cache_defaults_to_enabled_without_redis_url() -> None:
     assert settings.cache_memory_ttl_seconds == 60
 
 
+def test_stream_prompt_guard_llm_defaults_to_disabled_for_ttft() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        settings = Settings(
+            DATABASE_URL="postgresql://localhost/test",
+            LLM_MODEL="test-model",
+            _env_file=None,
+        )
+
+    assert settings.prompt_guard_llm_enabled is True
+    assert settings.prompt_guard_llm_stream_enabled is False
+
+
 def test_checkpoint_storage_defaults() -> None:
     with patch.dict("os.environ", {}, clear=True):
         settings = Settings(

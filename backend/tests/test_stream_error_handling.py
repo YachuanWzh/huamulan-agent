@@ -1,5 +1,6 @@
 import pytest
 from langchain_core.messages import AIMessage
+from unittest.mock import AsyncMock
 
 from personal_assistant.agent.harness import AgentHarness
 
@@ -41,6 +42,10 @@ class FakeChunk:
 
 class FakeState:
     values = {"messages": []}
+
+
+def without_ttft(chunks: list[str]) -> list[str]:
+    return [chunk for chunk in chunks if not chunk.startswith("event: ttft_phase")]
 
 
 class ReasoningStreamApp:
@@ -180,10 +185,11 @@ class CompletedStreamApp:
 
 class BackgroundReflectionHarness(AgentHarness):
     def __init__(self) -> None:
+        self.decisions = {}
         self.callbacks = []
         self.scheduled_values = []
 
-    def _compile(self, _llm_config=None, *, enable_memory_reflection=True):
+    def _compile(self, _llm_config=None, *, enable_memory_reflection=True, requires_approval=None):
         assert enable_memory_reflection is False
         return CompletedStreamApp()
 
@@ -228,6 +234,52 @@ class ApprovalBackgroundReflectionHarness(AgentHarness):
         self.scheduled_values.append((thread_id, values, llm_config, callbacks))
 
 
+class PromptGuardSettings:
+    prompt_guard_llm_confidence_threshold = 0.8
+    prompt_guard_llm_stream_enabled = False
+
+
+class PromptGuardStreamHarness(BackgroundReflectionHarness):
+    def __init__(self, guard_llm) -> None:
+        super().__init__()
+        self.settings = PromptGuardSettings()
+        self._prompt_guard_llm = guard_llm
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_ttft_phase_before_first_token() -> None:
+    harness = BackgroundReflectionHarness()
+
+    chunks = [
+        chunk
+        async for chunk in harness.run_user_turn_stream("thread-1", "hello")
+    ]
+
+    first_token = next(index for index, chunk in enumerate(chunks) if "event: token" in chunk)
+    phases_before_token = [
+        chunk for chunk in chunks[:first_token] if "event: ttft_phase" in chunk
+    ]
+    assert any('"phase": "request_received"' in chunk for chunk in phases_before_token)
+    assert any('"phase": "prompt_guard_completed"' in chunk for chunk in phases_before_token)
+    assert any('"phase": "graph_compiled"' in chunk for chunk in phases_before_token)
+    assert any('"phase": "llm_stream_started"' in chunk for chunk in phases_before_token)
+
+
+@pytest.mark.asyncio
+async def test_stream_skips_llm_prompt_guard_when_stream_guard_disabled() -> None:
+    guard_llm = AsyncMock()
+    guard_llm.ainvoke = AsyncMock()
+    harness = PromptGuardStreamHarness(guard_llm)
+
+    chunks = [
+        chunk
+        async for chunk in harness.run_user_turn_stream("thread-1", "hello")
+    ]
+
+    assert guard_llm.ainvoke.await_count == 0
+    assert any("event: token" in chunk for chunk in chunks)
+
+
 @pytest.mark.asyncio
 async def test_streaming_llm_errors_are_sent_as_sse_error_events() -> None:
     chunks = [
@@ -235,7 +287,7 @@ async def test_streaming_llm_errors_are_sent_as_sse_error_events() -> None:
         async for chunk in FailingHarness().run_user_turn_stream("thread-1", "hello")
     ]
 
-    assert chunks == [
+    assert without_ttft(chunks) == [
         'event: error\ndata: {"message": "llm connection failed"}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -248,7 +300,7 @@ async def test_streaming_compile_errors_are_sent_as_sse_error_events() -> None:
         async for chunk in FailingCompileHarness().run_user_turn_stream("thread-1", "hello")
     ]
 
-    assert chunks == [
+    assert without_ttft(chunks) == [
         'event: error\ndata: {"message": "Missing credentials"}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -283,9 +335,9 @@ async def test_streaming_reasoning_chunks_are_sent_as_sse_events() -> None:
         ).run_user_turn_stream("thread-1", "hello")
     ]
 
-    assert chunks == [
-        'event: reasoning\ndata: {"content": "think"}\n\n',
-        'event: token\ndata: {"content": "answer"}\n\n',
+    assert without_ttft(chunks) == [
+        'event: reasoning\ndata: {"content": "think", "node": ""}\n\n',
+        'event: token\ndata: {"content": "answer", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": ""}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -300,8 +352,8 @@ async def test_streaming_chunks_without_reasoning_do_not_emit_reasoning_events()
         ).run_user_turn_stream("thread-1", "hello")
     ]
 
-    assert chunks == [
-        'event: token\ndata: {"content": "answer"}\n\n',
+    assert without_ttft(chunks) == [
+        'event: token\ndata: {"content": "answer", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": ""}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -319,7 +371,7 @@ async def test_tool_results_are_sent_as_sse_events() -> None:
     ]
 
     assert chunks == [
-        'event: tool_result\ndata: {"name": "resolve_current_time", "content": "2026-06-29 19:30"}\n\n',
+        'event: tool_result\ndata: {"name": "resolve_current_time", "content": "2026-06-29 19:30", "node": ""}\n\n',
         'event: done\ndata: {"status": "completed", "message": ""}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -332,7 +384,7 @@ async def test_compaction_progress_is_sent_as_sse_events() -> None:
         async for chunk in CompactingHarness().run_user_turn_stream("thread-1", "hello")
     ]
 
-    assert chunks[:2] == [
+    assert without_ttft(chunks)[:2] == [
         'event: compacting\ndata: {"status": "started", "content": "Compacting context"}\n\n',
         'event: compacting\ndata: {"status": "completed", "content": "Context compacted"}\n\n',
     ]
@@ -347,7 +399,7 @@ async def test_pending_tool_approval_requests_are_recorded_to_audit() -> None:
         async for chunk in harness.run_user_turn_stream("thread-1", "what time")
     ]
 
-    assert chunks[0].startswith("event: requires_approval")
+    assert without_ttft(chunks)[0].startswith("event: requires_approval")
     assert len(harness.memory.audit_events) == 1
     event = harness.memory.audit_events[0]
     assert event.thread_id == "thread-1"
@@ -370,9 +422,9 @@ async def test_stream_done_is_sent_before_background_memory_reflection() -> None
         async for chunk in harness.run_user_turn_stream("thread-1", "remember this")
     ]
 
-    assert chunks == [
-        'event: token\ndata: {"content": "Final"}\n\n',
-        'event: token\ndata: {"content": " answer"}\n\n',
+    assert without_ttft(chunks) == [
+        'event: token\ndata: {"content": "Final", "node": "", "agent_role": "system"}\n\n',
+        'event: token\ndata: {"content": " answer", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -399,7 +451,7 @@ async def test_batch_approval_stream_records_all_decisions_and_resumes_once() ->
     assert harness.decisions == {"approval-1": True, "approval-2": False}
     assert harness.app.inputs == [{"approval_turn_count": 2}]
     assert chunks == [
-        'event: token\ndata: {"content": "Done"}\n\n',
+        'event: token\ndata: {"content": "Done", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -419,7 +471,7 @@ async def test_approval_resume_stream_schedules_memory_reflection_in_background(
     ]
 
     assert chunks == [
-        'event: token\ndata: {"content": "Done"}\n\n',
+        'event: token\ndata: {"content": "Done", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
         "data: [DONE]\n\n",
     ]
@@ -441,7 +493,7 @@ async def test_batch_approval_resume_stream_schedules_memory_reflection_in_backg
     ]
 
     assert chunks == [
-        'event: token\ndata: {"content": "Done"}\n\n',
+        'event: token\ndata: {"content": "Done", "node": "", "agent_role": "system"}\n\n',
         'event: done\ndata: {"status": "completed", "message": "Final answer"}\n\n',
         "data: [DONE]\n\n",
     ]

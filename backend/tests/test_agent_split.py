@@ -57,6 +57,50 @@ def test_harness_passes_hook_manager_to_compiled_agent(monkeypatch):
     ]
 
 
+def test_compile_cached_reuses_single_agent_graph(monkeypatch):
+    calls = []
+    sentinel = object()
+
+    def fake_compile_agent(
+        settings,
+        registry,
+        memory,
+        decisions,
+        llm_config=None,
+        enable_memory_reflection=True,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                settings,
+                registry,
+                memory,
+                decisions,
+                llm_config,
+                enable_memory_reflection,
+                kwargs,
+            )
+        )
+        return sentinel
+
+    monkeypatch.setattr(agent_module, "compile_agent", fake_compile_agent)
+    harness = AgentHarness(settings="settings", registry="registry", memory="memory")
+
+    assert harness._compile_cached("llm-config", enable_memory_reflection=False) is sentinel
+    assert harness._compile_cached("llm-config", enable_memory_reflection=False) is sentinel
+    assert calls == [
+        (
+            "settings",
+            "registry",
+            "memory",
+            harness.decisions,
+            "llm-config",
+            False,
+            {},
+        )
+    ]
+
+
 def test_resume_after_approval_injects_approval_turn_count(monkeypatch):
     class FakeApp:
         async def ainvoke(self, state, config=None):
