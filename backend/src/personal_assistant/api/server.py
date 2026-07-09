@@ -186,6 +186,7 @@ frontend_rum_events: list[FrontendRumEvent] = []
 _otel_alerts: deque[dict] = deque(maxlen=200)
 _otel_alert_subscribers: list[asyncio.Queue] = []
 _active_rca_tasks: set[asyncio.Task] = set()  # Track background RCA tasks to prevent GC warnings
+_alert_kafka_consumer = None  # type: ignore[var-annotated]
 
 
 async def _broadcast_otel_alert(alert_data: dict) -> None:
@@ -418,9 +419,21 @@ def _build_feishu_message_handler(
 _feishu_stream_client: "FeishuStreamClient | None" = None
 
 
+async def _process_alert_from_kafka(alert_data: dict) -> None:
+    """Process a P2/P3 alert from the Kafka consumer.
+
+    Mirrors the webhook handler's pipeline: in-memory deque → persistence
+    → SSE broadcast.  Does NOT trigger auto-RCA (P2/P3 are manual analyze)
+    and does NOT push to Feishu (P0/P1 only).
+    """
+    _otel_alerts.appendleft(alert_data)
+    await _alert_persistence.save_alert(alert_data)
+    await _broadcast_otel_alert(alert_data)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global _feishu_stream_client
+    global _feishu_stream_client, _alert_kafka_consumer
 
     await postgres_memory.start()
     registry.start_watching()
@@ -440,9 +453,24 @@ async def lifespan(_: FastAPI):
         _feishu_stream_client.start_background()
         logger.info("Feishu Stream client started (bidirectional mode)")
 
+    # ── Start P2/P3 Kafka alert consumer ──────────────────────────
+    if settings.otel_alert_kafka_enabled:
+        from personal_assistant.consumers.alert_consumer import AlertKafkaConsumer
+
+        _alert_kafka_consumer = AlertKafkaConsumer(
+            on_alert=_process_alert_from_kafka,
+        )
+        await _alert_kafka_consumer.start()
+    else:
+        _alert_kafka_consumer = None
+
     try:
         yield
     finally:
+        # Stop P2/P3 Kafka alert consumer
+        if _alert_kafka_consumer is not None:
+            await _alert_kafka_consumer.stop()
+
         # Stop Feishu Stream client
         if _feishu_stream_client and _feishu_stream_client.running:
             _feishu_stream_client.stop(timeout=5.0)
