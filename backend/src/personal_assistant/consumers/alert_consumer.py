@@ -155,3 +155,104 @@ class AlertKafkaConsumer:
         self._running = False
         self._p2_task: asyncio.Task | None = None
         self._p3_task: asyncio.Task | None = None
+
+    def _fetch_alert_messages(self) -> list[str]:
+        """Fetch recent messages from the alert Kafka topic as strings.
+
+        Returns decoded UTF-8 strings (the alert messages are JSON,
+        not protobuf).  Returns an empty list when Kafka is unreachable
+        or no messages are available.
+        """
+        try:
+            from kafka import KafkaConsumer, TopicPartition
+        except ImportError:
+            logger.error("kafka-python not installed, alert consumer cannot fetch")
+            return []
+
+        try:
+            broker_list = [b.strip() for b in self.brokers.split(",") if b.strip()]
+            consumer = KafkaConsumer(
+                bootstrap_servers=broker_list,
+                group_id=self.consumer_group,
+                auto_offset_reset="latest",
+                enable_auto_commit=True,
+                consumer_timeout_ms=10_000,
+            )
+
+            partitions = consumer.partitions_for_topic(self.topic)
+            if not partitions:
+                logger.debug("Alert consumer: no partitions for topic %s", self.topic)
+                consumer.close()
+                return []
+
+            topic_partitions = [
+                TopicPartition(self.topic, p) for p in sorted(partitions)
+            ]
+            consumer.assign(topic_partitions)
+
+            messages: list[str] = []
+            for tp in topic_partitions:
+                end_offset = consumer.end_offsets([tp]).get(tp, 0)
+                start_offset = max(
+                    0, end_offset - max(1, self.max_messages // len(topic_partitions))
+                )
+                if start_offset < end_offset:
+                    consumer.seek(tp, start_offset)
+
+            deadline = time.monotonic() + 15.0
+            while len(messages) < self.max_messages and time.monotonic() < deadline:
+                polled = consumer.poll(
+                    timeout_ms=2000,
+                    max_records=self.max_messages - len(messages),
+                )
+                if not polled:
+                    break
+                for _tp, records in polled.items():
+                    for record in records:
+                        if record.value:
+                            raw = record.value
+                            if isinstance(raw, bytes):
+                                raw = raw.decode("utf-8", errors="replace")
+                            messages.append(raw)
+
+            consumer.close()
+            return messages
+
+        except Exception:
+            logger.exception(
+                "Alert consumer: Kafka fetch error for topic %s", self.topic
+            )
+            return []
+
+    async def _poll_for_level(self, level: str) -> None:
+        """Execute one poll cycle for a specific alert level.
+
+        Fetches messages from Kafka, parses each one, filters to
+        those matching *level*, and invokes ``on_alert`` for each.
+        """
+        messages = self._fetch_alert_messages()
+        if not messages:
+            return
+
+        count = 0
+        for raw in messages:
+            alert_data = _parse_alert_message(raw)
+            if alert_data is None:
+                continue
+            if alert_data.get("level") != level:
+                continue
+            count += 1
+            if self._on_alert:
+                try:
+                    await self._on_alert(alert_data)
+                except Exception:
+                    logger.exception(
+                        "Alert consumer: on_alert callback failed for %s",
+                        alert_data.get("id"),
+                    )
+
+        if count:
+            logger.info(
+                "Alert consumer: processed %d %s alerts from Kafka topic %s",
+                count, level, self.topic,
+            )
