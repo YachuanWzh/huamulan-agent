@@ -299,6 +299,27 @@ class Settings(BaseSettings):
         default="langgraph-claw",
         alias="OTEL_KAFKA_CONSUMER_GROUP",
     )
+    # ── OTEL Alert Kafka Consumer (P2/P3 cron poll) ──────────────────
+    otel_alert_kafka_enabled: bool = Field(
+        default=False,
+        alias="OTEL_ALERT_KAFKA_ENABLED",
+    )
+    otel_alert_kafka_topic: str = Field(
+        default="otel-alerts",
+        alias="OTEL_ALERT_KAFKA_TOPIC",
+    )
+    otel_alert_p2_poll_seconds: int = Field(
+        default=300,
+        alias="OTEL_ALERT_P2_POLL_SECONDS",
+    )
+    otel_alert_p3_poll_seconds: int = Field(
+        default=1800,
+        alias="OTEL_ALERT_P3_POLL_SECONDS",
+    )
+    otel_alert_kafka_max_messages: int = Field(
+        default=100,
+        alias="OTEL_ALERT_KAFKA_MAX_MESSAGES",
+    )
     evaluation_judge_base_url: str | None = Field(
         default=None,
         alias="EVALUATION_JUDGE_BASE_URL",
