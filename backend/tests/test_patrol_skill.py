@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Tests for the patrol skill — Kafka consumption + alert posting."""
 from __future__ import annotations
 
@@ -245,3 +246,103 @@ class TestPatrolAgentSkills:
     def test_patrol_is_registered_subagent(self):
         from personal_assistant.agent.multi_agent import APM_SUBAGENTS
         assert "patrol" in APM_SUBAGENTS
+
+
+class TestTriggerNonInterference:
+    """Verify patrol skill triggers do NOT match queries that belong to other skills."""
+
+    PATROL_TRIGGERS = {
+        "patrol", "inspection", "巡检", "自动巡检",
+        "定时巡检", "批量巡检", "执行巡检", "拉取预警", "扫描预警",
+    }
+
+    def test_patrol_triggers_dont_match_knowledge_queries(self):
+        """Queries asking about metric definitions should NOT trigger patrol."""
+        knowledge_queries = [
+            "什么是LCP",
+            "怎么定义error rate",
+            "Apdex是什么含义",
+            "error budget怎么解读",
+            "Web Vitals采集方法",
+            "how to collect custom metrics",
+        ]
+        for query in knowledge_queries:
+            lower = query.lower()
+            matched = any(t in lower for t in self.PATROL_TRIGGERS)
+            assert not matched, (
+                f"Knowledge query '{query}' should NOT match patrol triggers, "
+                f"but matched: {[t for t in self.PATROL_TRIGGERS if t in lower]}"
+            )
+
+    def test_patrol_triggers_dont_match_troubleshoot_queries(self):
+        """Queries asking to diagnose incidents should NOT trigger patrol."""
+        troubleshoot_queries = [
+            "排查这个超时问题",
+            "根因分析一下",
+            "RCA这个故障",
+            "帮我定位这个异常",
+            "troubleshoot the frontend error",
+            "APM incident diagnosis",
+        ]
+        for query in troubleshoot_queries:
+            lower = query.lower()
+            matched = any(t in lower for t in self.PATROL_TRIGGERS)
+            assert not matched, (
+                f"Troubleshoot query '{query}' should NOT match patrol triggers, "
+                f"but matched: {[t for t in self.PATROL_TRIGGERS if t in lower]}"
+            )
+
+    def test_patrol_triggers_dont_match_otel_query_queries(self):
+        """Queries asking to query specific traces/metrics should NOT trigger patrol."""
+        otel_queries = [
+            "查一下最近的trace",
+            "查一下jaeger的span",
+            "查一下Prometheus的latency",
+            "查看error rate的metric",
+            "show me spans for frontend service",
+        ]
+        for query in otel_queries:
+            lower = query.lower()
+            matched = any(t in lower for t in self.PATROL_TRIGGERS)
+            assert not matched, (
+                f"OTEL query '{query}' should NOT match patrol triggers, "
+                f"but matched: {[t for t in self.PATROL_TRIGGERS if t in lower]}"
+            )
+
+    def test_patrol_triggers_dont_match_audit_queries(self):
+        """Queries asking to audit execution logs should NOT trigger patrol."""
+        audit_queries = [
+            "审计这个线程",
+            "检查工具调用失败率",
+            "查一下审批事件",
+            "audit the execution logs",
+            "compliance report",
+        ]
+        for query in audit_queries:
+            lower = query.lower()
+            matched = any(t in lower for t in self.PATROL_TRIGGERS)
+            assert not matched, (
+                f"Audit query '{query}' should NOT match patrol triggers, "
+                f"but matched: {[t for t in self.PATROL_TRIGGERS if t in lower]}"
+            )
+
+    def test_patrol_triggers_DO_match_patrol_queries(self):
+        """Actual patrol queries SHOULD match patrol triggers."""
+        patrol_queries = [
+            ("执行巡检", "执行巡检"),           # exact match
+            ("run patrol now", "patrol"),      # English substring
+            ("自动巡检所有服务", "自动巡检"),    # 自动巡检 as prefix
+            ("设置定时巡检规则", "定时巡检"),    # 定时巡检 as substring
+            ("批量巡检任务", "批量巡检"),        # 批量巡检 as prefix
+            ("帮我拉取预警信息", "拉取预警"),    # 拉取预警 as substring
+            ("扫描预警数据", "扫描预警"),        # 扫描预警 as prefix
+            ("patrol inspection", "inspection"), # English substring
+        ]
+        for query, expected_trigger in patrol_queries:
+            lower = query.lower()
+            matched = any(t in lower for t in self.PATROL_TRIGGERS)
+            assert matched, (
+                f"Patrol query '{query}' SHOULD match patrol triggers "
+                f"(expected at least '{expected_trigger}'), "
+                f"but matched none. Triggers: {self.PATROL_TRIGGERS}"
+            )

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Patrol skill script — consume Kafka OTEL telemetry and post P2/P3 alerts.
 
 Triggered by the ``patrol`` skill.  Consumes pending telemetry from Kafka,
