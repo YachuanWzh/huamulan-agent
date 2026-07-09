@@ -221,3 +221,27 @@ class TestRunPatrol:
             result = run_patrol(window="5m", topic="test", limit=10)
             assert result["alerts_posted"] == 0
             assert result["traces_consumed"] == 1
+
+
+class TestPatrolAgentSkills:
+    """Verify patrol skill is mounted on patrol_agent in multi_agent.py."""
+
+    def test_patrol_agent_has_patrol_skill(self):
+        from personal_assistant.agent.multi_agent import CHILD_AGENT_SKILLS
+        assert "patrol" in CHILD_AGENT_SKILLS
+        patrol_skills = CHILD_AGENT_SKILLS["patrol"]
+        assert "patrol" in patrol_skills, (
+            f"Expected 'patrol' skill in patrol agent skills, got: {patrol_skills}"
+        )
+
+    def test_patrol_agent_has_otel_query_skill(self):
+        """Patrol agent should also have otel-query for on-demand data fetching."""
+        from personal_assistant.agent.multi_agent import CHILD_AGENT_SKILLS
+        patrol_skills = CHILD_AGENT_SKILLS["patrol"]
+        assert "otel-query" in patrol_skills, (
+            f"Expected 'otel-query' skill in patrol agent skills, got: {patrol_skills}"
+        )
+
+    def test_patrol_is_registered_subagent(self):
+        from personal_assistant.agent.multi_agent import APM_SUBAGENTS
+        assert "patrol" in APM_SUBAGENTS

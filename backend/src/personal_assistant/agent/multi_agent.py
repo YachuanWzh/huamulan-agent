@@ -31,7 +31,7 @@ APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
 CHILD_AGENT_SKILLS: dict[str, list[str]] = {
     "metrics": ["apm-metrics", "otel-query"],
     "troubleshoot": ["troubleshoot", "troubleshoot-runbook", "otel-query"],
-    "patrol": [],
+    "patrol": ["patrol", "otel-query"],
     "audit": ["audit-sop"],
 }
 
