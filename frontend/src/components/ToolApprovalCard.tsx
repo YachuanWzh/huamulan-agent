@@ -1,4 +1,6 @@
+import { useMemo } from 'react'
 import type { ToolCallApproval } from '../lib/api'
+import { TruncatedText } from './LazyContent'
 
 interface Props {
   approval: ToolCallApproval
@@ -13,10 +15,13 @@ export function ToolApprovalCard({
   onDeny,
   variant = 'inline',
 }: Props) {
-  const argsDisplay =
-    Object.keys(approval.args).length === 0
-      ? '{}'
-      : JSON.stringify(approval.args, null, 2)
+  const argsDisplay = useMemo(
+    () =>
+      Object.keys(approval.args).length === 0
+        ? '{}'
+        : JSON.stringify(approval.args, null, 2),
+    [approval.args],
+  )
 
   return (
     <div
@@ -31,7 +36,9 @@ export function ToolApprovalCard({
       </div>
       <div className="approval-body">
         <div className="tool-name">{approval.name}</div>
-        <pre className="tool-args">{argsDisplay}</pre>
+        <pre className="tool-args">
+          <TruncatedText text={argsDisplay} downloadName={`${approval.name}-args.json`} />
+        </pre>
       </div>
       <div className="approval-actions">
         <button

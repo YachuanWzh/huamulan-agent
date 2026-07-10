@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Message, ToolCallEntry } from '../hooks/useChat'
 import type { KnowledgeContext } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { TruncatedText } from './LazyContent'
 
 interface Props {
   id?: string
@@ -74,6 +75,34 @@ function parseChildReport(content: string): {
 const toolResultPreview = (content: string) => {
   const firstLine = content.trim().split(/\r?\n/, 1)[0] ?? ''
   return firstLine.length > 96 ? `${firstLine.slice(0, 96)}...` : firstLine
+}
+
+/**
+ * Native <details> keeps its children mounted even when collapsed, so a large
+ * tool result would be laid out on first paint. Track the open state and only
+ * mount the (truncated) result body once the user actually expands it.
+ */
+function ChildToolCall({ tc }: { tc: ToolCallEntry }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details
+      className="child-agent-tool-call"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="child-agent-tool-call-summary">
+        <span className="child-agent-tool-call-name">🔧 {tc.name}</span>
+        {tc.streaming && !tc.result && (
+          <span className="child-agent-tool-call-running">执行中...</span>
+        )}
+        {tc.result && <span className="child-agent-tool-call-done">✓</span>}
+      </summary>
+      {open && tc.result && (
+        <pre className="child-agent-tool-call-result">
+          <TruncatedText text={tc.result} downloadName={`${tc.name}-result.txt`} />
+        </pre>
+      )}
+    </details>
+  )
 }
 
 export function MessageBubble({
@@ -177,7 +206,7 @@ export function MessageBubble({
               role="region"
               aria-label="tool_result"
             >
-              {content}
+              <TruncatedText text={content} downloadName="tool_result.txt" />
             </div>
           )}
           {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
@@ -247,24 +276,7 @@ export function MessageBubble({
               {toolCalls && toolCalls.length > 0 && (
                 <div className="child-agent-tool-calls">
                   {toolCalls.map((tc, i) => (
-                    <details
-                      key={i}
-                      className="child-agent-tool-call"
-                      open={tc.streaming && !tc.result}
-                    >
-                      <summary className="child-agent-tool-call-summary">
-                        <span className="child-agent-tool-call-name">🔧 {tc.name}</span>
-                        {tc.streaming && !tc.result && (
-                          <span className="child-agent-tool-call-running">执行中...</span>
-                        )}
-                        {tc.result && (
-                          <span className="child-agent-tool-call-done">✓</span>
-                        )}
-                      </summary>
-                      {tc.result && (
-                        <pre className="child-agent-tool-call-result">{tc.result}</pre>
-                      )}
-                    </details>
+                    <ChildToolCall key={i} tc={tc} />
                   ))}
                 </div>
               )}

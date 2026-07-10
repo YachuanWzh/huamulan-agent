@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   api,
   type ExecutionLog,
@@ -17,6 +17,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { OtelAlertsPanel } from './OtelAlertsPanel'
 import { IncidentPanel } from './IncidentPanel'
 import { GovernancePanel } from './GovernancePanel'
+import { TruncatedText } from './LazyContent'
 
 interface Props {
   panel: 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance'
@@ -54,6 +55,61 @@ const statusLabels: Record<string, string> = {
   retrying: '重试中',
   approved: '已批准',
   denied: '已拒绝',
+}
+
+/**
+ * One checkpoint row. The full state (raw LangGraph channel_values + messages)
+ * can be multiple MB; serializing and mounting it for every checkpoint on first
+ * paint is what freezes the page. Only stringify + mount (truncated) once the
+ * user expands this row, and memoize so unrelated re-renders don't redo it.
+ */
+function CheckpointDetails({
+  index,
+  state,
+  onReplay,
+}: {
+  index: number
+  state: ReplayState
+  onReplay: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const json = useMemo(
+    () => (open ? JSON.stringify(state, null, 2) : ''),
+    [open, state],
+  )
+  return (
+    <details
+      className="workspace-state"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span>
+          检查点 {index + 1}
+          {state.node ? ` / ${state.node}` : ''}
+        </span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault()
+            onReplay()
+          }}
+        >
+          回放检查点 {index + 1}
+        </button>
+      </summary>
+      <div className="workspace-meta">
+        {state.created_at && <span>{state.created_at}</span>}
+        {state.values.selected_skills?.length ? (
+          <span>Skill: {state.values.selected_skills.join(', ')}</span>
+        ) : null}
+      </div>
+      {open && (
+        <pre>
+          <TruncatedText text={json} downloadName={`checkpoint-${index + 1}.json`} />
+        </pre>
+      )}
+    </details>
+  )
 }
 
 export function WorkspacePanel({
@@ -506,30 +562,12 @@ export function WorkspacePanel({
           {replay && replay.states.length > 0 && (
             <div className="workspace-state-list">
               {replay.states.map((state, i) => (
-                <details key={i} className="workspace-state">
-                  <summary>
-                    <span>
-                      检查点 {i + 1}
-                      {state.node ? ` / ${state.node}` : ''}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.preventDefault()
-                        onReplayState?.(state)
-                      }}
-                    >
-                      回放检查点 {i + 1}
-                    </button>
-                  </summary>
-                  <div className="workspace-meta">
-                    {state.created_at && <span>{state.created_at}</span>}
-                    {state.values.selected_skills?.length ? (
-                      <span>Skill: {state.values.selected_skills.join(', ')}</span>
-                    ) : null}
-                  </div>
-                  <pre>{JSON.stringify(state, null, 2)}</pre>
-                </details>
+                <CheckpointDetails
+                  key={i}
+                  index={i}
+                  state={state}
+                  onReplay={() => onReplayState?.(state)}
+                />
               ))}
             </div>
           )}

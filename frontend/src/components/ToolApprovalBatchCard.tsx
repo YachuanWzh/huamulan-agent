@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ApprovalBatchItem, ToolCallApproval } from '../lib/api'
+import { TruncatedText } from './LazyContent'
 
 interface Props {
   approvals: ToolCallApproval[]
@@ -11,6 +12,19 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
     Object.fromEntries(approvals.map((approval) => [approval.approval_id, true])),
   )
   const title = `需要审批 ${approvals.length} 个工具调用`
+  // Serialize args once per approval set — decision toggles must not re-stringify.
+  const argsById = useMemo(
+    () =>
+      Object.fromEntries(
+        approvals.map((approval) => [
+          approval.approval_id,
+          Object.keys(approval.args).length === 0
+            ? '{}'
+            : JSON.stringify(approval.args, null, 2),
+        ]),
+      ),
+    [approvals],
+  )
   const submitDecisions = useMemo(
     () =>
       approvals.map((approval) => ({
@@ -47,10 +61,7 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
       <div className="approval-batch-list">
         {approvals.map((approval) => {
           const approved = decisions[approval.approval_id] ?? true
-          const argsDisplay =
-            Object.keys(approval.args).length === 0
-              ? '{}'
-              : JSON.stringify(approval.args, null, 2)
+          const argsDisplay = argsById[approval.approval_id] ?? '{}'
           return (
             <div className="approval-batch-item" key={approval.approval_id}>
               <div className="approval-batch-item-header">
@@ -59,7 +70,9 @@ export function ToolApprovalBatchCard({ approvals, onSubmit }: Props) {
                   {approved ? '已批准' : '已拒绝'}
                 </span>
               </div>
-              <pre className="tool-args">{argsDisplay}</pre>
+              <pre className="tool-args">
+                <TruncatedText text={argsDisplay} downloadName={`${approval.name}-args.json`} />
+              </pre>
               <div className="approval-actions">
                 <button
                   className="btn-approve"
