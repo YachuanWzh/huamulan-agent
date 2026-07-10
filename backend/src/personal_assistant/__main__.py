@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 
@@ -5,6 +6,11 @@ import uvicorn
 
 
 def main() -> None:
+    # Windows: psycopg (PostgreSQL driver) requires SelectorEventLoop.
+    # Without this the server hangs on first DB query.
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     # Stream cache debug logs to stderr so you can see every hit / miss.
     _setup_cache_logging()
 

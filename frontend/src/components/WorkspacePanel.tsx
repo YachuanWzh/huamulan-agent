@@ -545,10 +545,10 @@ export function WorkspacePanel({
       )}
 
       {panel === 'governance' && (
-        <>
+        <div className="governance-workspace">
           <IncidentPanel />
           <GovernancePanel threadId={threadId} />
-        </>
+        </div>
       )}
 
       {panel === 'audit' && (

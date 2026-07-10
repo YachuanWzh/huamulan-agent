@@ -303,6 +303,17 @@ export function Sidebar({
             <div className="sidebar-panel-note-body">实时 OTEL 告警推送与自动排障</div>
           </div>
         )}
+
+        {tab === 'governance' && (
+          <div className="sidebar-panel-note">
+            <div className="sidebar-panel-note-header">
+              <h3>执行治理</h3>
+            </div>
+            <div className="sidebar-panel-note-body">
+              在主面板查看事故处置、Token 预算和策略版本；保存策略后会立即生效。
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   )

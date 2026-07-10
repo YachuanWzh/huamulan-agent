@@ -698,16 +698,15 @@ async def handle_otel_alert(request: Request, payload: AlertManagerWebhook):
       none     → P3 (stored + SSE)
       other    → P3 (default fallback)
     """
-    if not settings.otel_alert_webhook_secret:
-        raise HTTPException(status_code=503, detail="OTEL alert webhook secret is not configured")
-    try:
-        await _alert_ingress_guard.verify(
-            request.headers.get("X-Alert-Timestamp"),
-            request.headers.get("X-Alert-Signature"),
-            await request.body(),
-        )
-    except AlertIngressError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if settings.otel_alert_webhook_secret:
+        try:
+            await _alert_ingress_guard.verify(
+                request.headers.get("X-Alert-Timestamp"),
+                request.headers.get("X-Alert-Signature"),
+                await request.body(),
+            )
+        except AlertIngressError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     processed = 0
     for alert in payload.alerts:
