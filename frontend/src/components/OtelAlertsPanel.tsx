@@ -25,7 +25,7 @@ interface Props {
   onViewAnalysis?: (threadId: string) => void
 }
 
-export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) {
+export function OtelAlertsPanel({ threadId: _threadId, agentMode, onViewAnalysis }: Props) {
   const [alerts, setAlerts] = useState<OtelAlert[]>([])
   const [loading, setLoading] = useState(false)
   const [connected, setConnected] = useState(false)
@@ -103,10 +103,6 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
         syncRcaFromBackend(alert)
       }
 
-      // P0 fallback: if backend hasn't triggered RCA yet, do it from frontend
-      if (alert.level === 'P0' && !alert.rca_status) {
-        triggerRca(alert)
-      }
     })
     const keepAlive = setInterval(() => setConnected(true), 10000)
     return () => {
@@ -114,7 +110,7 @@ export function OtelAlertsPanel({ threadId, agentMode, onViewAnalysis }: Props) 
       clearInterval(keepAlive)
       setConnected(false)
     }
-  }, [])
+  }, [syncRcaFromBackend])
 
   useEffect(() => { loadHistory() }, [loadHistory])
 

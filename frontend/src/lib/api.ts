@@ -592,10 +592,101 @@ export interface OtelAlert {
   rca_result_text?: string | null
 }
 
+export type IncidentStatus = 'open' | 'investigating' | 'mitigated' | 'closed'
+
+export interface IncidentTimelineEvent {
+  id: string
+  event_type: string
+  message: string
+  created_at: string
+  metadata: Record<string, unknown>
+}
+
+export interface IncidentAction {
+  id: string
+  description: string
+  completed: boolean
+  created_at: string
+  completed_at?: string | null
+}
+
+export interface Incident {
+  id: string
+  alert_id: string
+  severity: string
+  title: string
+  service: string
+  status: IncidentStatus
+  owner?: string | null
+  rca_thread_id?: string | null
+  rca_result?: string | null
+  created_at: string
+  updated_at: string
+  timeline: IncidentTimelineEvent[]
+  actions: IncidentAction[]
+}
+
+export interface GovernancePolicyDocument {
+  max_global_tokens?: number | null
+  max_thread_tokens?: number | null
+  max_global_cost_usd?: number | string | null
+  max_thread_cost_usd?: number | string | null
+  auto_rca_levels?: string[]
+  auto_approved_tools?: string[]
+  model_prices?: Record<string, { input_per_million: number | string; output_per_million: number | string }>
+}
+
+export interface GovernancePolicyVersion {
+  version: number
+  document: GovernancePolicyDocument
+  is_active: boolean
+  created_at: string
+}
+
+export interface BudgetTotals {
+  total_tokens: number
+  estimated_cost_usd: number | string
+}
+
+export interface BudgetSnapshot {
+  policy: GovernancePolicyVersion
+  totals: BudgetTotals
+}
+
 // ── API client ────────────────────────────────────────────────────
 
 export const api = {
   health: () => request<{ status: string }>('/api/health'),
+
+  listIncidents: (status?: IncidentStatus) => {
+    const suffix = status ? `?status=${encodeURIComponent(status)}` : ''
+    return request<Incident[]>(`/api/incidents${suffix}`)
+  },
+
+  updateIncident: (incidentId: string, body: Partial<Pick<Incident, 'status' | 'owner'>>) =>
+    request<Incident>(`/api/incidents/${incidentId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  addIncidentAction: (incidentId: string, description: string) =>
+    request<Incident>(`/api/incidents/${incidentId}/actions`, {
+      method: 'POST', body: JSON.stringify({ description }),
+    }),
+
+  updateIncidentAction: (incidentId: string, actionId: string, completed: boolean) =>
+    request<Incident>(`/api/incidents/${incidentId}/actions/${actionId}`, {
+      method: 'PATCH', body: JSON.stringify({ completed }),
+    }),
+
+  getBudget: (threadId?: string) => {
+    const suffix = threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ''
+    return request<BudgetSnapshot>(`/api/governance/budget${suffix}`)
+  },
+
+  listGovernancePolicies: () => request<GovernancePolicyVersion[]>('/api/governance/policies'),
+
+  createGovernancePolicy: (document: GovernancePolicyDocument) =>
+    request<GovernancePolicyVersion>('/api/governance/policies', {
+      method: 'POST', body: JSON.stringify(document),
+    }),
 
   chat: (body: ChatRequest) =>
     request<ChatResponse>('/api/chat', {

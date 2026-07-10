@@ -3706,3 +3706,20 @@ button {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
+
+/* Governance command center */
+.governance-panel { padding: 26px 30px; background: linear-gradient(145deg, #fffdf7, #f8f1e4); border: 1px solid #d7bd91; border-radius: 14px; }
+.command-header { align-items: flex-start; margin-bottom: 22px; }
+.command-kicker { display: block; margin-bottom: 7px; color: #9a5b35; font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+.command-header h2 { margin: 0; color: #28231d; font-size: 26px; }
+.command-header p { margin-top: 5px; }
+.command-button { border: 1px solid #8d392f; border-radius: 7px; background: #8d392f; color: #fff9ee; padding: 9px 14px; font-weight: 750; cursor: pointer; }
+.command-button.quiet { background: transparent; color: #8d392f; }
+.governance-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #ddc8a4; border: 1px solid #ddc8a4; border-radius: 10px; overflow: hidden; }
+.governance-metrics > div { min-height: 92px; padding: 17px; background: #fffaf0; display: flex; flex-direction: column; gap: 7px; }
+.governance-metrics span, .governance-history > span:first-child { color: #806d57; font-size: 12px; font-weight: 700; }
+.governance-metrics strong { color: #35261f; font-size: 22px; }.governance-metrics em { font-size: 12px; font-style: normal; }
+.governance-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: end; margin: 20px 0; }.governance-form label { display:flex; flex-direction:column; gap:7px; color:#5e4939; font-size:13px; font-weight:700; }.governance-form input { height:38px; border:1px solid #cdb895; border-radius:6px; background:#fffdf7; padding:0 10px; }
+.governance-history { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }.policy-chip { padding:4px 9px; border-radius:99px; background:#eee1ca; color:#745d48; font-size:12px; }.policy-chip.active { background:#315c50; color:#fffaf0; }
+.incident-empty { min-height: 230px; display:flex; flex-direction:column; align-items:center; justify-content:center; border:1px dashed #cdb895; border-radius:10px; color:#765d49; text-align:center; }.incident-empty > span { color:#a96d3a; font-size:32px; }.incident-empty strong { color:#382820; margin-top:8px; }.incident-empty p { margin:7px 0 0; font-size:13px; }
+@media (max-width: 760px) { .governance-metrics, .governance-form { grid-template-columns: 1fr; }.governance-panel { padding:20px; } }

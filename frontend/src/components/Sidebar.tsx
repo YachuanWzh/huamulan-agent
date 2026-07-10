@@ -11,10 +11,10 @@ interface Props {
   onThreadCleared?: () => void
   onThreadSelected?: (threadId: string) => void
   onReplayState?: (state: ReplayState) => void
-  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance') => void
+  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance') => void
 }
 
-type Tab = 'skills' | 'history' | 'checkpoint' | 'audit' | 'performance'
+type Tab = 'skills' | 'history' | 'checkpoint' | 'audit' | 'performance' | 'governance'
 
 export function Sidebar({
   threadId,
@@ -124,7 +124,7 @@ export function Sidebar({
     setClearingHistory(false)
   }
 
-  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance') => {
+  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance') => {
     setTab(nextTab)
     onPanelChange?.(panel)
   }
@@ -171,6 +171,14 @@ export function Sidebar({
           onClick={() => selectTab('performance', 'performance')}
         >
           APM
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'governance'}
+          className={`tab ${tab === 'governance' ? 'active' : ''}`}
+          onClick={() => selectTab('governance', 'governance')}
+        >
+          Governance
         </button>
       </div>
 

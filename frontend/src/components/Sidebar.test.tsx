@@ -45,6 +45,7 @@ describe('Sidebar', () => {
       'aria-selected',
       'true',
     )
+    expect(screen.getByRole('tab', { name: 'Governance' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /tool errors/i })).not.toBeInTheDocument()
   })
 

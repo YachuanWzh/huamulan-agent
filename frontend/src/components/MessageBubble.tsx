@@ -81,7 +81,7 @@ export function MessageBubble({
   role,
   content,
   node,
-  agentRole,
+  agentRole: _agentRole,
   approvalStatus,
   streaming,
   reasoning,

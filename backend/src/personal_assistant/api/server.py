@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from typing import Any, Callable, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -52,6 +53,15 @@ from personal_assistant.api.schemas import (
     ToolError,
 )
 from personal_assistant.cache import build_cache
+from personal_assistant.governance.alert_guard import (
+    AlertIngressError,
+    AlertIngressGuard,
+    InMemoryAlertIngressStore,
+)
+from personal_assistant.governance.budget import BudgetService, InMemoryUsageLedger
+from personal_assistant.governance.incidents import IncidentService, IncidentStatus
+from personal_assistant.governance.models import GovernancePolicy
+from personal_assistant.governance.policy import InMemoryPolicyStore, PolicyService
 from personal_assistant.config import get_settings
 from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
@@ -187,6 +197,15 @@ _otel_alerts: deque[dict] = deque(maxlen=200)
 _otel_alert_subscribers: list[asyncio.Queue] = []
 _active_rca_tasks: set[asyncio.Task] = set()  # Track background RCA tasks to prevent GC warnings
 _alert_kafka_consumer = None  # type: ignore[var-annotated]
+_alert_ingress_guard = AlertIngressGuard(
+    settings.otel_alert_webhook_secret or "",
+    InMemoryAlertIngressStore(),
+    rate_limit_per_minute=settings.otel_alert_webhook_rate_limit_per_minute,
+)
+_policy_service = PolicyService(InMemoryPolicyStore())
+_policy_service.create(GovernancePolicy(auto_rca_levels=settings.governance_default_auto_rca_levels))
+_budget_service = BudgetService(InMemoryUsageLedger(), _policy_service)
+_incident_service = IncidentService()
 
 
 async def _broadcast_otel_alert(alert_data: dict) -> None:
@@ -381,7 +400,7 @@ def _build_feishu_message_handler(
     the agent's text response for reply.
     """
     import asyncio
-    from typing import Any, Callable, Optional
+    from typing import Any, Optional
 
     def handle_message(msg: dict[str, Any]) -> Optional[str]:
         content = msg.get("content", "").strip()
@@ -665,7 +684,7 @@ def _severity_to_level(severity: str) -> str:
 
 
 @app.post("/api/otel/alerts")
-async def handle_otel_alert(payload: AlertManagerWebhook):
+async def handle_otel_alert(request: Request, payload: AlertManagerWebhook):
     """Receive AlertManager webhook for P0-P3 alerts.
 
     All severity levels are accepted, stored in the in-memory alert
@@ -679,6 +698,17 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
       none     → P3 (stored + SSE)
       other    → P3 (default fallback)
     """
+    if not settings.otel_alert_webhook_secret:
+        raise HTTPException(status_code=503, detail="OTEL alert webhook secret is not configured")
+    try:
+        await _alert_ingress_guard.verify(
+            request.headers.get("X-Alert-Timestamp"),
+            request.headers.get("X-Alert-Signature"),
+            await request.body(),
+        )
+    except AlertIngressError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
     processed = 0
     for alert in payload.alerts:
         severity = alert.labels.get("severity", "")
@@ -718,6 +748,10 @@ async def handle_otel_alert(payload: AlertManagerWebhook):
             "rca_result_text": None,
             "metadata": {},
         }
+        incident = _incident_service.create_from_alert(
+            alert_data["id"], level, alert_name, service
+        )
+        alert_data["incident_id"] = incident.id
         _otel_alerts.appendleft(alert_data)
 
         # Persist alert to Redis + PostgreSQL
@@ -749,6 +783,65 @@ async def list_otel_alerts(limit: int = Query(default=50, le=200)) -> list[dict]
     if persisted:
         return persisted
     return list(_otel_alerts)[:limit]
+
+
+@app.get("/api/incidents")
+async def list_incidents(status: IncidentStatus | None = None, limit: int = Query(default=100, le=200)):
+    return _incident_service.list(status=status, limit=limit)
+
+
+@app.get("/api/incidents/{incident_id}")
+async def get_incident(incident_id: str):
+    try:
+        return _incident_service.get(incident_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.patch("/api/incidents/{incident_id}")
+async def update_incident(incident_id: str, payload: dict):
+    try:
+        status = IncidentStatus(payload["status"]) if payload.get("status") else None
+        return _incident_service.update(incident_id, status=status, owner=payload.get("owner"))
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(status_code=404 if isinstance(exc, LookupError) else 422, detail=str(exc)) from exc
+
+
+@app.post("/api/incidents/{incident_id}/actions")
+async def create_incident_action(incident_id: str, payload: dict):
+    try:
+        return _incident_service.add_action(incident_id, payload["description"])
+    except (KeyError, LookupError) as exc:
+        raise HTTPException(status_code=422 if isinstance(exc, KeyError) else 404, detail=str(exc)) from exc
+
+
+@app.patch("/api/incidents/{incident_id}/actions/{action_id}")
+async def update_incident_action(incident_id: str, action_id: str, payload: dict):
+    try:
+        return _incident_service.complete_action(incident_id, action_id, completed=bool(payload.get("completed")))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/governance/budget")
+async def get_budget(thread_id: str | None = None):
+    return {"policy": _policy_service.active(), "totals": _budget_service.totals(thread_id)}
+
+
+@app.get("/api/governance/policies")
+async def list_policies():
+    active = _policy_service.active()
+    return [active]
+
+
+@app.get("/api/governance/policies/active")
+async def get_active_policy():
+    return _policy_service.active()
+
+
+@app.post("/api/governance/policies")
+async def create_policy(payload: GovernancePolicy):
+    return _policy_service.create(payload)
 
 
 @app.get("/api/otel/alerts/stream")

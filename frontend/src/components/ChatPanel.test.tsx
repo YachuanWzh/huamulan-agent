@@ -88,6 +88,7 @@ describe('ChatPanel', () => {
       expect(mockApi.chatStream).toHaveBeenCalledWith({
         thread_id: 'new-thread',
         message: 'Hi',
+        agent_mode: 'single',
       })
     })
   })

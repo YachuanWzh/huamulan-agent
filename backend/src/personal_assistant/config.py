@@ -320,6 +320,15 @@ class Settings(BaseSettings):
         default=500,
         alias="OTEL_ALERT_KAFKA_MAX_MESSAGES",
     )
+    otel_alert_webhook_secret: str | None = Field(
+        default=None,
+        alias="OTEL_ALERT_WEBHOOK_SECRET",
+    )
+    otel_alert_webhook_rate_limit_per_minute: int = Field(
+        default=60,
+        ge=1,
+        alias="OTEL_ALERT_WEBHOOK_RATE_LIMIT_PER_MINUTE",
+    )
     evaluation_judge_base_url: str | None = Field(
         default=None,
         alias="EVALUATION_JUDGE_BASE_URL",
@@ -343,6 +352,10 @@ class Settings(BaseSettings):
     prompt_guard_llm_confidence_threshold: float = Field(
         default=0.8,
         alias="PROMPT_GUARD_LLM_CONFIDENCE_THRESHOLD",
+    )
+    governance_default_auto_rca_levels: list[str] = Field(
+        default=["P0"],
+        alias="GOVERNANCE_DEFAULT_AUTO_RCA_LEVELS",
     )
 
     @field_validator("redis_url")

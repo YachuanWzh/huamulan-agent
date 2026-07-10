@@ -1,5 +1,7 @@
 # huamulan-agent
 
+> Governance update: OTEL alert ingress supports HMAC-SHA256 (`X-Alert-Timestamp` + `X-Alert-Signature`) with a five-minute replay window. The console exposes incidents, recovery actions, current budget totals, and the active automatic-RCA/budget policy through `/api/incidents` and `/api/governance/*`.
+
 > **单/多 Agent 花木兰工作台：以 LangGraph ReAct 循环为骨架，扩展 APM 多 Agent 协作，配套人工审批、审计追踪、热插拔 Skill 与 superharness 工程纪律。**
 
 `huamulan-agent` 是一个面向 Agent 工程化的 LangGraph 工程：默认保持原有单 ReAct Agent 链路，同时新增可切换的 APM 多 Agent 模式，让主 Agent 可以编排 metrics、troubleshoot、patrol、audit 等子 Agent 分工分析。前端对应花木兰的人设与战备意象，后端保持安全 ReAct Agent、工具调用审批、渐进式 Skill 系统、长短期记忆、上下文压缩、RAG 知识库检索与评测闭环。

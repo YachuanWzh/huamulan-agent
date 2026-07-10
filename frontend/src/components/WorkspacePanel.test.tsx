@@ -19,6 +19,7 @@ vi.mock('../lib/api', () => ({
     runSkillEvaluationStream: vi.fn(),
     resetSkillEvaluations: vi.fn(),
     getObservabilitySnapshot: vi.fn(),
+    streamOtelAlerts: vi.fn(() => new AbortController()),
   },
 }))
 
@@ -158,11 +159,7 @@ describe('WorkspacePanel', () => {
 
     render(<WorkspacePanel panel="performance" threadId="t1" />)
 
-    expect(await screen.findByText('Frontend Performance')).toBeInTheDocument()
-    expect(screen.getByText('LCP')).toBeInTheDocument()
-    expect(screen.getByText('4300ms')).toBeInTheDocument()
-    expect(screen.getByText('frontend_resource')).toBeInTheDocument()
-    expect(screen.getByText(/Check asset URL generation/i)).toBeInTheDocument()
+    expect(await screen.findByText('OTEL Alerts')).toBeInTheDocument()
   })
 
   it('uses the main workspace for execution audit lookup', async () => {

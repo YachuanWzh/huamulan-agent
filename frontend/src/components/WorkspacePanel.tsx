@@ -15,9 +15,11 @@ import {
 } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { OtelAlertsPanel } from './OtelAlertsPanel'
+import { IncidentPanel } from './IncidentPanel'
+import { GovernancePanel } from './GovernancePanel'
 
 interface Props {
-  panel: 'skills' | 'checkpoint' | 'audit' | 'performance'
+  panel: 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance'
   threadId: string | null
   onThreadCleared?: () => void
   onReplayState?: (state: ReplayState) => void
@@ -169,7 +171,7 @@ export function WorkspacePanel({
         setSelectedGoldenPath((prev) => {
           if (!datasets.some((d) => d.path === prev)) {
             // Try to preserve old preference: if the first dataset is available, pick it
-            return datasets[0]?.path ?? FALLBACK_GOLDEN_DATASETS[0].path
+            return datasets[0]?.path ?? FALLBACK_GOLDEN_DATASETS[0]?.path ?? ''
           }
           return prev
         })
@@ -540,6 +542,13 @@ export function WorkspacePanel({
           agentMode={agentMode}
           onViewAnalysis={onViewOtelAnalysis}
         />
+      )}
+
+      {panel === 'governance' && (
+        <>
+          <IncidentPanel />
+          <GovernancePanel threadId={threadId} />
+        </>
       )}
 
       {panel === 'audit' && (
@@ -1556,10 +1565,6 @@ function formatEvaluationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   const detailMatch = message.match(/"detail"\s*:\s*"([^"]+)"/)
   return detailMatch?.[1] ?? message
-}
-
-function formatMetricValue(metric: string, value: number) {
-  return metric.toUpperCase() === 'CLS' ? value.toFixed(3) : `${Math.round(value)}ms`
 }
 
 // 指标说明映射

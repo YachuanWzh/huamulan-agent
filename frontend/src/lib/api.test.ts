@@ -705,4 +705,42 @@ describe('api', () => {
       await expect(api.health()).rejects.toThrow()
     })
   })
+
+  describe('governance', () => {
+    it('loads incidents, budget totals, and policy versions', async () => {
+      server.use(
+        http.get(`${BASE}/api/incidents`, () => HttpResponse.json([])),
+        http.get(`${BASE}/api/governance/budget`, ({ request }) => {
+          expect(new URL(request.url).searchParams.get('thread_id')).toBe('thread-1')
+          return HttpResponse.json({ policy: { version: 1, document: {} }, totals: { total_tokens: 12, estimated_cost_usd: '0.01' } })
+        }),
+        http.get(`${BASE}/api/governance/policies`, () => HttpResponse.json([{ version: 1, is_active: true, document: {} }])),
+      )
+
+      await expect(api.listIncidents()).resolves.toEqual([])
+      await expect(api.getBudget('thread-1')).resolves.toMatchObject({ totals: { total_tokens: 12 } })
+      await expect(api.listGovernancePolicies()).resolves.toHaveLength(1)
+    })
+
+    it('updates an incident, creates an action, and saves a policy', async () => {
+      server.use(
+        http.patch(`${BASE}/api/incidents/i-1`, async ({ request }) => {
+          expect(await request.json()).toEqual({ status: 'investigating', owner: 'me' })
+          return HttpResponse.json({ id: 'i-1', status: 'investigating' })
+        }),
+        http.post(`${BASE}/api/incidents/i-1/actions`, async ({ request }) => {
+          expect(await request.json()).toEqual({ description: 'Rollback' })
+          return HttpResponse.json({ id: 'i-1', actions: [] })
+        }),
+        http.post(`${BASE}/api/governance/policies`, async ({ request }) => {
+          expect(await request.json()).toEqual({ max_global_tokens: 100 })
+          return HttpResponse.json({ version: 2, is_active: true, document: { max_global_tokens: 100 } })
+        }),
+      )
+
+      await expect(api.updateIncident('i-1', { status: 'investigating', owner: 'me' })).resolves.toMatchObject({ status: 'investigating' })
+      await expect(api.addIncidentAction('i-1', 'Rollback')).resolves.toMatchObject({ id: 'i-1' })
+      await expect(api.createGovernancePolicy({ max_global_tokens: 100 })).resolves.toMatchObject({ version: 2 })
+    })
+  })
 })

@@ -225,7 +225,7 @@ export function useChat(
           if (existing) return existing
           const id = nextId()
           nodeMessages.set(node, id)
-          const label = _childAgentLabel(node)
+          void _childAgentLabel(node)
           setMessages((prev) => [
             ...prev,
             {
@@ -445,8 +445,9 @@ export function useChat(
                   const calls = [...(m.toolCalls || [])]
                   // Find the last matching tool call without a result
                   for (let i = calls.length - 1; i >= 0; i--) {
-                    if (calls[i].name === event.name && !calls[i].result) {
-                      calls[i] = { ...calls[i], result: event.content, streaming: false }
+                    const call = calls[i]
+                    if (call && call.name === event.name && !call.result) {
+                      calls[i] = { ...call, result: event.content, streaming: false }
                       break
                     }
                   }
