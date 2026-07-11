@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field, ValidationError
