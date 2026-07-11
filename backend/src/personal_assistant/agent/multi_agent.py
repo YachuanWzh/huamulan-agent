@@ -3,6 +3,7 @@ import logging
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
+from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
 from langgraph.types import Send
 
 from personal_assistant.agent.child_agent_protocol import SubAgentInput
@@ -19,7 +21,14 @@ from personal_assistant.agent.router import OllamaBgeM3EmbeddingProvider
 from personal_assistant.agent.state import AgentState
 from personal_assistant.api.schemas import ExecutionLogCreate, LLMConfig
 from personal_assistant.config import Settings
+from personal_assistant.memory.compaction import ContextCompactor
 from personal_assistant.skills import SkillRegistry
+
+# ── 复用单 Agent 的压缩辅助函数 ──────────────────────────────────────
+from personal_assistant.agent.agent import (
+    _build_compaction_summary_messages,
+    _replace_messages_update,
+)
 
 
 APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
@@ -246,6 +255,20 @@ def compile_multi_agent(
     else:
         child_llm = llm  # 回退到主 LLM（保持向后兼容）
 
+    # ── Context compaction (reuses single-agent pattern) ──────────────
+    transcript_dir = getattr(settings, "transcript_dir", None)
+
+    async def summarize_for_compaction(messages):
+        response = await llm.ainvoke(_build_compaction_summary_messages(messages))
+        return str(getattr(response, "content", "") or "")
+
+    compactor = ContextCompactor(
+        transcript_dir=Path(transcript_dir) if transcript_dir else Path(".transcripts"),
+        trigger_message_count=getattr(settings, "context_compaction_message_count", 20),
+        token_threshold=getattr(settings, "context_compaction_token_threshold", 1_000_000),
+        summarize=summarize_for_compaction,
+    )
+
     # ── 为每个子 Agent 预加载 Skill 并构建工具 ─────────────────────────
     child_agent_tools: dict[str, list] = {}
     _registry_ok = hasattr(registry, "tool_map_for_skills") and hasattr(registry, "load_skill")
@@ -281,6 +304,16 @@ def compile_multi_agent(
     semantic_threshold = float(getattr(settings, "multi_agent_intent_semantic_threshold", 0.75) or 0.75)
     llm_enabled = bool(getattr(settings, "multi_agent_intent_llm_enabled", True))
     llm_threshold = float(getattr(settings, "multi_agent_intent_llm_threshold", 0.60) or 0.60)
+
+    async def compact_context(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
+        thread_id = _thread_id_from_config(config)
+        messages = await compactor.acompact(
+            state.get("messages", []),
+            thread_id=thread_id,
+        )
+        if messages == state.get("messages", []):
+            return {}
+        return _replace_messages_update(messages)
 
     async def rewrite_intent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         query = _last_human_text(state)
@@ -540,6 +573,7 @@ def compile_multi_agent(
         return {"messages": [AIMessage(content=content)]}
 
     graph = StateGraph(AgentState)
+    graph.add_node("compact_context", compact_context)
     graph.add_node("rewrite_intent", rewrite_intent)
     graph.add_node("retrieve_user_vector_context", retrieve_user_vector_context)
     graph.add_node("supervisor", supervisor)
@@ -550,7 +584,8 @@ def compile_multi_agent(
     graph.add_node("gate", gate_node)
     graph.add_node("synthesize", synthesize)
 
-    graph.set_entry_point("rewrite_intent")
+    graph.set_entry_point("compact_context")
+    graph.add_edge("compact_context", "rewrite_intent")
     graph.add_edge("rewrite_intent", "retrieve_user_vector_context")
     graph.add_edge("retrieve_user_vector_context", "supervisor")
 

@@ -304,3 +304,148 @@ def test_audit_agent_gets_builtin_memory_tools_when_registry_empty(monkeypatch) 
     assert any(
         name.startswith("query_") for name in tool_names_bound
     ), f"audit agent 工具应包含 query_* 前缀，实际: {tool_names_bound}"
+
+
+# ── 多 Agent 上下文压缩 ─────────────────────────────────────────────────
+
+
+def test_compact_context_triggers_on_twenty_one_user_turns(monkeypatch, tmp_path) -> None:
+    """多 Agent 图中，当用户轮次超过 20 时，入口 compact_context 应触发压缩。
+
+    GIVEN: 21 条 HumanMessage（超过 trigger_message_count=20）
+    WHEN: 多 Agent 图运行
+    THEN: 消息列表被压缩（以 [Compacted] 前缀标记），子 agent 正常执行
+    """
+    summary_called = []
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            content = str(getattr(messages[-1], "content", ""))
+            # Compaction summary call
+            if "Return a Chinese summary" in content:
+                summary_called.append(True)
+                return AIMessage(
+                    content=(
+                        "==当前目标==\n压缩测试\n"
+                        "==重要发现 / 决策==\n多 Agent 压缩集成\n"
+                        "==已读 / 已改的文件==\nmulti_agent.py\n"
+                        "==剩余工作==\n验证\n"
+                        "==用户约束==\n保留 transcript"
+                    )
+                )
+            # Synthesize call — reports are in the payload
+            if "reports" in content or '"reports"' in content:
+                return AIMessage(content="综合结论")
+            # Child agent calls
+            if "metrics" in content:
+                return AIMessage(
+                    content='{"agent":"metrics","findings":["p95 high"],'
+                    '"evidence":["trace-001"],"recommendations":["check"],"confidence":0.8}'
+                )
+            if "troubleshoot" in content:
+                return AIMessage(
+                    content='{"agent":"troubleshoot","findings":["timeout"],'
+                    '"evidence":["log-001"],"recommendations":["fix"],"confidence":0.7}'
+                )
+            return AIMessage(content="{}")
+
+    class Memory:
+        checkpointer = None
+
+        async def record_execution_log(self, log):
+            return None
+
+    monkeypatch.setattr(multi_agent_module, "build_llm", lambda *a, **kw: FakeLLM())
+
+    app = multi_agent_module.compile_multi_agent("settings", "registry", Memory())
+    result = asyncio.run(
+        app.ainvoke(
+            {
+                "messages": [
+                    *[multi_agent_module.HumanMessage(content=f"user turn {i}")
+                      for i in range(21)],
+                ]
+            },
+            config={"configurable": {"thread_id": "thread-1"}},
+        )
+    )
+
+    # 压缩已触发
+    assert len(summary_called) == 1, "应调用一次 LLM 摘要"
+
+    # 消息列表应包含被压缩后的摘要（以 [Compacted] 前缀开头）
+    compacted_msg = next(
+        (
+            m for m in result["messages"]
+            if getattr(m, "content", "").startswith("[Compacted]")
+        ),
+        None,
+    )
+    assert compacted_msg is not None, "压缩后的消息应包含 [Compacted] 标记"
+    assert "==当前目标==" in compacted_msg.content
+    assert "压缩测试" in compacted_msg.content
+
+    # 子 agent 报告和 synthesize 正常
+    assert result["messages"][-1].content == "综合结论"
+    assert {r["agent"] for r in result["apm_reports"]} >= {"metrics", "troubleshoot"}
+
+
+def test_compact_context_does_not_trigger_under_threshold(monkeypatch, tmp_path) -> None:
+    """多 Agent 图中，用户轮次未超过 20 时不触发压缩。
+
+    GIVEN: 5 条 HumanMessage（低于 trigger_message_count=20）
+    WHEN: 多 Agent 图运行
+    THEN: 不调用 LLM 摘要，消息列表保持原样（未被 [Compacted] 替换）
+    """
+    summary_called = []
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages, config=None):
+            content = str(getattr(messages[-1], "content", ""))
+            if "Return a Chinese summary" in content:
+                summary_called.append(True)
+                return AIMessage(content="should not be used")
+            if "reports" in content or '"reports"' in content:
+                return AIMessage(content="综合结论")
+            if "metrics" in content:
+                return AIMessage(
+                    content='{"agent":"metrics","findings":["ok"],'
+                    '"evidence":["e1"],"recommendations":["r1"],"confidence":0.8}'
+                )
+            return AIMessage(content="{}")
+
+    class Memory:
+        checkpointer = None
+
+        async def record_execution_log(self, log):
+            return None
+
+    monkeypatch.setattr(multi_agent_module, "build_llm", lambda *a, **kw: FakeLLM())
+
+    original_messages = [
+        multi_agent_module.HumanMessage(content=f"user turn {i}")
+        for i in range(5)
+    ]
+    app = multi_agent_module.compile_multi_agent("settings", "registry", Memory())
+    result = asyncio.run(
+        app.ainvoke(
+            {"messages": list(original_messages)},
+            config={"configurable": {"thread_id": "thread-1"}},
+        )
+    )
+
+    # 未触发压缩
+    assert len(summary_called) == 0, "低于阈值时不应调用 LLM 摘要"
+
+    # 原始消息未被 [Compacted] 替换
+    compacted = [
+        m for m in result["messages"]
+        if getattr(m, "content", "").startswith("[Compacted]")
+    ]
+    assert len(compacted) == 0, "低于阈值时不应有 [Compacted] 消息"
