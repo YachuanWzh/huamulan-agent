@@ -5,6 +5,7 @@ import {
   type ApprovalBatchItem,
   type KnowledgeContext,
   type ReplayState,
+  type RouteCard,
   type StreamEvent,
   type ToolCallApproval,
 } from '../lib/api'
@@ -32,6 +33,8 @@ export interface Message {
   compactingStreaming?: boolean
   compactingCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
+  rewrittenQuery?: string  // 改写后的查询文本（来自 QueryRewriter）
+  cards?: RouteCard[]  // 路由/改写卡片（query_rewrite / skill_route）
   childCollapsed?: boolean  // child agent card collapse state
   toolCalls?: ToolCallEntry[]  // tool calls inside child agent cards
 }
@@ -382,6 +385,19 @@ export function useChat(
             )
             break
           }
+          case 'card': {
+            // 路由/改写卡片：挂到主 assistant 气泡，早于正文 token 到达
+            const id = ensureAssistantMessage()
+            const card: RouteCard = event
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === id
+                  ? { ...m, cards: [...(m.cards ?? []), card] }
+                  : m,
+              ),
+            )
+            break
+          }
           case 'token': {
             finishReasoning()
             finishCompacting()
@@ -531,6 +547,23 @@ export function useChat(
                   : m,
               ),
             )
+            // Attach rewritten query to the last user message
+            if (event.rewritten_query) {
+              setMessages((prev) => {
+                // Find the last user message (most recent, highest index)
+                let lastUserIdx = -1
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  if (prev[i].role === 'user') { lastUserIdx = i; break }
+                }
+                if (lastUserIdx < 0) return prev
+                // Only attach if rewritten differs from original
+                const userMsg = prev[lastUserIdx]
+                if (event.rewritten_query!.trim() === userMsg.content.trim()) return prev
+                return prev.map((m, i) =>
+                  i === lastUserIdx ? { ...m, rewrittenQuery: event.rewritten_query } : m,
+                )
+              })
+            }
             setPendingApprovals([])
             return
           }

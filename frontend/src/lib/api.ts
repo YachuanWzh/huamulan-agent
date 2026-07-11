@@ -469,7 +469,35 @@ export interface StreamDone {
   status: 'completed'
   message: string
   knowledge_context?: KnowledgeContext
+  rewritten_query?: string
+  intent_slots?: Record<string, unknown>
 }
+
+export interface StreamQueryRewriteCard {
+  type: 'card'
+  card_type: 'query_rewrite'
+  rewritten_query: string
+  original_query: string
+  intent: string
+  secondary_intents: string[]
+  confidence: number | null
+  needs_clarification: boolean
+  missing_slots: string[]
+  sub_queries: string[]
+}
+
+export interface StreamSkillRouteCard {
+  type: 'card'
+  card_type: 'skill_route'
+  selected_skills: string[]
+  confidence: number | null
+  reason: string
+  stage: string
+}
+
+/** A structured routing card carried by the `card` SSE event.
+ *  Replaces the raw JSON that route/rewrite nodes used to leak into the answer. */
+export type RouteCard = StreamQueryRewriteCard | StreamSkillRouteCard
 
 export interface StreamError {
   type: 'error'
@@ -487,6 +515,8 @@ export type StreamEvent =
   | StreamToolResult
   | StreamToolCallGenerating
   | StreamDone
+  | StreamQueryRewriteCard
+  | StreamSkillRouteCard
   | StreamError
 
 // --- API client ---

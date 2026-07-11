@@ -1,8 +1,143 @@
 import { useState } from 'react'
 import type { Message, ToolCallEntry } from '../hooks/useChat'
-import type { KnowledgeContext } from '../lib/api'
+import type { KnowledgeContext, RouteCard } from '../lib/api'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { TruncatedText } from './LazyContent'
+
+/** Collapsible routing card (query rewrite / skill route) shown on assistant
+ *  messages. Replaces the raw JSON that used to leak into the answer text. */
+function RouteCardView({ card }: { card: RouteCard }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const isRewrite = card.card_type === 'query_rewrite'
+  const label = isRewrite ? '🔍 查询改写' : '🧭 技能路由'
+  const summary = isRewrite
+    ? card.rewritten_query
+    : `已选 ${card.selected_skills.length} 个技能`
+  const pct = (v: number | null) =>
+    typeof v === 'number' ? `${Math.round(v * 100)}%` : '—'
+  return (
+    <div className={`route-card ${collapsed ? 'collapsed' : ''}`} data-card-type={card.card_type}>
+      <button
+        type="button"
+        className="route-card-header"
+        onClick={() => setCollapsed((v) => !v)}
+        aria-expanded={!collapsed}
+      >
+        <span className="route-card-label">{label}</span>
+        <span className="route-card-summary">{summary}</span>
+        <span className="route-card-toggle">{collapsed ? '展开' : '收起'}</span>
+      </button>
+      {!collapsed && (
+        <div className="route-card-body">
+          {isRewrite ? (
+            <>
+              <div className="route-card-row">
+                <span className="route-card-key">改写后</span>
+                <span className="route-card-val">{card.rewritten_query}</span>
+              </div>
+              {card.original_query && card.original_query.trim() !== card.rewritten_query.trim() && (
+                <div className="route-card-row">
+                  <span className="route-card-key">原始</span>
+                  <span className="route-card-val route-card-muted">{card.original_query}</span>
+                </div>
+              )}
+              <div className="route-card-row">
+                <span className="route-card-key">意图</span>
+                <span className="route-card-val">
+                  {card.intent || '—'}
+                  {card.secondary_intents.length > 0 && `（次要：${card.secondary_intents.join('、')}）`}
+                </span>
+              </div>
+              <div className="route-card-row">
+                <span className="route-card-key">置信度</span>
+                <span className="route-card-val">{pct(card.confidence)}</span>
+              </div>
+              {card.needs_clarification && (
+                <div className="route-card-row route-card-warn">
+                  <span className="route-card-key">需澄清</span>
+                  <span className="route-card-val">
+                    缺少：{card.missing_slots.length ? card.missing_slots.join('、') : '（未指明）'}
+                  </span>
+                </div>
+              )}
+              {card.sub_queries.length > 0 && (
+                <div className="route-card-row">
+                  <span className="route-card-key">子查询</span>
+                  <ul className="route-card-list">
+                    {card.sub_queries.map((q, i) => <li key={i}>{q}</li>)}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="route-card-row">
+                <span className="route-card-key">选中技能</span>
+                <span className="route-card-val">
+                  {card.selected_skills.length > 0 ? (
+                    card.selected_skills.map((s) => (
+                      <span key={s} className="route-card-skill">{s}</span>
+                    ))
+                  ) : (
+                    <span className="route-card-muted">无匹配技能</span>
+                  )}
+                </span>
+              </div>
+              <div className="route-card-row">
+                <span className="route-card-key">置信度</span>
+                <span className="route-card-val">{pct(card.confidence)}</span>
+              </div>
+              {card.stage && (
+                <div className="route-card-row">
+                  <span className="route-card-key">判定阶段</span>
+                  <span className="route-card-val">{card.stage}</span>
+                </div>
+              )}
+              {card.reason && (
+                <div className="route-card-row">
+                  <span className="route-card-key">理由</span>
+                  <span className="route-card-val route-card-muted">{card.reason}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Collapsible card showing the rewritten query on user messages. */
+function RewriteCard({ rewritten, original }: { rewritten: string; original: string }) {
+  const [collapsed, setCollapsed] = useState(true)
+  // Only show if rewritten differs from original
+  if (rewritten.trim() === original.trim()) return null
+  return (
+    <div className={`rewrite-card ${collapsed ? 'collapsed' : ''}`}>
+      <button
+        type="button"
+        className="rewrite-header"
+        onClick={() => setCollapsed((v) => !v)}
+        aria-expanded={!collapsed}
+      >
+        <span className="rewrite-label">🔍 查询已改写</span>
+        <span className="rewrite-toggle">{collapsed ? '展开' : '收起'}</span>
+      </button>
+      {!collapsed && (
+        <div className="rewrite-body">
+          <div className="rewrite-section">
+            <span className="rewrite-section-label">改写后</span>
+            <p className="rewrite-text">{rewritten}</p>
+          </div>
+          <div className="rewrite-section">
+            <span className="rewrite-section-label">原始</span>
+            <p className="rewrite-original">{original}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface Props {
   id?: string
@@ -20,6 +155,8 @@ interface Props {
   compactingCollapsed?: boolean
   childCollapsed?: boolean
   knowledgeContext?: KnowledgeContext
+  rewrittenQuery?: string  // 改写后的查询文本
+  cards?: RouteCard[]  // 路由/改写卡片
   toolCalls?: ToolCallEntry[]
   onToggleReasoning?: (messageId: string) => void
   onToggleCompacting?: (messageId: string) => void
@@ -121,6 +258,8 @@ export function MessageBubble({
   compactingCollapsed,
   childCollapsed,
   knowledgeContext,
+  rewrittenQuery,
+  cards,
   toolCalls,
   onToggleReasoning,
   onToggleCompacting,
@@ -213,6 +352,13 @@ export function MessageBubble({
         </div>
       ) : role === 'assistant' ? (
         <>
+          {cards && cards.length > 0 && (
+            <div className="route-cards">
+              {cards.map((card, i) => (
+                <RouteCardView key={i} card={card} />
+              ))}
+            </div>
+          )}
           {knowledgeContext && knowledgeContext.documents.length > 0 && (
             <div className={`knowledge-sources ${knowledgeExpanded ? 'expanded' : 'collapsed'}`}>
               <button
@@ -331,10 +477,15 @@ export function MessageBubble({
           )}
         </div>
       ) : (
-        <div className="message-content">
-          {content}
-          {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
-        </div>
+        <>
+          {role === 'user' && rewrittenQuery && rewrittenQuery.trim() !== content.trim() && (
+            <RewriteCard rewritten={rewrittenQuery} original={content} />
+          )}
+          <div className="message-content">
+            {content}
+            {streaming && <span className="typewriter-cursor" data-testid="typewriter-cursor" />}
+          </div>
+        </>
       )}
     </div>
   )

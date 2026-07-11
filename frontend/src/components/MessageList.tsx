@@ -53,6 +53,8 @@ export function MessageList({ messages, loading, onToggleReasoning, onToggleComp
           compactingCollapsed={msg.compactingCollapsed}
           childCollapsed={msg.childCollapsed}
           knowledgeContext={msg.knowledgeContext}
+          rewrittenQuery={msg.rewrittenQuery}
+          cards={msg.cards}
           toolCalls={msg.toolCalls}
           onToggleReasoning={onToggleReasoning}
           onToggleCompacting={onToggleCompacting}

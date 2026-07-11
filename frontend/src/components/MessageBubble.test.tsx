@@ -16,6 +16,35 @@ describe('MessageBubble', () => {
     expect(screen.getByTestId('message-bubble')).toHaveClass('assistant')
   })
 
+  it('renders query-rewrite and skill-route cards without dumping raw JSON', async () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="好的"
+        cards={[
+          {
+            type: 'card', card_type: 'query_rewrite',
+            rewritten_query: '查询系统的运行状况和指标', original_query: '我想看看这个系统',
+            intent: 'general', secondary_intents: [], confidence: 0.3,
+            needs_clarification: true, missing_slots: ['service_name'], sub_queries: [],
+          },
+          {
+            type: 'card', card_type: 'skill_route',
+            selected_skills: ['otel-query'], confidence: 0.9,
+            reason: '适合此需求', stage: 'llm_judge',
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByText(/查询改写/)).toBeInTheDocument()
+    expect(screen.getByText(/技能路由/)).toBeInTheDocument()
+    expect(screen.queryByText(/rewritten_query/)).toBeNull()
+    expect(screen.queryByText(/selectedSkill/)).toBeNull()
+
+    await userEvent.click(screen.getByText(/技能路由/))
+    expect(screen.getByText(/otel-query/)).toBeInTheDocument()
+  })
+
   it('renders tool call with pending badge', () => {
     render(<MessageBubble role="tool_call" content="get_time" approvalStatus="pending" />)
     expect(screen.getByText('get_time')).toBeInTheDocument()

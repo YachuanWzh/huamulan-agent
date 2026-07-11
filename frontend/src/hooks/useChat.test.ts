@@ -659,4 +659,37 @@ describe('useChat', () => {
 
     expect(result.current.pendingApprovals).toEqual([])
   })
+
+  it('collects route cards into the assistant message', async () => {
+    mockApi.chatStream.mockReturnValue(
+      makeStream([
+        {
+          type: 'card', card_type: 'query_rewrite',
+          rewritten_query: '查询系统的运行状况和指标', original_query: '我想看看这个系统',
+          intent: 'general', secondary_intents: [], confidence: 0.3,
+          needs_clarification: true, missing_slots: ['service_name'], sub_queries: [],
+        },
+        {
+          type: 'card', card_type: 'skill_route',
+          selected_skills: ['otel-query'], confidence: 0.9,
+          reason: 'otel-query 合适', stage: 'llm_judge',
+        },
+        { type: 'token', content: '好的', node: 'agent', agent_role: 'system' },
+        { type: 'done', status: 'completed', message: '好的' },
+      ]),
+    )
+
+    const { result } = renderHook(() => useChat('thread-1', () => 'thread-1'))
+
+    await act(async () => {
+      await result.current.send('我想看看这个系统')
+    })
+
+    const assistant = result.current.messages.find((m) => m.role === 'assistant')
+    expect(assistant?.cards?.map((c) => c.card_type)).toEqual([
+      'query_rewrite',
+      'skill_route',
+    ])
+    expect(assistant?.content).toBe('好的')
+  })
 })
