@@ -520,6 +520,8 @@ class AgentHarness:
                         node_payload = _node_finished_payload(event)
                         if node_payload is not None:
                             yield _sse_event("node_finished", node_payload)
+                        for card in _route_card_events(event):
+                            yield card
                 elif kind == "on_tool_start":
                     yield _sse_event("tool_started", _tool_started_payload(event))
                 elif kind == "on_tool_end":
@@ -527,6 +529,9 @@ class AgentHarness:
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     node = _current_node_from_event(event)
+                    # 内部路由/改写节点的 JSON 决策由 card 事件承接，不进可见流
+                    if node in _SILENT_TOKEN_NODES:
+                        continue
                     # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
                     if node not in _CHILD_AGENT_NODES:
                         reasoning = _extract_reasoning_content(chunk)
@@ -568,6 +573,12 @@ class AgentHarness:
                 kc = values.get("knowledge_context")
                 if isinstance(kc, dict) and kc.get("documents"):
                     done_payload["knowledge_context"] = kc
+                rq = values.get("rewritten_query")
+                if rq and isinstance(rq, str) and rq.strip():
+                    done_payload["rewritten_query"] = rq
+                    slots = values.get("intent_slots")
+                    if isinstance(slots, dict):
+                        done_payload["intent_slots"] = slots
                 yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
         except Exception as exc:
@@ -1351,6 +1362,79 @@ _CHILD_AGENT_NODES = frozenset({
 _ORCHESTRATOR_NODES = frozenset({
     "supervisor", "synthesize", "rewrite_intent", "gate",
 })
+# 内部路由/改写节点：其 LLM 产出是 JSON 决策，不该进可见正文流，
+# 改由结构化 `card` 事件承接（前端渲染成卡片）。
+_SILENT_TOKEN_NODES = frozenset({"route_skills", "rewrite_intent"})
+_ROUTE_CARD_NODES = frozenset({"route_skills", "rewrite_intent"})
+
+
+def _distill_route_decision(trace: Any) -> tuple[Any, str, str]:
+    """从技能路由 trace 里提炼出最终决策的 confidence / reason / stage。"""
+    confidence: Any = None
+    reason = ""
+    stage = ""
+    if isinstance(trace, list):
+        for entry in trace:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("reason") or entry.get("confidence") is not None:
+                confidence = entry.get("confidence", confidence)
+                reason = entry.get("reason") or reason
+                stage = entry.get("stage") or stage
+    return confidence, reason, stage
+
+
+def _query_rewrite_card(output: dict[str, Any]) -> dict[str, Any] | None:
+    """从 route 节点输出构造"查询改写"卡片；改写未启用时返回 None。"""
+    slots = output.get("intent_slots")
+    if not isinstance(slots, dict) or not slots:
+        return None
+    rewritten = output.get("rewritten_query")
+    return {
+        "card_type": "query_rewrite",
+        "rewritten_query": rewritten if isinstance(rewritten, str) else "",
+        "original_query": slots.get("original_query", ""),
+        "intent": slots.get("intent", ""),
+        "secondary_intents": slots.get("secondary_intents", []),
+        "confidence": slots.get("confidence"),
+        "needs_clarification": bool(slots.get("needs_clarification", False)),
+        "missing_slots": slots.get("missing_slots", []),
+        "sub_queries": slots.get("sub_queries", []),
+    }
+
+
+def _skill_route_card(output: dict[str, Any]) -> dict[str, Any] | None:
+    """从 route 节点输出构造"技能路由"卡片；无路由结果时返回 None。"""
+    if "selected_skills" not in output:
+        return None
+    selected = output.get("selected_skills") or []
+    if not isinstance(selected, list):
+        return None
+    confidence, reason, stage = _distill_route_decision(output.get("routing_trace"))
+    return {
+        "card_type": "skill_route",
+        "selected_skills": selected,
+        "confidence": confidence,
+        "reason": reason,
+        "stage": stage,
+    }
+
+
+def _route_card_events(event: dict[str, Any]) -> list[str]:
+    """route/rewrite 节点结束时，把解析后的结果转成 `card` SSE 事件。"""
+    if event.get("name") not in _ROUTE_CARD_NODES:
+        return []
+    output = (event.get("data") or {}).get("output")
+    if not isinstance(output, dict):
+        return []
+    events: list[str] = []
+    rewrite = _query_rewrite_card(output)
+    if rewrite is not None:
+        events.append(_sse_event("card", rewrite))
+    route = _skill_route_card(output)
+    if route is not None:
+        events.append(_sse_event("card", route))
+    return events
 
 
 def _agent_role_for_node(name: str) -> str:
