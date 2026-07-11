@@ -1124,15 +1124,6 @@ def build_system_prompt(
         if memory_text:
             sections.append(memory_text)
 
-    # ── Rewrite context (injected before system prompt) ──
-    if rewritten_query:
-        sections.append(
-            "## 改写后的用户查询\n"
-            "用户的原始查询经过意图改写处理后，标准化的查询文本为:\n\n"
-            f"> {rewritten_query}\n\n"
-            "请基于改写后的查询理解用户意图并选择工具。\n"
-        )
-
     sections.append(_BASE_PROMPT)
 
     selected_set = set(selected)
