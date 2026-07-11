@@ -33,7 +33,12 @@ function RouteCardView({ card }: { card: RouteCard }) {
             <>
               <div className="route-card-row">
                 <span className="route-card-key">改写后</span>
-                <span className="route-card-val">{card.rewritten_query}</span>
+                <span className="route-card-val">
+                  {card.rewritten_query}
+                  {card.original_query.trim() === card.rewritten_query.trim() && (
+                    <span className="route-card-noop-tag">（未做改写）</span>
+                  )}
+                </span>
               </div>
               {card.original_query && card.original_query.trim() !== card.rewritten_query.trim() && (
                 <div className="route-card-row">

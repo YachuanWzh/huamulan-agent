@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { MessageBubble } from './MessageBubble'
 
 describe('MessageBubble', () => {
@@ -205,5 +207,69 @@ describe('MessageBubble', () => {
     )
     const cursor = container.querySelector('.typewriter-cursor')
     expect(cursor).toBeInTheDocument()
+  })
+})
+
+it('marks rewrite card as unchanged when rewritten equals original', () => {
+    render(
+      <MessageBubble
+        role="assistant"
+        content="好的"
+        cards={[{
+          type: 'card', card_type: 'query_rewrite',
+          rewritten_query: '排查 p99 延迟', original_query: '排查 p99 延迟',
+          intent: 'troubleshoot', secondary_intents: [], confidence: 1.0,
+          needs_clarification: false, missing_slots: [], sub_queries: [],
+        }]}
+      />,
+    )
+    // Click to expand the card so we can read the body label
+    return userEvent.click(screen.getByText(/查询改写/)).then(() => {
+      expect(screen.getByText(/未做改写/)).toBeInTheDocument()
+    })
+  })
+
+describe('route-card / rewrite-card styling', () => {
+  // Helper: read App.css source and pull out a CSS rule block for the given selector.
+  function readCssRule(selector: string): string {
+    const css = readFileSync(resolve(__dirname, '../App.css'), 'utf8')
+    // Match e.g. ".route-card-key { ... }" — balanced braces are not required for
+    // our small flat rules. Use a non-greedy match bounded by the next "}" at the
+    // same indent level (newline + spaces + "}" terminates the block).
+    const re = new RegExp(`\\${selector}\\s*\\{[^}]*\\}`, 'm')
+    const m = css.match(re)
+    return m ? m[0] : ''
+  }
+
+  it('route-card-key uses a dark, readable color (not light-alpha on light bg)', () => {
+    const rule = readCssRule('.route-card-key')
+    expect(rule).not.toBe('')
+    // The app's parchment background is light; light-alpha text is invisible.
+    // Project theme has --color-muted and --color-text — both dark.
+    expect(rule).toMatch(/var\(--color-(text|muted|saddle-leather)\)/)
+    expect(rule).not.toMatch(/rgba\(139,\s*148,\s*158/)
+    expect(rule).not.toMatch(/rgba\(251,\s*252,\s*248/)
+  })
+
+  it('route-card-val uses a dark, readable color', () => {
+    const rule = readCssRule('.route-card-val')
+    expect(rule).not.toBe('')
+    expect(rule).toMatch(/var\(--color-text\)/)
+    expect(rule).not.toMatch(/rgba\(251,\s*252,\s*248,\s*0\.82/)
+  })
+
+  it('route-card-header text is readable (not light-alpha)', () => {
+    const rule = readCssRule('.route-card-header')
+    expect(rule).not.toBe('')
+    expect(rule).toMatch(/var\(--color-(text|muted)\)/)
+    expect(rule).not.toMatch(/rgba\(251,\s*252,\s*248,\s*0\.6\)/)
+  })
+
+  it('rewrite-text uses a dark color (visible on light parchment)', () => {
+    const rule = readCssRule('.rewrite-text')
+    expect(rule).not.toBe('')
+    // rewrite-card sits on the user bubble (dark bg) → --color-user-text (#fffaf0) is correct
+    expect(rule).toMatch(/var\(--color-(text|user-text)\)/)
+    expect(rule).not.toMatch(/rgba\(160,\s*200,\s*255/)
   })
 })

@@ -786,12 +786,12 @@ button {
   color: rgba(251, 252, 248, 0.68);
 }
 
-/* ── Rewrite card on user messages ── */
+/* ── Rewrite card on user messages (dark bubble bg) ── */
 .rewrite-card {
   margin-bottom: 6px;
   border-radius: 6px;
-  background: rgba(139, 148, 158, 0.06);
-  border: 1px solid rgba(139, 148, 158, 0.12);
+  background: rgba(255, 250, 240, 0.06);
+  border: 1px solid rgba(255, 250, 240, 0.18);
   overflow: hidden;
   font-size: 0.78rem;
 }
@@ -804,13 +804,13 @@ button {
   padding: 5px 10px;
   background: none;
   border: none;
-  color: rgba(251, 252, 248, 0.55);
+  color: var(--color-user-text);
   cursor: pointer;
   font-size: inherit;
 }
 
 .rewrite-header:hover {
-  background: rgba(139, 148, 158, 0.06);
+  background: rgba(255, 250, 240, 0.06);
 }
 
 .rewrite-label {
@@ -819,12 +819,13 @@ button {
 
 .rewrite-toggle {
   font-size: 0.7rem;
-  opacity: 0.65;
+  opacity: 0.85;
+  color: var(--color-user-text);
 }
 
 .rewrite-body {
   padding: 6px 10px 8px;
-  border-top: 1px solid rgba(139, 148, 158, 0.08);
+  border-top: 1px solid rgba(255, 250, 240, 0.12);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -840,24 +841,27 @@ button {
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgba(139, 148, 158, 0.45);
+  color: rgba(255, 250, 240, 0.7);
 }
 
 .rewrite-text {
   margin: 0;
-  color: rgba(160, 200, 255, 0.85);
+  color: var(--color-user-text);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .rewrite-original {
   margin: 0;
-  color: rgba(251, 252, 248, 0.60);
+  color: rgba(255, 250, 240, 0.7);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* ── Routing cards (query rewrite / skill route) on assistant messages ── */
+/* ── Routing cards (query rewrite / skill route) on assistant messages ──
+   These sit on the light parchment assistant bubble, so use project theme
+   dark colors (--color-text / --color-muted / --color-saddle-leather) instead
+   of the light-alpha RGBA palette that was meant for dark backgrounds. */
 .route-cards {
   display: flex;
   flex-direction: column;
@@ -867,14 +871,15 @@ button {
 
 .route-card {
   border-radius: 6px;
-  background: rgba(139, 148, 158, 0.06);
-  border: 1px solid rgba(139, 148, 158, 0.14);
+  background: rgba(170, 143, 103, 0.08);
+  border: 1px solid rgba(170, 143, 103, 0.28);
   overflow: hidden;
   font-size: 0.78rem;
 }
 
 .route-card[data-card-type='skill_route'] {
-  border-color: rgba(120, 180, 140, 0.22);
+  border-color: rgba(52, 105, 92, 0.32);
+  background: rgba(52, 105, 92, 0.06);
 }
 
 .route-card-header {
@@ -885,19 +890,20 @@ button {
   padding: 5px 10px;
   background: none;
   border: none;
-  color: rgba(251, 252, 248, 0.6);
+  color: var(--color-text);
   cursor: pointer;
   font-size: inherit;
   text-align: left;
 }
 
 .route-card-header:hover {
-  background: rgba(139, 148, 158, 0.06);
+  background: rgba(170, 143, 103, 0.1);
 }
 
 .route-card-label {
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
+  color: var(--color-text);
 }
 
 .route-card-summary {
@@ -905,18 +911,19 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(160, 200, 255, 0.8);
+  color: var(--color-saddle-leather);
 }
 
 .route-card-toggle {
   font-size: 0.7rem;
-  opacity: 0.65;
+  opacity: 0.85;
   white-space: nowrap;
+  color: var(--color-muted);
 }
 
 .route-card-body {
   padding: 6px 10px 8px;
-  border-top: 1px solid rgba(139, 148, 158, 0.08);
+  border-top: 1px solid rgba(170, 143, 103, 0.2);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -930,25 +937,33 @@ button {
 
 .route-card-key {
   flex: 0 0 56px;
-  font-size: 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: rgba(139, 148, 158, 0.5);
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
 }
 
 .route-card-val {
   flex: 1;
-  color: rgba(251, 252, 248, 0.82);
+  color: var(--color-text);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .route-card-muted {
-  color: rgba(251, 252, 248, 0.55);
+  color: var(--color-muted);
+}
+
+.route-card-noop-tag {
+  margin-left: 6px;
+  font-size: 0.7rem;
+  color: var(--color-muted);
+  font-style: italic;
 }
 
 .route-card-warn .route-card-val {
-  color: rgba(255, 190, 120, 0.9);
+  color: var(--color-jujube-red);
 }
 
 .route-card-skill {
@@ -956,9 +971,10 @@ button {
   padding: 1px 7px;
   margin: 0 4px 2px 0;
   border-radius: 10px;
-  background: rgba(120, 180, 140, 0.16);
-  color: rgba(180, 230, 200, 0.95);
+  background: rgba(52, 105, 92, 0.16);
+  color: var(--color-bronze-green);
   font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .route-card-list {
