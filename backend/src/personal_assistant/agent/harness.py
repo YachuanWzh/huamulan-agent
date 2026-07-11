@@ -636,6 +636,8 @@ class AgentHarness:
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     node = _current_node_from_event(event)
+                    # 审批恢复不会重新进入 route_skills/rewrite_intent（入口专用节点），
+                    # 故此处无需静默门控；正文都来自 agent/child 节点。
                     # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
                     if node not in _CHILD_AGENT_NODES:
                         reasoning = _extract_reasoning_content(chunk)
@@ -729,6 +731,8 @@ class AgentHarness:
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
                     node = _current_node_from_event(event)
+                    # 审批恢复不会重新进入 route_skills/rewrite_intent（入口专用节点），
+                    # 故此处无需静默门控；正文都来自 agent/child 节点。
                     # 子 agent 的 reasoning 是模型内部独白，对用户无意义，直接抑制
                     if node not in _CHILD_AGENT_NODES:
                         reasoning = _extract_reasoning_content(chunk)
@@ -1365,7 +1369,10 @@ _ORCHESTRATOR_NODES = frozenset({
 # 内部路由/改写节点：其 LLM 产出是 JSON 决策，不该进可见正文流，
 # 改由结构化 `card` 事件承接（前端渲染成卡片）。
 _SILENT_TOKEN_NODES = frozenset({"route_skills", "rewrite_intent"})
-_ROUTE_CARD_NODES = frozenset({"route_skills", "rewrite_intent"})
+# 只有单 agent 的 route_skills 输出的 intent_slots 形状与卡片契约一致；
+# 多 agent 的 rewrite_intent slot 字段不同（rewrite_confidence 等），暂不承接成卡，
+# 但其 JSON 仍会被上面的静默集拦下，不会泄漏。
+_ROUTE_CARD_NODES = frozenset({"route_skills"})
 
 
 def _distill_route_decision(trace: Any) -> tuple[Any, str, str]:

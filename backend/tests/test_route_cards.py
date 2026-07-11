@@ -151,3 +151,46 @@ async def test_skill_route_card_only_when_no_rewrite() -> None:
     chunks = [c async for c in NoRewriteHarness().run_user_turn_stream("t1", "hi")]
     cards = _cards(chunks)
     assert [c["card_type"] for c in cards] == ["skill_route"]
+
+
+@pytest.mark.asyncio
+async def test_rewrite_intent_is_silent_but_emits_no_card() -> None:
+    """多 agent 的 rewrite_intent 用的是不同的 slot 形状，暂不承接成卡；
+    但它的改写 JSON 仍必须静默，不能泄漏进正文。"""
+
+    class RewriteIntentApp:
+        async def astream_events(self, *_args, **_kwargs):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": FakeChunk(content='{"rewritten": "x"}')},
+                "metadata": {"langgraph_node": "rewrite_intent"},
+            }
+            yield {
+                "event": "on_chain_end",
+                "name": "rewrite_intent",
+                "tags": ["langgraph_node"],
+                "data": {"output": {"rewritten_query": "x", "intent_slots": {"intent": "general"}}},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": FakeChunk(content="答案")},
+                "metadata": {"langgraph_node": "synthesize"},
+            }
+
+        async def aget_state(self, *_args, **_kwargs):
+            return FakeState()
+
+    class RewriteIntentHarness(RouteHarness):
+        def _compile(self, _llm_config=None):
+            return RewriteIntentApp()
+
+    chunks = [c async for c in RewriteIntentHarness().run_user_turn_stream("t1", "hi")]
+    # rewrite_intent 不发卡
+    assert _cards(chunks) == []
+    tokens = _tokens(chunks)
+    # 但 rewrite_intent 的 JSON 依然被静默
+    assert all(tok["node"] != "rewrite_intent" for tok in tokens)
+    assert all("rewritten" not in tok["content"] for tok in tokens)
+    # synthesize 的正文照常流式
+    assert any(tok["node"] == "synthesize" and tok["content"] == "答案" for tok in tokens)
+

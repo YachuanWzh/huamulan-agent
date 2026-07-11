@@ -355,7 +355,7 @@ export function MessageBubble({
           {cards && cards.length > 0 && (
             <div className="route-cards">
               {cards.map((card, i) => (
-                <RouteCardView key={i} card={card} />
+                <RouteCardView key={`${card.card_type}-${i}`} card={card} />
               ))}
             </div>
           )}
