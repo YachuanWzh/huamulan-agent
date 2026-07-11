@@ -379,3 +379,84 @@ def test_rewriter_multi_intent_splits():
     assert len(result.sub_queries) == 2
     assert result.sub_queries[0] == "排查 payment-service 超时"
     assert result.sub_queries[1] == "审计最近的执行日志"
+
+
+# ── Task: fallback path must produce a visible rewrite for informal Chinese ──
+
+
+def test_rewriter_fallback_normalizes_colloquial_chinese():
+    """When LLM confidence falls below threshold, regex path must at least apply
+    basic Chinese colloquial → standard normalization so the user sees a visible
+    rewrite instead of an exact copy of the input.
+    """
+    llm = FakeRewriteLLM(response_text=json.dumps({
+        "rewritten": "我想看看这个系统的运行状况，它的指标怎么样",
+        "intent": "metrics",
+        "secondary_intents": [],
+        "confidence": 0.50,  # Below 0.60 → triggers regex fallback
+        "needs_clarification": True,
+        "missing_slots": ["service_name"],
+        "sub_queries": [],
+        "reason": "Query too vague",
+        "metrics": [],
+        "entities": [],
+    }, ensure_ascii=False))
+    rewriter = QueryRewriter(llm=llm, enabled=True, rewrite_confidence_threshold=0.60)
+    original = "我想看看这个系统的运行状况，它的指标怎么样"
+    result = async_test(rewriter.rewrite(original))
+    assert result.rewritten != original, (
+        f"Fallback path produced identity rewrite: {result.rewritten!r} == {original!r}"
+    )
+    # Should normalize at least one colloquial pattern
+    assert any(tok in result.rewritten for tok in ("查看", "查询", "系统")), (
+        f"Expected colloquial normalization, got {result.rewritten!r}"
+    )
+
+
+def test_rewriter_fast_path_normalizes_colloquial_patterns():
+    """The fast regex path itself should normalize common colloquial Chinese
+    so that the fallback (or disabled) path produces visible rewriting.
+    """
+    cases = [
+        ("我想看看这个系统的运行状况", "查看"),  # 我想看看 → 查看
+        ("帮我查下 payment-service 延迟", "查询"),  # 帮我查下 → 查询
+        ("看看有没有异常", "查询"),  # 看看有没有 → 查询是否存在
+    ]
+    for original, expected_tok in cases:
+        result = rewrite_query_fast(original)
+        assert result.rewritten != original, (
+            f"Fast path produced identity rewrite for {original!r}"
+        )
+        assert expected_tok in result.rewritten, (
+            f"Expected {expected_tok!r} in rewrite of {original!r}, got {result.rewritten!r}"
+        )
+
+
+# ── Task: LLM contradiction (rewritten==original ∧ conf<1.0) → fallback ──
+
+
+def test_rewriter_demotes_llm_identity_with_low_confidence():
+    """When LLM returns rewritten==original with confidence < 1.0, this is a
+    contradictory state. The rewriter must either accept it (with confidence
+    boosted to 1.0) or fall back to regex normalization. Either way, the
+    user must see a visible rewrite OR confidence must be exactly 1.0.
+    """
+    llm = FakeRewriteLLM(response_text=json.dumps({
+        "rewritten": "我想看看这个系统的运行状况，它的指标怎么样",
+        "intent": "metrics",
+        "secondary_intents": [],
+        "confidence": 0.70,  # < 1.0 — contradicts rewritten==original
+        "needs_clarification": True,
+        "missing_slots": ["service_name"],
+        "sub_queries": [],
+        "reason": "Query reasonably clear",
+        "metrics": [],
+        "entities": [],
+    }, ensure_ascii=False))
+    rewriter = QueryRewriter(llm=llm, enabled=True)
+    original = "我想看看这个系统的运行状况，它的指标怎么样"
+    result = async_test(rewriter.rewrite(original))
+    # Acceptable: visible rewrite OR confidence exactly 1.0
+    assert result.rewritten != original or result.confidence == 1.0, (
+        f"Identity rewrite with conf={result.confidence} (not 1.0) — contradictory"
+    )
