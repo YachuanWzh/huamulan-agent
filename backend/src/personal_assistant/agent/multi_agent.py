@@ -227,6 +227,8 @@ def compile_multi_agent(
     child_llm_config: LLMConfig | None = None,
     # ── Hybrid RAG retrieval ───────────────────────────────────────────
     hybrid_retriever=None,  # HybridRetriever | None
+    # ── Enhanced query rewriting ────────────────────────────────────────
+    query_rewriter=None,  # QueryRewriter | None
 ):
     llm = build_llm(settings, llm_config)
 
@@ -283,15 +285,36 @@ def compile_multi_agent(
     async def rewrite_intent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         query = _last_human_text(state)
 
+        # ── Enhanced query rewriting (LLM-based, config-gated) ──
+        rewritten_query = query
+        rewrite_result = None
+        if query_rewriter is not None and query_rewriter.enabled:
+            from personal_assistant.agent.query_rewriter import extract_conversation_context
+
+            history_text = extract_conversation_context(
+                state.get("messages", []),
+                max_turns=query_rewriter.history_max_turns,
+            )
+            history_entries: list[dict[str, str]] = []
+            if history_text:
+                for line in history_text.split("\n"):
+                    if line.startswith("user: "):
+                        history_entries.append({"role": "user", "content": line[6:]})
+                    elif line.startswith("assistant: "):
+                        history_entries.append({"role": "assistant", "content": line[11:]})
+
+            rewrite_result = await query_rewriter.rewrite(query, history=history_entries)
+            rewritten_query = rewrite_result.rewritten
+
         # Always run legacy regex for metrics/entities extraction
-        legacy = rewrite_query_and_slots(query)
+        legacy = rewrite_query_and_slots(rewritten_query)
 
         # Use 3-tier funnel when intent_index or intent_llm is available
         if intent_index is not None or intent_llm is not None:
             from personal_assistant.agent.intent_router import route_intent_with_trace
 
             routing = await route_intent_with_trace(
-                query,
+                rewritten_query,
                 intent_index=intent_index if semantic_enabled else None,
                 llm=intent_llm if llm_enabled else None,
                 regex_threshold=regex_threshold,
@@ -300,20 +323,39 @@ def compile_multi_agent(
                 existing_slots=legacy.get("slots"),
             )
             slots_dict = routing.intent_slots.to_dict()
+
+            # Merge rewrite result into intent slots
+            if rewrite_result is not None:
+                slots_dict["original_query"] = rewrite_result.original
+                slots_dict["rewrite_confidence"] = rewrite_result.confidence
+                slots_dict["needs_clarification"] = rewrite_result.needs_clarification
+                slots_dict["missing_slots"] = rewrite_result.missing_slots
+                slots_dict["sub_queries"] = rewrite_result.sub_queries
+                slots_dict["rewrite_reason"] = rewrite_result.reason
+
             await _record_multiagent_log(memory, config, "rewrite_intent", output={
                 "slots": slots_dict,
                 "trace": routing.trace,
+                "rewrite": {
+                    "original": rewrite_result.original if rewrite_result else query,
+                    "rewritten": rewritten_query,
+                    "confidence": rewrite_result.confidence if rewrite_result else None,
+                } if rewrite_result else None,
             })
             return {
-                "rewritten_query": legacy["rewritten_query"],
+                "rewritten_query": rewritten_query,
                 "intent_slots": slots_dict,
             }
 
-        # Fallback: pure regex (original behavior, unchanged)
+        # Fallback: pure regex (with rewritten query if available)
         payload = legacy
+        if rewrite_result is not None:
+            payload["rewritten_query"] = rewritten_query
+            payload["slots"]["original_query"] = rewrite_result.original
+            payload["slots"]["rewrite_confidence"] = rewrite_result.confidence
         await _record_multiagent_log(memory, config, "rewrite_intent", output=payload)
         return {
-            "rewritten_query": payload["rewritten_query"],
+            "rewritten_query": rewritten_query,
             "intent_slots": payload["slots"],
         }
 

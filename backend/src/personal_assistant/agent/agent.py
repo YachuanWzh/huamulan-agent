@@ -108,6 +108,33 @@ def build_skill_router_components(
                 "memory_cache_ttl_seconds": getattr(settings, "cache_memory_ttl_seconds", 60),
             }
         )
+    # ── Build enhanced query rewriter (config-gated) ──
+    router_kwargs["query_rewriter"] = None
+    if getattr(settings, "query_rewrite_enabled", False):
+        from personal_assistant.agent.query_rewriter import QueryRewriter
+        from personal_assistant.agent.llm import build_llm as _build_llm
+        try:
+            rewrite_model = getattr(settings, "query_rewrite_llm_model", None)
+            rewrite_llm = _build_llm(
+                settings,
+                LLMConfig(model=rewrite_model) if rewrite_model else llm_config,
+            )
+            router_kwargs["query_rewriter"] = QueryRewriter(
+                llm=rewrite_llm,
+                enabled=True,
+                coreference_enabled=getattr(settings, "query_rewrite_coreference_enabled", True),
+                slot_filling_enabled=getattr(settings, "query_rewrite_slot_filling_enabled", True),
+                multi_intent_enabled=getattr(settings, "query_rewrite_multi_intent_enabled", True),
+                semantic_normalize_enabled=getattr(settings, "query_rewrite_semantic_normalize_enabled", True),
+                history_max_turns=getattr(settings, "query_rewrite_history_max_turns", 3),
+                rewrite_confidence_threshold=getattr(settings, "query_rewrite_confidence_threshold", 0.60),
+            )
+        except Exception:
+            logger.warning(
+                "Failed to build QueryRewriter for single-agent — "
+                "rewriting will be disabled.",
+                exc_info=True,
+            )
     return router_kwargs
 
 

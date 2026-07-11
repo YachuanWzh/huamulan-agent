@@ -728,6 +728,7 @@ def build_skill_router(
     rerank_threshold: float | None = None,
     rerank_top_k: int | None = None,
     llm_retry_count: int = 1,
+    query_rewriter=None,  # QueryRewriter | None
 ):
     async def route_skills(state: AgentState) -> AgentState:
         user_text = "\n".join(
@@ -736,9 +737,41 @@ def build_skill_router(
             if getattr(message, "type", "") == "human"
         )[-4000:]
 
+        # ── Enhanced query rewriting (config-gated) ──
+        rewritten_query = user_text
+        intent_slots: dict[str, Any] = {}
+        if query_rewriter is not None and query_rewriter.enabled:
+            from personal_assistant.agent.query_rewriter import extract_conversation_context
+
+            history_text = extract_conversation_context(
+                state.get("messages", []),
+                max_turns=query_rewriter.history_max_turns,
+            )
+            history_entries: list[dict[str, str]] = []
+            if history_text:
+                for line in history_text.split("\n"):
+                    if line.startswith("user: "):
+                        history_entries.append({"role": "user", "content": line[6:]})
+                    elif line.startswith("assistant: "):
+                        history_entries.append({"role": "assistant", "content": line[11:]})
+
+            rewrite_result = await query_rewriter.rewrite(user_text, history=history_entries)
+            rewritten_query = rewrite_result.rewritten
+            intent_slots = {
+                "original_query": rewrite_result.original,
+                "intent": rewrite_result.intent,
+                "secondary_intents": rewrite_result.secondary_intents,
+                "confidence": rewrite_result.confidence,
+                "needs_clarification": rewrite_result.needs_clarification,
+                "missing_slots": rewrite_result.missing_slots,
+                "sub_queries": rewrite_result.sub_queries,
+                "source": "rewriter",
+            }
+
+        # Use rewritten query for skill routing (better semantic recall)
         routing = await route_skill_names_with_trace(
             registry,
-            user_text,
+            rewritten_query,
             semantic_index=semantic_index,
             reranker=reranker,
             llm=llm,
@@ -764,12 +797,16 @@ def build_skill_router(
             selected,
             long_term_memory=long_term_memory,
             memory_text=memory_text,
+            rewritten_query=rewritten_query if rewritten_query != user_text else "",
+            intent_slots=intent_slots,
         )
         return {
             "messages": [system],
             "selected_skills": selected,
             "routing_trace": routing.trace,
             "allowed_tools": list(registry.tool_map_for_skills(selected)),
+            "rewritten_query": rewritten_query,
+            "intent_slots": intent_slots,
         }
 
     return route_skills
@@ -1068,8 +1105,17 @@ def build_system_prompt(
     selected: list[str],
     long_term_memory: "LongTermMemoryStore | None" = None,
     memory_text: str | None = None,
+    rewritten_query: str = "",
+    intent_slots: dict[str, Any] | None = None,
 ) -> SystemMessage:
-    """Build a progressive system prompt with meta overview + detailed selected skills."""
+    """Build a progressive system prompt with meta overview + detailed selected skills.
+
+    Args:
+        rewritten_query: Optional rewritten version of the user's query
+            (from QueryRewriter). Injected to help the agent understand
+            the clarified intent.
+        intent_slots: Optional intent classification result from rewriting.
+    """
     sections: list[str] = []
 
     if long_term_memory is not None:
@@ -1077,6 +1123,15 @@ def build_system_prompt(
             memory_text = long_term_memory.read_all()
         if memory_text:
             sections.append(memory_text)
+
+    # ── Rewrite context (injected before system prompt) ──
+    if rewritten_query:
+        sections.append(
+            "## 改写后的用户查询\n"
+            "用户的原始查询经过意图改写处理后，标准化的查询文本为:\n\n"
+            f"> {rewritten_query}\n\n"
+            "请基于改写后的查询理解用户意图并选择工具。\n"
+        )
 
     sections.append(_BASE_PROMPT)
 

@@ -865,6 +865,32 @@ class AgentHarness:
                     exc_info=True,
                 )
 
+        # ── Build enhanced query rewriter (config-gated) ──────────────
+        kwargs["query_rewriter"] = None
+        if getattr(self.settings, "query_rewrite_enabled", False):
+            from personal_assistant.agent.query_rewriter import QueryRewriter
+            try:
+                rewrite_model = getattr(self.settings, "query_rewrite_llm_model", None)
+                rewrite_llm = _build_llm(
+                    self.settings,
+                    LLMConfig(model=rewrite_model) if rewrite_model else llm_config,
+                )
+                kwargs["query_rewriter"] = QueryRewriter(
+                    llm=rewrite_llm,
+                    enabled=True,
+                    coreference_enabled=getattr(self.settings, "query_rewrite_coreference_enabled", True),
+                    slot_filling_enabled=getattr(self.settings, "query_rewrite_slot_filling_enabled", True),
+                    multi_intent_enabled=getattr(self.settings, "query_rewrite_multi_intent_enabled", True),
+                    semantic_normalize_enabled=getattr(self.settings, "query_rewrite_semantic_normalize_enabled", True),
+                    history_max_turns=getattr(self.settings, "query_rewrite_history_max_turns", 3),
+                    rewrite_confidence_threshold=getattr(self.settings, "query_rewrite_confidence_threshold", 0.60),
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to build QueryRewriter — rewriting will be disabled for this call.",
+                    exc_info=True,
+                )
+
         return multi_agent_module.compile_multi_agent(
             self.settings,
             self.registry,

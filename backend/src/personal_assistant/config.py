@@ -238,6 +238,42 @@ class Settings(BaseSettings):
             "设为 'deepseek-v4-flash' 可减少子 Agent 思考延迟。"
         ),
     )
+    # ── Enhanced Query Rewriting ────────────────────────────────────
+    query_rewrite_enabled: bool = Field(
+        default=False,
+        alias="QUERY_REWRITE_ENABLED",
+        description="启用 LLM 驱动的增强查询改写（指代消解、槽位填充、语义标准化等）",
+    )
+    query_rewrite_llm_model: str | None = Field(
+        default=None,
+        alias="QUERY_REWRITE_LLM_MODEL",
+        description="查询改写专用 LLM 模型。默认 None 回退到主 LLM_MODEL。建议使用 flash 模型降低延迟",
+    )
+    query_rewrite_coreference_enabled: bool = Field(
+        default=True,
+        alias="QUERY_REWRITE_COREFERENCE_ENABLED",
+    )
+    query_rewrite_slot_filling_enabled: bool = Field(
+        default=True,
+        alias="QUERY_REWRITE_SLOT_FILLING_ENABLED",
+    )
+    query_rewrite_multi_intent_enabled: bool = Field(
+        default=True,
+        alias="QUERY_REWRITE_MULTI_INTENT_ENABLED",
+    )
+    query_rewrite_semantic_normalize_enabled: bool = Field(
+        default=True,
+        alias="QUERY_REWRITE_SEMANTIC_NORMALIZE_ENABLED",
+    )
+    query_rewrite_confidence_threshold: float = Field(
+        default=0.60,
+        alias="QUERY_REWRITE_CONFIDENCE_THRESHOLD",
+        description="改写置信度低于此阈值时回退到快速正则改写",
+    )
+    query_rewrite_history_max_turns: int = Field(
+        default=3,
+        alias="QUERY_REWRITE_HISTORY_MAX_TURNS",
+    )
     evaluation_judge_enabled: bool = Field(
         default=True,
         alias="EVALUATION_JUDGE_ENABLED",
