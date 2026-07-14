@@ -166,7 +166,7 @@ export function EngineeringPanel({
     <section className="engineering-workspace" aria-label="Agent engineering workspace">
       <header className="engineering-header">
         <div><span>FLIGHT RECORDER</span><h2>Agent Engineering</h2></div>
-        <p>沿链路复盘，拿评测证据做决策。</p>
+        <p>Review the execution path and make decisions from evaluation evidence.</p>
       </header>
       <div className="engineering-tools" role="tablist">
         {([['trace', 'Trace'], ['regression', 'Regression'], ['replay', 'Replay diff'], ['sbs', 'SBS review']] as const).map(([id, label]) => (
@@ -180,15 +180,15 @@ export function EngineeringPanel({
       {tool === 'trace' && <div className="engineering-grid">
         <aside className="evidence-index">
           <h3>Thread traces</h3>
-          {!threadId && <p>先选择一个对话线程。</p>}
-          {threadId && traces.length === 0 && !busy && <p>该线程还没有 Trace。</p>}
+          {!threadId && <p>Select a conversation thread first.</p>}
+          {threadId && traces.length === 0 && !busy && <p>This thread has no traces yet.</p>}
           {traces.map((item) => <button key={item.trace_id} onClick={() => run(async () => setTrace(await api.getTrace(item.trace_id)))}>
             <code>{item.trace_id}</code><span>{item.duration_ms} ms · {item.total_spans} spans</span>
           </button>)}
         </aside>
         <div className="evidence-canvas">
           <ToolIntro title="Trace evidence">Inspect every span in one agent turn, including timing, tokens, inputs, outputs, errors, and metadata.</ToolIntro>
-          {!trace ? <EmptyEvidence text="选择一条 Trace 查看执行脊柱。" /> : <>
+          {!trace ? <EmptyEvidence text="Select a trace to inspect its execution spine." /> : <>
             <div className="trace-facts">
               <span>{trace.summary.duration_ms} ms</span>
               <span>{trace.summary.total_spans} spans</span>
@@ -251,7 +251,7 @@ export function EngineeringPanel({
       </div>}
 
       {tool === 'sbs' && <div className="engineering-grid">
-        <aside className="evidence-index"><h3>Review queue</h3>{sbsTasks.length === 0 && <p>暂无待评 SBS。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{item.status}</span></button>)}</aside>
+        <aside className="evidence-index"><h3>Review queue</h3>{sbsTasks.length === 0 && <p>No SBS tasks are waiting for review.</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{item.status}</span></button>)}</aside>
         <div className="evidence-canvas engineering-form">
           <ToolIntro title="Blinded preference review">Create blinded A/B tasks, judge outputs without model identity, and keep the reason as auditable evidence.</ToolIntro>
           <section className="sbs-create" aria-label="Create SBS task">
@@ -263,7 +263,7 @@ export function EngineeringPanel({
               <button disabled={!sbsDraft.prompt.trim() || !sbsDraft.candidateA.trim() || !sbsDraft.candidateB.trim()} onClick={createSbsTask}>Create SBS task</button>
             </div>
           </section>
-          {!sbsTask ? <EmptyEvidence text="创建任务，或从左侧选择一个待评任务。" /> : <>
+          {!sbsTask ? <EmptyEvidence text="Create a task or select one from the review queue." /> : <>
           <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>Candidate {item.label}</strong><p>{item.output}</p></article>)}</div>
           <div className="form-row"><label>Reviewer<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label><label>Winner<select aria-label="Winner" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">Tie</option><option value="both_bad">Both bad</option></select></label><label>Reason<textarea aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
           <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
