@@ -521,7 +521,7 @@ class AgentHarness:
             }
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
             await _record_execution_log(
-                self.memory,
+                getattr(self, "memory", None),
                 ExecutionLogCreate(
                     thread_id=thread_id,
                     run_id=trace.span_id,
@@ -617,7 +617,7 @@ class AgentHarness:
                 yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
             await _record_execution_log(
-                self.memory,
+                getattr(self, "memory", None),
                 ExecutionLogCreate(
                     thread_id=thread_id,
                     run_id=trace.span_id,
@@ -631,7 +631,7 @@ class AgentHarness:
         except Exception as exc:
             if trace is not None:
                 await _record_execution_log(
-                    self.memory,
+                    getattr(self, "memory", None),
                     ExecutionLogCreate(
                         thread_id=thread_id,
                         run_id=trace.span_id,
