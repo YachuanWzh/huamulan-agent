@@ -51,6 +51,10 @@ export function EngineeringPanel({
   const [reviewer, setReviewer] = useState('')
   const [winner, setWinner] = useState<SBSReview['winner']>('A')
   const [reason, setReason] = useState('')
+  const [notice, setNotice] = useState('')
+  const [sbsDraft, setSbsDraft] = useState({
+    prompt: '', candidateA: '', candidateB: '', provenance: {} as Record<string, unknown>,
+  })
 
   useEffect(() => {
     if (!threadId) return
@@ -121,6 +125,43 @@ export function EngineeringPanel({
     && runs.some((item) => item.run_id === baseline && item.status === 'completed')
     && runs.some((item) => item.run_id === candidate && item.status === 'completed')
 
+  const createSbsTask = () => run(async () => {
+    const task: SBSTask = {
+      task_id: crypto.randomUUID(),
+      prompt: sbsDraft.prompt.trim(),
+      candidate_a: {
+        candidate_id: 'baseline', output: sbsDraft.candidateA.trim(), metadata: {},
+      },
+      candidate_b: {
+        candidate_id: 'candidate', output: sbsDraft.candidateB.trim(), metadata: {},
+      },
+      status: 'pending',
+      provenance: sbsDraft.provenance,
+    }
+    const created = await api.createSBSTask(task)
+    setSbsTasks(await api.listSBSTasks())
+    setSbsTask(await api.getSBSTask(created.task_id))
+    setSbsDraft({ prompt: '', candidateA: '', candidateB: '', provenance: {} })
+    setNotice('SBS task created')
+  })
+
+  const prefillSbsFromFinding = (finding: EvaluationComparison['findings'][number]) => {
+    setSbsDraft({
+      prompt: finding.message,
+      candidateA: evidenceText(finding.baseline),
+      candidateB: evidenceText(finding.candidate),
+      provenance: {
+        baseline_run_id: comparison?.baseline_run_id,
+        candidate_run_id: comparison?.candidate_run_id,
+        case_id: finding.case_id,
+        rule: finding.rule,
+      },
+    })
+    setSbsTask(null)
+    setNotice('Regression evidence copied into a new SBS task')
+    setTool('sbs')
+  }
+
   return (
     <section className="engineering-workspace" aria-label="Agent engineering workspace">
       <header className="engineering-header">
@@ -134,6 +175,7 @@ export function EngineeringPanel({
       </div>
       {error && <div className="engineering-error" role="alert">{error}</div>}
       {busy && <div className="engineering-loading">Loading evidence…</div>}
+      {notice && <div className="engineering-notice" role="status">{notice}</div>}
 
       {tool === 'trace' && <div className="engineering-grid">
         <aside className="evidence-index">
@@ -145,6 +187,7 @@ export function EngineeringPanel({
           </button>)}
         </aside>
         <div className="evidence-canvas">
+          <ToolIntro title="Trace evidence">Inspect every span in one agent turn, including timing, tokens, inputs, outputs, errors, and metadata.</ToolIntro>
           {!trace ? <EmptyEvidence text="选择一条 Trace 查看执行脊柱。" /> : <>
             <div className="trace-facts">
               <span>{trace.summary.duration_ms} ms</span>
@@ -160,6 +203,7 @@ export function EngineeringPanel({
       </div>}
 
       {tool === 'regression' && <div className="evidence-canvas engineering-form">
+        <ToolIntro title="Regression gate">Create persisted EvalRuns, then compare a baseline and candidate over the same Golden Dataset.</ToolIntro>
         <section className="evalrun-create" aria-label="Create EvalRun">
           <div>
             <h3>Create EvalRun</h3>
@@ -190,10 +234,11 @@ export function EngineeringPanel({
           <button disabled={!canCompare} onClick={() => run(async () => setComparison(await api.compareEvaluationRuns(baseline, candidate)))}>Run gate</button>
         </div>
         {comparison && <><div className={`gate-status ${comparison.status}`}>{comparison.status.toUpperCase()} · {(comparison.baseline_pass_rate * 100).toFixed(1)}% → {(comparison.candidate_pass_rate * 100).toFixed(1)}%</div>
-          <ul className="finding-list">{comparison.findings.map((item, index) => <li key={`${item.rule}-${index}`} data-severity={item.severity}><code>{item.rule}</code><span>{item.case_id || 'run'}</span><p>{item.message}</p></li>)}</ul></>}
+          <ul className="finding-list">{comparison.findings.map((item, index) => <li key={`${item.rule}-${index}`} data-severity={item.severity}><code>{item.rule}</code><span>{item.case_id || 'run'}</span><p>{item.message}</p>{(item.baseline !== undefined || item.candidate !== undefined) && <button onClick={() => prefillSbsFromFinding(item)}>Review side by side</button>}</li>)}</ul></>}
       </div>}
 
       {tool === 'replay' && <div className="evidence-canvas engineering-form">
+        <ToolIntro title="Replay evidence">Compare two checkpoints without executing tools, then describe a provenance-preserving safe fork.</ToolIntro>
         <h3>Checkpoint state diff</h3>
         <div className="form-row">
           <label>Before<input value={beforeCheckpoint} onChange={(e) => setBeforeCheckpoint(e.target.value)} placeholder="checkpoint id" /></label>
@@ -207,11 +252,31 @@ export function EngineeringPanel({
 
       {tool === 'sbs' && <div className="engineering-grid">
         <aside className="evidence-index"><h3>Review queue</h3>{sbsTasks.length === 0 && <p>暂无待评 SBS。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{item.status}</span></button>)}</aside>
-        <div className="evidence-canvas engineering-form">{!sbsTask ? <EmptyEvidence text="选择任务后，只显示盲化候选。" /> : <>
+        <div className="evidence-canvas engineering-form">
+          <ToolIntro title="Blinded preference review">Create blinded A/B tasks, judge outputs without model identity, and keep the reason as auditable evidence.</ToolIntro>
+          <section className="sbs-create" aria-label="Create SBS task">
+            <h3>Create SBS task</h3>
+            <div className="form-row">
+              <label>Prompt<input value={sbsDraft.prompt} onChange={(e) => setSbsDraft((draft) => ({ ...draft, prompt: e.target.value }))} /></label>
+              <label>Candidate A output<textarea value={sbsDraft.candidateA} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateA: e.target.value }))} /></label>
+              <label>Candidate B output<textarea value={sbsDraft.candidateB} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateB: e.target.value }))} /></label>
+              <button disabled={!sbsDraft.prompt.trim() || !sbsDraft.candidateA.trim() || !sbsDraft.candidateB.trim()} onClick={createSbsTask}>Create SBS task</button>
+            </div>
+          </section>
+          {!sbsTask ? <EmptyEvidence text="创建任务，或从左侧选择一个待评任务。" /> : <>
           <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>Candidate {item.label}</strong><p>{item.output}</p></article>)}</div>
           <div className="form-row"><label>Reviewer<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label><label>Winner<select aria-label="Winner" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">Tie</option><option value="both_bad">Both bad</option></select></label><label>Reason<textarea aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-          <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => { await api.submitSBSReview(sbsTask.task_id, { task_id: sbsTask.task_id, reviewer, winner, reason, dimension_scores: {}, revision: 1 }) })}>Save review</button></div>
-        </>}</div>
+          <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
+            await api.submitSBSReview(sbsTask.task_id, { task_id: sbsTask.task_id, reviewer, winner, reason, dimension_scores: {}, revision: 1 })
+            setSbsTasks(await api.listSBSTasks())
+            setSbsTask(null)
+            setReviewer('')
+            setWinner('A')
+            setReason('')
+            setNotice('Review saved')
+          })}>Save review</button></div>
+        </>}
+        </div>
       </div>}
     </section>
   )
@@ -255,7 +320,13 @@ function ChangeList({ diff }: { diff: ReplayDiff }) {
 }
 
 function EmptyEvidence({ text }: { text: string }) { return <div className="engineering-empty"><span>⌁</span><p>{text}</p></div> }
+function ToolIntro({ title, children }: { title: string; children: string }) { return <div className="tool-intro"><span>{title}</span><p>{children}</p></div> }
 function message(cause: unknown) { return cause instanceof Error ? cause.message : 'Unable to load evidence.' }
+function evidenceText(value: unknown) {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return 'No evidence recorded.'
+  return JSON.stringify(value, null, 2)
+}
 function evaluationRunLabel(run: EvaluationRun) {
   const created = new Date(run.created_at).toLocaleString()
   return `${created} · ${run.dataset_path} · ${run.mode} · ${run.completed_cases}/${run.total_cases} · ${run.status}`

@@ -79,6 +79,10 @@ describe('EngineeringPanel', () => {
       task_id: 'sbs-1', prompt: '诊断超时',
       candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
     })
+    api.submitSBSReview.mockResolvedValue({
+      task_id: 'sbs-1', reviewer: 'alice', winner: 'both_bad', reason: '两边都缺少证据',
+      dimension_scores: {}, revision: 1, canonical_winner: 'both_bad',
+    })
     const user = userEvent.setup()
     render(<EngineeringPanel threadId="thread-1" />)
 
@@ -90,6 +94,9 @@ describe('EngineeringPanel', () => {
     await user.type(screen.getByLabelText('Reviewer'), 'alice')
     await user.type(screen.getByLabelText('Reason'), '两边都缺少证据')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save review' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Save review' }))
+    expect(await screen.findByText('Review saved')).toBeInTheDocument()
+    expect(api.listSBSTasks).toHaveBeenCalledTimes(2)
   })
 
   it('creates a persisted EvalRun in Regression and selects it as the baseline', async () => {
@@ -142,5 +149,77 @@ describe('EngineeringPanel', () => {
     await user.selectOptions(screen.getByLabelText('Candidate'), 'run-one')
 
     expect(screen.getByRole('button', { name: 'Run gate' })).toBeDisabled()
+  })
+
+  it('explains what every Agent Engineering module does', async () => {
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    expect(screen.getByText(/Inspect every span/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Regression' }))
+    expect(await screen.findByText(/Create persisted EvalRuns/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Replay diff' }))
+    expect(screen.getByText(/Compare two checkpoints/i)).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'SBS review' }))
+    expect(screen.getByText(/Create blinded A\/B tasks/i)).toBeInTheDocument()
+  })
+
+  it('creates and opens a blinded SBS task from the SBS module', async () => {
+    const task = {
+      task_id: 'sbs-created', prompt: 'Which answer is better?', status: 'pending' as const,
+      provenance: {},
+      candidate_a: { candidate_id: 'baseline', output: 'Old answer', metadata: {} },
+      candidate_b: { candidate_id: 'candidate', output: 'New answer', metadata: {} },
+    }
+    api.listSBSTasks.mockResolvedValueOnce([]).mockResolvedValueOnce([task])
+    api.createSBSTask.mockResolvedValue(task)
+    api.getSBSTask.mockResolvedValue({
+      task_id: 'sbs-created', prompt: task.prompt,
+      candidates: [{ label: 'A', output: 'Old answer' }, { label: 'B', output: 'New answer' }],
+    })
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('sbs-created' as `${string}-${string}-${string}-${string}-${string}`)
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'SBS review' }))
+    await user.type(screen.getByLabelText('Prompt'), task.prompt)
+    await user.type(screen.getByLabelText('Candidate A output'), 'Old answer')
+    await user.type(screen.getByLabelText('Candidate B output'), 'New answer')
+    await user.click(screen.getByRole('button', { name: 'Create SBS task' }))
+
+    await waitFor(() => expect(api.createSBSTask).toHaveBeenCalledWith(task))
+    expect(await screen.findByText('Old answer')).toBeInTheDocument()
+    expect(screen.getByText('New answer')).toBeInTheDocument()
+  })
+
+  it('prefills an SBS task from a Regression finding', async () => {
+    const runs = ['base', 'candidate'].map((runId) => ({
+      run_id: runId, created_at: '2026-07-14T01:00:00Z', updated_at: '2026-07-14T01:01:00Z',
+      mode: 'quick', agent_mode: 'single', status: 'completed' as const,
+      dataset_path: 'claw_eval_smoke', dataset_hash: 'hash', total_cases: 1,
+      completed_cases: 1, failed_cases: 0, case_results: [],
+    }))
+    api.listEvaluationRuns.mockResolvedValue(runs)
+    api.compareEvaluationRuns.mockResolvedValue({
+      baseline_run_id: 'base', candidate_run_id: 'candidate', status: 'failed',
+      baseline_pass_rate: 1, candidate_pass_rate: 0,
+      findings: [{
+        rule: 'answer_score', severity: 'error', case_id: 'case-1',
+        baseline: 'Old answer', candidate: 'New answer', message: 'Answer quality regressed',
+      }],
+    })
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'Regression' }))
+    await user.selectOptions(await screen.findByLabelText('Baseline'), 'base')
+    await user.selectOptions(screen.getByLabelText('Candidate'), 'candidate')
+    await user.click(screen.getByRole('button', { name: 'Run gate' }))
+    await user.click(await screen.findByRole('button', { name: 'Review side by side' }))
+
+    expect(screen.getByRole('tab', { name: 'SBS review' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Answer quality regressed')
+    expect(screen.getByLabelText('Candidate A output')).toHaveValue('Old answer')
+    expect(screen.getByLabelText('Candidate B output')).toHaveValue('New answer')
   })
 })
