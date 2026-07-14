@@ -97,7 +97,7 @@ def test_compile_agent_wraps_necessary_graph_nodes(monkeypatch):
 
     monkeypatch.setattr(agent_module, "StateGraph", FakeGraph)
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: object())
-    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, long_term_memory=None: (lambda state: state))
+    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, **_kwargs: (lambda state: state))
     monkeypatch.setattr(agent_module, "ToolNode", lambda tools: object())
 
     manager = AgentHookManager()
@@ -133,7 +133,7 @@ def test_build_skill_vector_index_defaults_to_memory() -> None:
         _env_file=None,
     )
 
-    index = agent_module._build_skill_vector_index(settings)
+    index = agent_module.build_skill_vector_index(settings)
 
     assert isinstance(index, InMemorySkillVectorIndex)
 
@@ -185,7 +185,7 @@ def test_build_skill_vector_index_uses_qdrant_when_configured() -> None:
         _env_file=None,
     )
 
-    index = agent_module._build_skill_vector_index(settings)
+    index = agent_module.build_skill_vector_index(settings)
 
     assert isinstance(index, QdrantSkillVectorIndex)
     assert index.url == "http://qdrant.example.test:6333"
@@ -199,7 +199,7 @@ def test_build_skill_reranker_returns_none_when_disabled() -> None:
         _env_file=None,
     )
 
-    assert agent_module._build_skill_reranker(settings) is None
+    assert agent_module.build_skill_reranker(settings) is None
 
 
 def test_build_skill_reranker_uses_ollama_when_enabled() -> None:
@@ -212,7 +212,7 @@ def test_build_skill_reranker_uses_ollama_when_enabled() -> None:
         _env_file=None,
     )
 
-    reranker = agent_module._build_skill_reranker(settings)
+    reranker = agent_module.build_skill_reranker(settings)
 
     assert isinstance(reranker, OllamaBgeM3Reranker)
     assert reranker.base_url == "http://ollama.example.test:11434"
@@ -242,8 +242,8 @@ def test_compile_agent_passes_reranker_when_enabled(monkeypatch) -> None:
 
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
     monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
-    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: object())
-    monkeypatch.setattr(agent_module, "_build_skill_reranker", lambda settings: FakeReranker())
+    monkeypatch.setattr(agent_module, "build_skill_vector_index", lambda settings: object())
+    monkeypatch.setattr(agent_module, "build_skill_reranker", lambda settings: FakeReranker())
     monkeypatch.setattr(agent_module, "build_skill_router", fake_build_skill_router)
 
     agent_module.compile_agent(
@@ -282,7 +282,7 @@ def test_build_skill_routing_llm_uses_dedicated_model(monkeypatch) -> None:
         _env_file=None,
     )
 
-    agent_module._build_skill_routing_llm(settings, llm_config=None)
+    agent_module.build_skill_routing_llm(settings, llm_config=None)
 
     assert captured_configs[0].model == "deepseek-v4-flash"
 
@@ -301,7 +301,7 @@ def test_build_skill_routing_llm_defaults_to_primary_model(monkeypatch) -> None:
         _env_file=None,
     )
 
-    agent_module._build_skill_routing_llm(settings, llm_config=None)
+    agent_module.build_skill_routing_llm(settings, llm_config=None)
 
     assert captured_configs == [None]
 
@@ -315,7 +315,7 @@ async def test_warmup_skill_routing_skips_when_semantic_disabled(monkeypatch) ->
         called = True
         return object()
 
-    monkeypatch.setattr(agent_module, "_build_skill_vector_index", fake_build_skill_vector_index)
+    monkeypatch.setattr(agent_module, "build_skill_vector_index", fake_build_skill_vector_index)
     settings = Settings(
         DATABASE_URL="postgresql://localhost/test",
         LLM_MODEL="test-model",
@@ -335,7 +335,7 @@ async def test_warmup_skill_routing_invokes_vector_index(monkeypatch) -> None:
         async def warmup(self, registry):
             warmed_registries.append(registry)
 
-    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: FakeIndex())
+    monkeypatch.setattr(agent_module, "build_skill_vector_index", lambda settings: FakeIndex())
     settings = Settings(
         DATABASE_URL="postgresql://localhost/test",
         LLM_MODEL="test-model",
@@ -355,7 +355,7 @@ async def test_warmup_skill_routing_swallows_index_errors(monkeypatch) -> None:
         async def warmup(self, registry):
             raise RuntimeError("qdrant unavailable")
 
-    monkeypatch.setattr(agent_module, "_build_skill_vector_index", lambda settings: FailingIndex())
+    monkeypatch.setattr(agent_module, "build_skill_vector_index", lambda settings: FailingIndex())
     settings = Settings(
         DATABASE_URL="postgresql://localhost/test",
         LLM_MODEL="test-model",
@@ -405,7 +405,7 @@ async def test_agent_node_propagates_runnable_config_to_llm(monkeypatch):
     monkeypatch.setattr(agent_module, "StateGraph", FakeGraph)
     monkeypatch.setattr(agent_module, "build_llm", lambda settings, llm_config=None: FakeLLM())
     monkeypatch.setattr(agent_module, "build_basic_tools", lambda workspace, **_kwargs: [])
-    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, long_term_memory=None: (lambda state: state))
+    monkeypatch.setattr(agent_module, "build_skill_router", lambda registry, **_kwargs: (lambda state: state))
     monkeypatch.setattr(agent_module, "ToolNode", lambda tools: object())
 
     agent_module.compile_agent(

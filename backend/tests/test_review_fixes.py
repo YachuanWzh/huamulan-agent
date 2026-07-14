@@ -218,11 +218,11 @@ class TestTokenBoundaryRouting:
         # "information" contains "for" as a substring but not as a word
         assert _keyword_route(registry, "I need information please") == []
 
-    def test_whole_word_still_matches(self, tmp_path: Path):
+    def test_whole_word_stopword_does_not_route(self, tmp_path: Path):
         d = tmp_path / "s"
         d.mkdir()
         (d / "SKILL.md").write_text(
             "---\nname: s\ndescription: for everything\n---\n# s\n", encoding="utf-8"
         )
         registry = SkillRegistry(tmp_path)
-        assert _keyword_route(registry, "this is for me") == ["s"]
+        assert _keyword_route(registry, "this is for me") == []

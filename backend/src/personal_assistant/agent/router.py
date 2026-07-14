@@ -1260,6 +1260,18 @@ def _deterministic_route(
         )
 
     suppressed: list[DeterministicRouteMatch] = []
+    if (
+        re.search(r"\b(?:runbook|playbook)\b|运行手册|排障手册", user_text, re.IGNORECASE)
+        and any(match.skill == "troubleshoot-runbook" for match in matches)
+    ):
+        kept = []
+        for match in matches:
+            if match.skill == "troubleshoot":
+                suppressed.append(match)
+                continue
+            kept.append(match)
+        matches = kept
+
     regex_primary_skills = {"weather", "audit-sop", "troubleshoot"}
     if any(match.skill in regex_primary_skills and match.source == "regex" for match in matches):
         kept: list[DeterministicRouteMatch] = []

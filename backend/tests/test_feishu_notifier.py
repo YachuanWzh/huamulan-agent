@@ -143,7 +143,7 @@ class TestExtractRcaResultText:
 
 class TestFeishuNotifier:
     def test_init_without_url_disables_push(self):
-        notifier = FeishuNotifier()
+        notifier = FeishuNotifier(webhook_url="")
         assert notifier.enabled is False
 
     def test_init_with_url_enables_push(self):
@@ -151,7 +151,7 @@ class TestFeishuNotifier:
         assert notifier.enabled is True
 
     def test_send_alert_skips_when_disabled(self):
-        notifier = FeishuNotifier()
+        notifier = FeishuNotifier(webhook_url="")
         result = notifier.send_alert({"level": "P0", "summary": "test"})
         assert result is False
 
@@ -219,6 +219,6 @@ class TestFeishuNotifier:
         assert result is True
 
     def test_send_rca_skips_when_disabled(self):
-        notifier = FeishuNotifier()
+        notifier = FeishuNotifier(webhook_url="")
         result = notifier.send_rca_result({"level": "P0"}, "result", "completed")
         assert result is False

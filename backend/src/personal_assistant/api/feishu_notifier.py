@@ -168,9 +168,10 @@ class FeishuNotifier:
         from personal_assistant.config import get_settings
 
         settings = get_settings()
-        self._webhook_url = (
-            webhook_url or settings.feishu_webhook_url
-        ).strip()
+        resolved_webhook_url = (
+            settings.feishu_webhook_url if webhook_url is None else webhook_url
+        )
+        self._webhook_url = resolved_webhook_url.strip()
         self._webhook_secret = (
             webhook_secret or settings.feishu_webhook_secret
         ).strip()

@@ -86,6 +86,18 @@ class TestKeywordRoute:
         result = _keyword_route(registry, "completely unrelated xyz query")
         assert result == []
 
+    def test_explicit_runbook_suppresses_generic_troubleshoot(self, tmp_path: Path):
+        _make_named_skill_with_triggers(tmp_path, "troubleshoot", ["RCA", "troubleshoot"])
+        _make_named_skill_with_triggers(tmp_path, "troubleshoot-runbook", ["runbook"])
+        registry = SkillRegistry(tmp_path)
+
+        result = _keyword_route(
+            registry,
+            "请按 APM runbook 排查支付回调超时并做 RCA",
+        )
+
+        assert result == ["troubleshoot-runbook"]
+
     def test_matches_multiple_skills(self, multi_skill_dir: Path):
         registry = SkillRegistry(multi_skill_dir)
         # "skill" appears in all skills' descriptions (meta only)

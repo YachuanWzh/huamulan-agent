@@ -84,7 +84,7 @@ async def test_list_threads_excludes_internal_skill_evaluation_runs() -> None:
     await memory.list_threads()
 
     sql, _ = pool.conn.calls[0]
-    assert "thread_id NOT LIKE 'skill-eval-%'" in sql
+    assert "thread_id NOT LIKE 'skill-eval-%%'" in sql
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,18 @@ class FakeCache:
             if key.startswith(prefix):
                 self.values.pop(key, None)
 
+    async def delete_thread_scope(self, safe_thread):
+        for pattern in (
+            f"pa:v1:execution_summary:{safe_thread}",
+            f"pa:v1:execution_logs:{safe_thread}:*",
+            f"pa:v1:audit_events:{safe_thread}:*",
+            f"pa:v1:tool_errors:{safe_thread}:*",
+        ):
+            if pattern.endswith("*"):
+                await self.delete_pattern(pattern)
+            else:
+                await self.delete(pattern)
+
     async def close(self):
         return None
 

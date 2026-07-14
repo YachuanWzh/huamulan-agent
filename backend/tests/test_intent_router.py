@@ -1,11 +1,16 @@
 """Tests for multi-agent hybrid intent routing (3-tier funnel)."""
 import asyncio
-import json
 
 from personal_assistant.agent.intent_router import (
+    INTENT_CLASSIFIER_PROMPT,
     INTENT_UTTERANCES,
     IntentCandidate,
+    IntentDecision,
+    IntentEmbeddingIndex,
     IntentSlots,
+    _parse_intent_llm_decision,
+    _regex_intent_with_confidence,
+    route_intent_with_trace,
 )
 
 
@@ -19,7 +24,7 @@ def async_test(coro):
 
 def test_intent_utterances_covers_all_intents():
     """每个意图类别都有足够的示例语句（≥6条）"""
-    for intent in ("troubleshoot", "audit", "metrics"):
+    for intent in ("troubleshoot", "patrol", "audit", "metrics"):
         assert intent in INTENT_UTTERANCES, f"missing intent: {intent}"
         assert len(INTENT_UTTERANCES[intent]) >= 6, (
             f"{intent} needs >=6 utterances, got {len(INTENT_UTTERANCES[intent])}"
@@ -94,9 +99,6 @@ def test_intent_routing_result_holds_slots_and_trace():
 
 # ── Task 2: Tier 0 regex with confidence ──────────────────────────────
 
-from personal_assistant.agent.intent_router import _regex_intent_with_confidence
-
-
 def test_regex_intent_troubleshoot_high_confidence():
     """多关键词命中 → 高置信度（≥0.80）"""
     intent, conf = _regex_intent_with_confidence("排查 payment-service 超时 根因分析")
@@ -153,9 +155,6 @@ def test_regex_intent_case_insensitive():
 
 # ── Task 3: IntentEmbeddingIndex ──────────────────────────────────────
 
-from personal_assistant.agent.intent_router import IntentEmbeddingIndex
-
-
 class FakeEmbeddingProvider:
     """Fake embedding provider — deterministic vectors per text via hash."""
 
@@ -173,7 +172,7 @@ def test_intent_index_warmup_and_search():
 
     candidates = async_test(index.search("排查服务超时问题", top_k=3))
     assert len(candidates) >= 1
-    assert candidates[0].name in ("troubleshoot", "audit", "metrics")
+    assert candidates[0].name in ("troubleshoot", "patrol", "audit", "metrics")
     assert 0.0 <= candidates[0].score <= 1.0
 
 
@@ -185,7 +184,7 @@ def test_intent_index_only_searches_defined_intents():
 
     candidates = async_test(index.search("random query", top_k=10))
     for c in candidates:
-        assert c.name in ("troubleshoot", "audit", "metrics")
+        assert c.name in ("troubleshoot", "patrol", "audit", "metrics")
 
 
 def test_intent_index_top_k_respected():
@@ -219,13 +218,6 @@ def test_intent_index_search_returns_sorted_by_score():
 
 
 # ── Task 4: Tier 2 LLM classifier ─────────────────────────────────────
-
-from personal_assistant.agent.intent_router import (
-    IntentDecision,
-    INTENT_CLASSIFIER_PROMPT,
-    _parse_intent_llm_decision,
-)
-
 
 def test_parse_intent_llm_decision_dict():
     """解析字典格式"""
@@ -310,9 +302,6 @@ def test_intent_decision_pydantic_validation():
 
 
 # ── Task 5: 3-tier funnel orchestrator ─────────────────────────────────
-
-from personal_assistant.agent.intent_router import route_intent_with_trace
-
 
 def test_route_intent_regex_short_circuit():
     """高置信度正则命中 → 短路返回，不进入语义层"""
