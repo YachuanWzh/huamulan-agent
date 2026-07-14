@@ -1,18 +1,16 @@
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
-from langgraph.graph.message import REMOVE_ALL_MESSAGES, RemoveMessage
 from langgraph.types import Send
 
 from personal_assistant.agent.child_agent_protocol import SubAgentInput
@@ -22,6 +20,7 @@ from personal_assistant.agent.state import AgentState
 from personal_assistant.api.schemas import ExecutionLogCreate, LLMConfig
 from personal_assistant.config import Settings
 from personal_assistant.memory.compaction import ContextCompactor
+from personal_assistant.observability.traces import context_from_config, trace_metadata
 from personal_assistant.skills import SkillRegistry
 
 # ── 复用单 Agent 的压缩辅助函数 ──────────────────────────────────────
@@ -29,6 +28,8 @@ from personal_assistant.agent.agent import (
     _build_compaction_summary_messages,
     _replace_messages_update,
 )
+
+logger = logging.getLogger(__name__)
 
 
 APM_SUBAGENTS = ("metrics", "troubleshoot", "patrol", "audit")
@@ -316,6 +317,7 @@ def compile_multi_agent(
         return _replace_messages_update(messages)
 
     async def rewrite_intent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
+        started = time.perf_counter()
         query = _last_human_text(state)
 
         # ── Enhanced query rewriting (LLM-based, config-gated) ──
@@ -366,7 +368,7 @@ def compile_multi_agent(
                 slots_dict["sub_queries"] = rewrite_result.sub_queries
                 slots_dict["rewrite_reason"] = rewrite_result.reason
 
-            await _record_multiagent_log(memory, config, "rewrite_intent", output={
+            await _record_multiagent_log(memory, config, "rewrite_intent", duration_ms=_elapsed_ms(started), output={
                 "slots": slots_dict,
                 "trace": routing.trace,
                 "rewrite": {
@@ -386,30 +388,33 @@ def compile_multi_agent(
             payload["rewritten_query"] = rewritten_query
             payload["slots"]["original_query"] = rewrite_result.original
             payload["slots"]["rewrite_confidence"] = rewrite_result.confidence
-        await _record_multiagent_log(memory, config, "rewrite_intent", output=payload)
+        await _record_multiagent_log(memory, config, "rewrite_intent", duration_ms=_elapsed_ms(started), output=payload)
         return {
             "rewritten_query": rewritten_query,
             "intent_slots": payload["slots"],
         }
 
     async def supervisor(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
+        started = time.perf_counter()
         plan = _supervisor_plan(state.get("rewritten_query", ""), state.get("intent_slots", {}))
-        await _record_multiagent_log(memory, config, "supervisor", output=plan)
+        await _record_multiagent_log(memory, config, "supervisor", duration_ms=_elapsed_ms(started), output=plan)
         return {"multiagent_plan": plan}
 
     async def retrieve_user_vector_context(
         state: AgentState,
         config: RunnableConfig | None = None,
     ) -> AgentState:
+        started = time.perf_counter()
         context = await _retrieve_user_vector_context(
             settings,
             state.get("rewritten_query", ""),
             hybrid_retriever=hybrid_retriever,
         )
-        await _record_multiagent_log(memory, config, "user_vector_retrieval", output=context)
+        await _record_multiagent_log(memory, config, "user_vector_retrieval", duration_ms=_elapsed_ms(started), output=context)
         return {"user_vector_context": context}
 
     async def child_agent(state: AgentState, config: RunnableConfig | None = None, *, name: str) -> AgentState:
+        started = time.perf_counter()
         # 构造结构化输入
         task_input = SubAgentInput(
             task_id=f"{name}-{_tid(config)}",
@@ -492,7 +497,7 @@ def compile_multi_agent(
         report_dict.setdefault("status", "completed")
         report_dict.setdefault("error", None)
 
-        await _record_multiagent_log(memory, config, f"{name}_agent", input=task_input.model_dump(), output=report_dict)
+        await _record_multiagent_log(memory, config, f"{name}_agent", duration_ms=_elapsed_ms(started), input=task_input.model_dump(), output=report_dict)
         return {
             "apm_reports": [report_dict],
             "child_agent_tasks": [{
@@ -516,6 +521,7 @@ def compile_multi_agent(
         LangGraph Send API 的 fan-out 边提供隐式 barrier — 所有 fan-out
         节点完成后才进入下游。本节点记录完成状态日志，不做实际等待。
         """
+        started = time.perf_counter()
         tasks = state.get("child_agent_tasks", [])
         reports = state.get("apm_reports", [])
         plan = state.get("multiagent_plan", {})
@@ -523,7 +529,7 @@ def compile_multi_agent(
         completed = {t.get("agent_name") for t in tasks if t.get("status") in ("completed", "failed")}
         missing = expected - completed
 
-        await _record_multiagent_log(memory, config, "gate", output={
+        await _record_multiagent_log(memory, config, "gate", duration_ms=_elapsed_ms(started), output={
             "expected": sorted(expected),
             "completed": sorted(completed),
             "missing": sorted(missing),
@@ -550,6 +556,7 @@ def compile_multi_agent(
         ]
 
     async def synthesize(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
+        started = time.perf_counter()
         payload = {
             "query": state.get("rewritten_query", ""),
             "intent_slots": state.get("intent_slots", {}),
@@ -569,7 +576,7 @@ def compile_multi_agent(
             config=config,
         )
         content = str(getattr(response, "content", response) or "")
-        await _record_multiagent_log(memory, config, "synthesize", input=payload, output={"content": content})
+        await _record_multiagent_log(memory, config, "synthesize", duration_ms=_elapsed_ms(started), input=payload, output={"content": content})
         return {"messages": [AIMessage(content=content)]}
 
     graph = StateGraph(AgentState)
@@ -678,25 +685,34 @@ async def _record_multiagent_log(
     *,
     input: dict[str, Any] | None = None,
     output: dict[str, Any] | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     record = getattr(memory, "record_execution_log", None)
     if not callable(record):
         return
     try:
+        trace = context_from_config(config)
+        span = trace.child(kind="multiagent", node=name) if trace else None
         await record(
             ExecutionLogCreate(
                 thread_id=_thread_id_from_config(config) or "",
+                run_id=span.span_id if span else None,
+                parent_id=span.parent_span_id if span else None,
                 event_type="multiagent",
                 status="completed",
                 name=name,
                 input=input or {},
                 output=output or {},
-                duration_ms=0,
-                metadata={"agent_mode": "multi"},
+                duration_ms=duration_ms,
+                metadata={**trace_metadata(span), "agent_mode": "multi"},
             )
         )
     except Exception:
         return
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, int((time.perf_counter() - started) * 1000))
 
 
 def _last_human_text(state: AgentState) -> str:

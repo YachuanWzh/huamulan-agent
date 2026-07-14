@@ -231,3 +231,22 @@ async def test_trace_api_returns_topology_and_thread_summaries(monkeypatch) -> N
 
     assert view.summary.duration_ms == 25
     assert summaries[0].trace_id == "trace-1"
+
+
+async def test_multiagent_log_records_measured_child_span() -> None:
+    from personal_assistant.agent.multi_agent import _record_multiagent_log
+
+    memory = _RecordingMemory()
+    root = TraceContext.create("thread-1")
+
+    await _record_multiagent_log(
+        memory,
+        {"configurable": {"thread_id": "thread-1", "trace_context": root.to_dict()}},
+        "supervisor",
+        duration_ms=17,
+    )
+
+    log = memory.logs[0]
+    assert log.duration_ms == 17
+    assert log.parent_id == root.span_id
+    assert log.metadata["trace_id"] == root.trace_id
