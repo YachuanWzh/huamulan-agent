@@ -367,6 +367,9 @@ async def test_run_user_turn_stream_injects_callbacks() -> None:
     assert mock_callback in call_config["callbacks"]
     assert "metadata" in call_config
     assert call_config["metadata"]["langfuse_session_id"] == "thread-abc"
+    trace_context = call_config["configurable"]["trace_context"]
+    assert trace_context["thread_id"] == "thread-abc"
+    assert trace_context["trace_id"]
 
 
 async def test_resume_after_approval_stream_injects_callbacks() -> None:

@@ -473,6 +473,7 @@ class AgentHarness:
         """Stream the agent response as SSE events."""
         request_started = time.perf_counter()
         first_visible_chunk_sent = False
+        trace: TraceContext | None = None
         try:
             yield _ttft_phase_event("request_received", request_started)
             # Layer 1: 正则快速拦截
@@ -511,8 +512,26 @@ class AgentHarness:
                 )
             )
             yield _ttft_phase_event("graph_compiled", request_started)
-            config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+            trace = TraceContext.create(thread_id, metadata={"agent_mode": agent_mode})
+            config: dict[str, Any] = {
+                "configurable": {
+                    "thread_id": thread_id,
+                    "trace_context": trace.to_dict(),
+                }
+            }
             _merge_callbacks(config, self.callbacks, thread_id, callbacks)
+            await _record_execution_log(
+                self.memory,
+                ExecutionLogCreate(
+                    thread_id=thread_id,
+                    run_id=trace.span_id,
+                    event_type="turn",
+                    status="started",
+                    name="user_turn_stream",
+                    input={"message": _clip_subject(message), "agent_mode": agent_mode},
+                    metadata=trace_metadata(trace),
+                ),
+            )
             yield _ttft_phase_event("llm_stream_started", request_started)
             async for event in app.astream_events(
                 {"messages": [HumanMessage(content=message)]},
@@ -597,7 +616,33 @@ class AgentHarness:
                         done_payload["intent_slots"] = slots
                 yield _sse_event("done", done_payload)
                 self._schedule_memory_reflection(thread_id, values, llm_config, callbacks)
+            await _record_execution_log(
+                self.memory,
+                ExecutionLogCreate(
+                    thread_id=thread_id,
+                    run_id=trace.span_id,
+                    event_type="turn",
+                    status="completed",
+                    name="user_turn_stream",
+                    duration_ms=int((time.perf_counter() - request_started) * 1000),
+                    metadata=trace_metadata(trace),
+                ),
+            )
         except Exception as exc:
+            if trace is not None:
+                await _record_execution_log(
+                    self.memory,
+                    ExecutionLogCreate(
+                        thread_id=thread_id,
+                        run_id=trace.span_id,
+                        event_type="turn",
+                        status="failed",
+                        name="user_turn_stream",
+                        duration_ms=int((time.perf_counter() - request_started) * 1000),
+                        error={"type": exc.__class__.__name__, "message": str(exc)},
+                        metadata=trace_metadata(trace),
+                    ),
+                )
             yield _sse_event("error", {"message": _stream_error_message(exc)})
 
         yield "data: [DONE]\n\n"
