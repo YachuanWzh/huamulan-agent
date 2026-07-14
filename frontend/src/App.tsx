@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { Sidebar } from './components/Sidebar'
 import { WorkspacePanel } from './components/WorkspacePanel'
+import { EngineeringPanel } from './components/EngineeringPanel'
 import type { AgentMode, ReplayState } from './lib/api'
 import './App.css'
 
@@ -16,7 +17,7 @@ function App() {
   const [conversationKey, setConversationKey] = useState('empty-thread')
   const [replayState, setReplayState] = useState<ReplayState | null>(null)
   const [agentMode, setAgentMode] = useState<AgentMode>('single')
-  const [activePanel, setActivePanel] = useState<'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance'>('chat')
+  const [activePanel, setActivePanel] = useState<'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance' | 'engineering'>('chat')
 
   const handleThreadCreated = () => {
     const id = createThreadId()
@@ -86,6 +87,8 @@ function App() {
             replayState={replayState}
             agentMode={agentMode}
           />
+        ) : activePanel === 'engineering' ? (
+          <EngineeringPanel threadId={threadId} />
         ) : (
           <WorkspacePanel
             panel={activePanel}

@@ -683,6 +683,78 @@ export interface BudgetSnapshot {
   totals: BudgetTotals
 }
 
+async function requestText(url: string): Promise<string> {
+  const res = await fetch(`${_baseUrl}${url}`)
+  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
+  return res.text()
+}
+
+export interface TraceSpan {
+  id: number
+  trace_id: string
+  span_id: string
+  parent_span_id?: string | null
+  thread_id: string
+  kind: string
+  status: string
+  name?: string | null
+  created_at: string
+  duration_ms?: number | null
+  token_usage: Record<string, unknown>
+  error: Record<string, unknown>
+  metadata: Record<string, unknown>
+}
+
+export interface TraceNode { span: TraceSpan; children: TraceNode[]; orphaned: boolean }
+export interface TraceSummary {
+  trace_id: string
+  total_spans: number
+  total_tokens: number
+  error_count: number
+  retry_count: number
+  tool_calls: number
+  duration_ms: number
+}
+export interface TraceView { summary: TraceSummary; spans: TraceSpan[]; roots: TraceNode[] }
+
+export interface EvaluationCaseResult {
+  run_id: string; case_id: string; status: string; passed: boolean
+  safety_passed?: boolean | null; forbidden_tools: string[]
+  latency_ms?: number | null; total_tokens?: number | null
+  trace_id?: string | null; thread_id?: string | null; detail: Record<string, unknown>
+}
+export interface EvaluationRun {
+  run_id: string; created_at: string; updated_at: string; mode: string; agent_mode: string
+  status: 'running' | 'completed' | 'incomplete' | 'failed'
+  dataset_path: string; dataset_hash: string; total_cases: number
+  completed_cases: number; failed_cases: number; case_results: EvaluationCaseResult[]
+}
+export interface RegressionFinding {
+  rule: string; severity: 'error' | 'warning' | 'info'; case_id?: string | null
+  baseline?: unknown; candidate?: unknown; message: string
+}
+export interface EvaluationComparison {
+  baseline_run_id: string; candidate_run_id: string; status: 'passed' | 'warning' | 'failed'
+  baseline_pass_rate: number; candidate_pass_rate: number; findings: RegressionFinding[]
+}
+export interface StateChange { path: string; kind: string; before?: unknown; after?: unknown }
+export interface ReplayDiff { added: StateChange[]; removed: StateChange[]; changed: StateChange[] }
+export interface ReplayForkDescriptor {
+  source_thread_id: string; source_checkpoint_id: string; target_thread_id: string
+  execute: false; provenance: Record<string, unknown>; state: Record<string, unknown>
+}
+export interface SBSTask {
+  task_id: string; prompt: string; status: string; provenance: Record<string, unknown>
+}
+export interface BlindedSBSTask {
+  task_id: string; prompt: string; candidates: { label: 'A' | 'B'; output: string }[]
+}
+export interface SBSReview {
+  task_id: string; reviewer: string; winner: 'A' | 'B' | 'tie' | 'both_bad'
+  reason: string; dimension_scores: Record<string, number>; revision: number
+  canonical_winner?: string | null
+}
+
 // ── API client ────────────────────────────────────────────────────
 
 export const api = {
@@ -744,6 +816,42 @@ export const api = {
 
   replay: (threadId: string) =>
     request<ReplayResponse>(`/api/threads/${threadId}/replay`),
+
+  getTrace: (traceId: string) =>
+    request<TraceView>(`/api/traces/${encodeURIComponent(traceId)}`),
+
+  listThreadTraces: (threadId: string) =>
+    request<TraceSummary[]>(`/api/threads/${encodeURIComponent(threadId)}/traces`),
+
+  listEvaluationRuns: () =>
+    request<EvaluationRun[]>('/api/evaluations/runs'),
+
+  compareEvaluationRuns: (baselineRunId: string, candidateRunId: string) =>
+    request<EvaluationComparison>('/api/evaluations/compare', {
+      method: 'POST',
+      body: JSON.stringify({ baseline_run_id: baselineRunId, candidate_run_id: candidateRunId }),
+    }),
+
+  diffReplay: (threadId: string, beforeCheckpointId: string, afterCheckpointId: string) =>
+    request<ReplayDiff>(`/api/threads/${encodeURIComponent(threadId)}/replay/diff`, {
+      method: 'POST',
+      body: JSON.stringify({ before_checkpoint_id: beforeCheckpointId, after_checkpoint_id: afterCheckpointId }),
+    }),
+
+  createReplayFork: (threadId: string, checkpointId: string, targetThreadId?: string) =>
+    request<ReplayForkDescriptor>(`/api/threads/${encodeURIComponent(threadId)}/replay/fork`, {
+      method: 'POST',
+      body: JSON.stringify({ checkpoint_id: checkpointId, target_thread_id: targetThreadId }),
+    }),
+
+  listSBSTasks: () => request<SBSTask[]>('/api/sbs/tasks'),
+  getSBSTask: (taskId: string) =>
+    request<BlindedSBSTask>(`/api/sbs/tasks/${encodeURIComponent(taskId)}`),
+  submitSBSReview: (taskId: string, review: SBSReview) =>
+    request<SBSReview>(`/api/sbs/tasks/${encodeURIComponent(taskId)}/reviews`, {
+      method: 'POST', body: JSON.stringify(review),
+    }),
+  exportSBS: () => requestText('/api/sbs/export'),
 
   listThreads: () =>
     request<ThreadSummary[]>('/api/threads?limit=100'),

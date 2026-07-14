@@ -553,11 +553,12 @@ export function useChat(
                 // Find the last user message (most recent, highest index)
                 let lastUserIdx = -1
                 for (let i = prev.length - 1; i >= 0; i--) {
-                  if (prev[i].role === 'user') { lastUserIdx = i; break }
+                  if (prev[i]?.role === 'user') { lastUserIdx = i; break }
                 }
                 if (lastUserIdx < 0) return prev
                 // Only attach if rewritten differs from original
                 const userMsg = prev[lastUserIdx]
+                if (!userMsg) return prev
                 if (event.rewritten_query!.trim() === userMsg.content.trim()) return prev
                 return prev.map((m, i) =>
                   i === lastUserIdx ? { ...m, rewrittenQuery: event.rewritten_query } : m,

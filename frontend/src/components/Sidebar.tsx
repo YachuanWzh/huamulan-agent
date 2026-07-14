@@ -11,10 +11,10 @@ interface Props {
   onThreadCleared?: () => void
   onThreadSelected?: (threadId: string) => void
   onReplayState?: (state: ReplayState) => void
-  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance') => void
+  onPanelChange?: (panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance' | 'engineering') => void
 }
 
-type Tab = 'skills' | 'history' | 'checkpoint' | 'audit' | 'performance' | 'governance'
+type Tab = 'skills' | 'history' | 'checkpoint' | 'audit' | 'performance' | 'governance' | 'engineering'
 
 export function Sidebar({
   threadId,
@@ -124,7 +124,7 @@ export function Sidebar({
     setClearingHistory(false)
   }
 
-  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance') => {
+  const selectTab = (nextTab: Tab, panel: 'chat' | 'skills' | 'checkpoint' | 'audit' | 'performance' | 'governance' | 'engineering') => {
     setTab(nextTab)
     onPanelChange?.(panel)
   }
@@ -179,6 +179,14 @@ export function Sidebar({
           onClick={() => selectTab('governance', 'governance')}
         >
           Governance
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'engineering'}
+          className={`tab ${tab === 'engineering' ? 'active' : ''}`}
+          onClick={() => selectTab('engineering', 'engineering')}
+        >
+          Agent Engineering
         </button>
       </div>
 

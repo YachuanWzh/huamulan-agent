@@ -41,6 +41,55 @@ function skillEvaluationSseBody(events: SkillEvaluationStreamEvent[]): string {
 }
 
 describe('api', () => {
+  describe('agent engineering endpoints', () => {
+    it('loads traces and compares evaluation runs', async () => {
+      server.use(
+        http.get(`${BASE}/api/traces/trace-1`, () =>
+          HttpResponse.json({
+            summary: { trace_id: 'trace-1', total_spans: 1 },
+            spans: [],
+            roots: [],
+          }),
+        ),
+        http.post(`${BASE}/api/evaluations/compare`, async ({ request }) => {
+          const body = (await request.json()) as { baseline_run_id: string }
+          return HttpResponse.json({
+            baseline_run_id: body.baseline_run_id,
+            candidate_run_id: 'candidate',
+            status: 'passed',
+            baseline_pass_rate: 1,
+            candidate_pass_rate: 1,
+            findings: [],
+          })
+        }),
+      )
+
+      await expect(api.getTrace('trace-1')).resolves.toMatchObject({
+        summary: { trace_id: 'trace-1' },
+      })
+      await expect(api.compareEvaluationRuns('base', 'candidate')).resolves.toMatchObject({
+        status: 'passed',
+      })
+    })
+
+    it('diffs replay and submits blinded SBS reviews', async () => {
+      server.use(
+        http.post(`${BASE}/api/threads/thread-1/replay/diff`, () =>
+          HttpResponse.json({ added: [], removed: [], changed: [] }),
+        ),
+        http.post(`${BASE}/api/sbs/tasks/sbs-1/reviews`, async ({ request }) =>
+          HttpResponse.json(await request.json()),
+        ),
+      )
+
+      await expect(api.diffReplay('thread-1', 'cp-1', 'cp-2')).resolves.toEqual({
+        added: [], removed: [], changed: [],
+      })
+      await expect(api.submitSBSReview('sbs-1', {
+        task_id: 'sbs-1', reviewer: 'alice', winner: 'A', reason: 'better', dimension_scores: {}, revision: 1,
+      })).resolves.toMatchObject({ winner: 'A' })
+    })
+  })
   describe('health', () => {
     it('returns status ok', async () => {
       server.use(
