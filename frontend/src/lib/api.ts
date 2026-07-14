@@ -223,6 +223,7 @@ export interface SkillEvaluationReport {
 export type SkillEvaluationStreamEvent =
   | {
       type: 'started'
+      run_id?: string
       mode: 'quick' | 'e2e'
       source: string
       total: number
@@ -248,6 +249,7 @@ export type SkillEvaluationStreamEvent =
     }
   | {
       type: 'done'
+      run_id?: string
       mode: 'quick' | 'e2e'
       source: string
       total: number
@@ -743,8 +745,18 @@ export interface ReplayForkDescriptor {
   source_thread_id: string; source_checkpoint_id: string; target_thread_id: string
   execute: false; provenance: Record<string, unknown>; state: Record<string, unknown>
 }
+export interface SBSCandidate {
+  candidate_id: string
+  output: string
+  metadata: Record<string, unknown>
+}
 export interface SBSTask {
-  task_id: string; prompt: string; status: string; provenance: Record<string, unknown>
+  task_id: string
+  prompt: string
+  candidate_a: SBSCandidate
+  candidate_b: SBSCandidate
+  status: 'pending' | 'reviewed'
+  provenance: Record<string, unknown>
 }
 export interface BlindedSBSTask {
   task_id: string; prompt: string; candidates: { label: 'A' | 'B'; output: string }[]
@@ -845,6 +857,10 @@ export const api = {
     }),
 
   listSBSTasks: () => request<SBSTask[]>('/api/sbs/tasks'),
+  createSBSTask: (task: SBSTask) =>
+    request<SBSTask>('/api/sbs/tasks', {
+      method: 'POST', body: JSON.stringify(task),
+    }),
   getSBSTask: (taskId: string) =>
     request<BlindedSBSTask>(`/api/sbs/tasks/${encodeURIComponent(taskId)}`),
   submitSBSReview: (taskId: string, review: SBSReview) =>

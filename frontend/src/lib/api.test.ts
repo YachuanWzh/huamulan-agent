@@ -4,6 +4,7 @@ import { setupServer } from 'msw/node'
 import {
   api,
   setBaseUrl,
+  type SBSTask,
   type SkillEvaluationStreamEvent,
   type StreamEvent,
 } from './api'
@@ -88,6 +89,25 @@ describe('api', () => {
       await expect(api.submitSBSReview('sbs-1', {
         task_id: 'sbs-1', reviewer: 'alice', winner: 'A', reason: 'better', dimension_scores: {}, revision: 1,
       })).resolves.toMatchObject({ winner: 'A' })
+    })
+
+    it('creates an SBS task', async () => {
+      const task: SBSTask = {
+        task_id: 'sbs-new',
+        prompt: 'Which answer is better?',
+        status: 'pending',
+        provenance: {},
+        candidate_a: { candidate_id: 'baseline', output: 'Answer A', metadata: {} },
+        candidate_b: { candidate_id: 'candidate', output: 'Answer B', metadata: {} },
+      }
+      server.use(
+        http.post(`${BASE}/api/sbs/tasks`, async ({ request }) => {
+          expect(await request.json()).toEqual(task)
+          return HttpResponse.json(task)
+        }),
+      )
+
+      await expect(api.createSBSTask(task)).resolves.toMatchObject({ task_id: 'sbs-new' })
     })
   })
   describe('health', () => {
