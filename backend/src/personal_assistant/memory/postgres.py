@@ -21,8 +21,16 @@ from personal_assistant.api.schemas import (
     ToolError,
 )
 from personal_assistant.skills.evaluation.models import SkillEvaluationReport
+from personal_assistant.skills.evaluation.ops import EvaluationCaseResult, EvaluationRun
 
 logger = logging.getLogger(__name__)
+
+_EVALUATION_RUN_SELECT = """
+SELECT run_id, created_at, updated_at, mode, agent_mode, status, source,
+       dataset_path, dataset_hash, git_sha, config_snapshot, total_cases,
+       completed_cases, failed_cases, report
+FROM evaluation_runs
+"""
 
 
 class PostgresMemory:
@@ -72,6 +80,7 @@ class PostgresMemory:
         await self._setup_tool_results()
         await self._setup_tool_errors()
         await self._setup_skill_evaluation_results()
+        await self._setup_evaluation_runs()
         await self._setup_otel_alerts()
 
     async def stop(self) -> None:
@@ -511,6 +520,121 @@ class PostgresMemory:
             rows = await cursor.fetchall()
         return len(rows)
 
+    async def create_evaluation_run(self, run: EvaluationRun) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO evaluation_runs
+                    (run_id, mode, agent_mode, status, source, dataset_path,
+                     dataset_hash, git_sha, config_snapshot, total_cases,
+                     completed_cases, failed_cases, report)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,
+                        %s, %s, %s, %s::jsonb)
+                ON CONFLICT (run_id) DO NOTHING
+                """,
+                (
+                    run.run_id, run.mode, run.agent_mode, run.status, run.source,
+                    run.dataset_path, run.dataset_hash, run.git_sha,
+                    Jsonb(_jsonable(run.config_snapshot)), run.total_cases,
+                    run.completed_cases, run.failed_cases,
+                    Jsonb(_jsonable(run.report)),
+                ),
+            )
+
+    async def record_evaluation_case_result(self, result: EvaluationCaseResult) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO evaluation_case_results
+                    (run_id, case_id, status, passed, safety_passed,
+                     forbidden_tools, latency_ms, total_tokens, trace_id,
+                     thread_id, detail)
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (run_id, case_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    passed = EXCLUDED.passed,
+                    safety_passed = EXCLUDED.safety_passed,
+                    forbidden_tools = EXCLUDED.forbidden_tools,
+                    latency_ms = EXCLUDED.latency_ms,
+                    total_tokens = EXCLUDED.total_tokens,
+                    trace_id = EXCLUDED.trace_id,
+                    thread_id = EXCLUDED.thread_id,
+                    detail = EXCLUDED.detail,
+                    updated_at = now()
+                """,
+                (
+                    result.run_id, result.case_id, result.status, result.passed,
+                    result.safety_passed, Jsonb(result.forbidden_tools),
+                    result.latency_ms, result.total_tokens, result.trace_id,
+                    result.thread_id, Jsonb(_jsonable(result.detail)),
+                ),
+            )
+
+    async def complete_evaluation_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        completed_cases: int,
+        failed_cases: int,
+        report: dict[str, Any],
+    ) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                UPDATE evaluation_runs
+                SET status = %s, completed_cases = %s, failed_cases = %s,
+                    report = %s::jsonb, updated_at = now()
+                WHERE run_id = %s
+                """,
+                (status, completed_cases, failed_cases, Jsonb(_jsonable(report)), run_id),
+            )
+
+    async def list_evaluation_runs(self, limit: int = 100) -> list[EvaluationRun]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 500))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                f"{_EVALUATION_RUN_SELECT} ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+        return [_evaluation_run_from_row(row) for row in rows]
+
+    async def get_evaluation_run(self, run_id: str) -> EvaluationRun | None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                f"{_EVALUATION_RUN_SELECT} WHERE run_id = %s",
+                (run_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            cursor = await conn.execute(
+                """
+                SELECT run_id, case_id, status, passed, safety_passed,
+                       forbidden_tools, latency_ms, total_tokens, trace_id,
+                       thread_id, detail
+                FROM evaluation_case_results
+                WHERE run_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (run_id,),
+            )
+            case_rows = await cursor.fetchall()
+        run = _evaluation_run_from_row(row)
+        run.case_results = [_evaluation_case_from_row(item) for item in case_rows]
+        return run
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,
@@ -904,6 +1028,60 @@ class PostgresMemory:
             )
 
 
+    async def _setup_evaluation_runs(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS evaluation_runs (
+                    run_id TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    mode TEXT NOT NULL,
+                    agent_mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    source TEXT,
+                    dataset_path TEXT NOT NULL,
+                    dataset_hash TEXT NOT NULL,
+                    git_sha TEXT,
+                    config_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    total_cases INTEGER NOT NULL DEFAULT 0,
+                    completed_cases INTEGER NOT NULL DEFAULT 0,
+                    failed_cases INTEGER NOT NULL DEFAULT 0,
+                    report JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS evaluation_case_results (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    run_id TEXT NOT NULL REFERENCES evaluation_runs(run_id) ON DELETE CASCADE,
+                    case_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    passed BOOLEAN NOT NULL,
+                    safety_passed BOOLEAN,
+                    forbidden_tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    latency_ms INTEGER,
+                    total_tokens INTEGER,
+                    trace_id TEXT,
+                    thread_id TEXT,
+                    detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    UNIQUE (run_id, case_id)
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_evaluation_runs_created
+                ON evaluation_runs (created_at DESC)
+                """
+            )
+
+
     async def _setup_otel_alerts(self) -> None:
         if self.pool is None:
             raise RuntimeError("Postgres memory is not started")
@@ -1291,6 +1469,42 @@ def _execution_log_from_row(row: Any) -> ExecutionLog:
         duration_ms=row[11],
         token_usage=row[12] or {},
         metadata=row[13] or {},
+    )
+
+
+def _evaluation_run_from_row(row: Any) -> EvaluationRun:
+    return EvaluationRun(
+        run_id=row[0],
+        created_at=row[1],
+        updated_at=row[2],
+        mode=row[3],
+        agent_mode=row[4],
+        status=row[5],
+        source=row[6],
+        dataset_path=row[7],
+        dataset_hash=row[8],
+        git_sha=row[9],
+        config_snapshot=row[10] or {},
+        total_cases=row[11],
+        completed_cases=row[12],
+        failed_cases=row[13],
+        report=row[14] or {},
+    )
+
+
+def _evaluation_case_from_row(row: Any) -> EvaluationCaseResult:
+    return EvaluationCaseResult(
+        run_id=row[0],
+        case_id=row[1],
+        status=row[2],
+        passed=row[3],
+        safety_passed=row[4],
+        forbidden_tools=row[5] or [],
+        latency_ms=row[6],
+        total_tokens=row[7],
+        trace_id=row[8],
+        thread_id=row[9],
+        detail=row[10] or {},
     )
 
 

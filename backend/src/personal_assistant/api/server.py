@@ -93,6 +93,15 @@ from personal_assistant.skills.evaluation.quality import (
     evaluate_tool_cases,
 )
 from personal_assistant.skills.evaluation.offline import evaluate_multi_agent_intent_cases
+from personal_assistant.skills.evaluation.ops import (
+    EvaluationCaseResult,
+    EvaluationCompareRequest,
+    EvaluationComparison,
+    EvaluationRun,
+    case_result_from_detail,
+    compare_evaluation_runs,
+    create_run_snapshot,
+)
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
 from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
@@ -1165,6 +1174,32 @@ async def run_skill_evaluation_stream(
     )
 
 
+@app.get("/api/evaluations/runs", response_model=list[EvaluationRun])
+async def list_evaluation_runs(limit: int = 100) -> list[EvaluationRun]:
+    return await memory.list_evaluation_runs(limit=limit)
+
+
+@app.get("/api/evaluations/runs/{run_id}", response_model=EvaluationRun)
+async def get_evaluation_run(run_id: str) -> EvaluationRun:
+    run = await memory.get_evaluation_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Evaluation run not found")
+    return run
+
+
+@app.post("/api/evaluations/compare", response_model=EvaluationComparison)
+async def compare_evaluation_run_pair(
+    request: EvaluationCompareRequest,
+) -> EvaluationComparison:
+    baseline = await memory.get_evaluation_run(request.baseline_run_id)
+    candidate = await memory.get_evaluation_run(request.candidate_run_id)
+    if baseline is None or candidate is None:
+        raise HTTPException(status_code=404, detail="Evaluation run not found")
+    if baseline.status != "completed" or candidate.status != "completed":
+        raise HTTPException(status_code=409, detail="Only completed runs can be compared")
+    return compare_evaluation_runs(baseline, candidate, request.thresholds)
+
+
 async def _reset_skill_evaluations(memory) -> SkillEvaluationResetResponse:
     deleted = await memory.reset_skill_evaluation_results()
     return SkillEvaluationResetResponse(deleted=deleted, results=[])
@@ -1213,11 +1248,30 @@ async def _iter_skill_evaluation_events(
     skills = list(registry.skills.values())
     total = len(cases)
     source = f"golden:{path}"
-    yield {"type": "started", "mode": mode, "total": total, "completed": 0, "source": source}
+    run_id = f"skill-eval-{mode}-{uuid4().hex[:8]}"
+    run = create_run_snapshot(
+        run_id=run_id,
+        mode=mode,
+        agent_mode=agent_mode,
+        dataset_path=path,
+        settings=settings,
+        total_cases=total,
+    )
+    create_run = getattr(memory, "create_evaluation_run", None)
+    if callable(create_run):
+        await create_run(run)
+    yield {
+        "type": "started",
+        "run_id": run_id,
+        "mode": mode,
+        "total": total,
+        "completed": 0,
+        "source": source,
+    }
 
     case_results = []
     case_details = []
-    run_id = f"skill-eval-{mode}-{uuid4().hex[:8]}"
+    failed_cases = 0
     # 快检模式构建LLM安全判定实例
     quick_guard_llm = None
     if mode == "quick" and settings.prompt_guard_llm_enabled:
@@ -1242,8 +1296,24 @@ async def _iter_skill_evaluation_events(
                 outcome = await _run_quick_case(registry, case, guard_llm=quick_guard_llm, agent_mode=agent_mode)
         except Exception as exc:
             logger.error("Case %s evaluation failed: %s", case.id, exc)
+            failed_cases += 1
+            record_case = getattr(memory, "record_evaluation_case_result", None)
+            if callable(record_case):
+                await record_case(
+                    EvaluationCaseResult(
+                        run_id=run_id,
+                        case_id=case.id,
+                        status="failed",
+                        passed=False,
+                        detail={
+                            "error_type": exc.__class__.__name__,
+                            "message": str(exc),
+                        },
+                    )
+                )
             yield {
                 "type": "case_error",
+                "run_id": run_id,
                 "mode": mode,
                 "case_id": case.id,
                 "message": f"id:{case.id}评测失败，请稍后重试",
@@ -1260,8 +1330,20 @@ async def _iter_skill_evaluation_events(
             )
         detail = build_case_evaluation_detail(case, outcome, mode=mode, judge=judge)
         case_details.append(detail)
+        record_case = getattr(memory, "record_evaluation_case_result", None)
+        if callable(record_case):
+            await record_case(
+                case_result_from_detail(
+                    run_id=run_id,
+                    case_id=case.id,
+                    detail=detail,
+                    trace_id=_trace_id_from_logs(outcome.get("logs", [])),
+                    thread_id=(f"{run_id}-{case.id}" if mode == "e2e" else None),
+                )
+            )
         progress_event: dict = {
             "type": "case_progress",
+            "run_id": run_id,
             "mode": mode,
             "source": source,
             "total": total,
@@ -1327,8 +1409,18 @@ async def _iter_skill_evaluation_events(
     )
     await memory.record_skill_evaluation_results(report, source=source)
     latest = await memory.list_latest_skill_evaluations()
+    complete_run = getattr(memory, "complete_evaluation_run", None)
+    if callable(complete_run):
+        await complete_run(
+            run_id,
+            status="incomplete" if failed_cases else "completed",
+            completed_cases=len(case_details),
+            failed_cases=failed_cases,
+            report=report.model_dump(mode="json"),
+        )
     yield {
         "type": "done",
+        "run_id": run_id,
         "mode": mode,
         "source": source,
         "total": total,
@@ -1704,6 +1796,14 @@ def _log_value(log, name: str):
     if isinstance(log, dict):
         return log.get(name)
     return getattr(log, name, None)
+
+
+def _trace_id_from_logs(logs) -> str | None:
+    for log in logs:
+        metadata = _log_value(log, "metadata") or {}
+        if isinstance(metadata, dict) and metadata.get("trace_id"):
+            return str(metadata["trace_id"])
+    return None
 
 
 def _golden_dataset_root() -> Path:
