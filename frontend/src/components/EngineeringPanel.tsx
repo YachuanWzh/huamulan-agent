@@ -356,20 +356,20 @@ export function EngineeringPanel({
           </details>
           {!sbsTask ? <EmptyEvidence text="创建任务，或从评审队列中选择一个任务。" /> : <>
           <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>候选 {item.label}</strong><p>{item.output}</p></article>)}</div>
-          <div className="form-row sbs-review-form">
+          {sbsTask.status === 'reviewed' ? <SBSReviewResult review={sbsTask.review} /> : <div className="form-row sbs-review-form">
             <label>评审人<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label>
             <label>胜出项<select aria-label="胜出项" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">平局</option><option value="both_bad">两者都不合格</option></select></label>
             <label className="sbs-review-reason">理由<textarea aria-label="理由" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
             <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
             await api.submitSBSReview(sbsTask.task_id, { task_id: sbsTask.task_id, reviewer, winner, reason, dimension_scores: {}, revision: 1 })
             setSbsTasks(await api.listSBSTasks())
-            setSbsTask(null)
+            setSbsTask(await api.getSBSTask(sbsTask.task_id))
             setReviewer('')
             setWinner('A')
             setReason('')
-            setNotice('评审已保存')
+            setNotice('评审已保存，任务已锁定')
             })}>保存评审</button>
-          </div>
+          </div>}
         </>}
         </div>
       </div>}
@@ -413,6 +413,31 @@ function TracePayload({ label, value }: { label: string; value: Record<string, u
 function ChangeList({ diff }: { diff: ReplayDiff }) {
   const rows = [...diff.added, ...diff.removed, ...diff.changed]
   return <ul className="change-list">{rows.map((item, index) => <li key={`${item.kind}-${item.path}-${index}`}><span>{changeKindLabel(item.kind)}</span><code>{item.path}</code><pre>{JSON.stringify(item.before)} → {JSON.stringify(item.after)}</pre></li>)}</ul>
+}
+
+function SBSReviewResult({ review }: { review: BlindedSBSTask['review'] }) {
+  if (!review) return <section className="sbs-review-result" aria-label="评审结果">
+    <header>
+      <div><span>已评审 · 已锁定</span><strong>评审记录不可用</strong></div>
+      <p>该任务不能修改</p>
+    </header>
+    <footer>未找到历史评审明细，请联系管理员检查数据完整性。</footer>
+  </section>
+  const winnerLabel = review.winner === 'A' || review.winner === 'B'
+    ? `候选 ${review.winner} 胜出`
+    : review.winner === 'tie' ? '结果持平' : '两者均不合格'
+  return <section className="sbs-review-result" aria-label="评审结果">
+    <header>
+      <div><span>已评审 · 已锁定</span><strong>{winnerLabel}</strong></div>
+      <p>该评审已保存，不能修改</p>
+    </header>
+    <dl>
+      <div><dt>评审人</dt><dd>{review.reviewer}</dd></div>
+      <div><dt>评审版本</dt><dd>第 {review.revision} 版</dd></div>
+      <div className="sbs-review-result-reason"><dt>评审理由</dt><dd>{review.reason || '未填写理由'}</dd></div>
+    </dl>
+    <footer>如需重新比较，请创建新的 SBS 任务。</footer>
+  </section>
 }
 
 function EmptyEvidence({ text }: { text: string }) { return <div className="engineering-empty"><span>⌁</span><p>{text}</p></div> }

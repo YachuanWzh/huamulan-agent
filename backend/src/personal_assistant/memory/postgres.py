@@ -722,6 +722,34 @@ class PostgresMemory:
             )
         return saved
 
+    async def get_latest_sbs_review(self, task_id: str) -> SBSReview | None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT task_id, reviewer, revision, display_winner,
+                       canonical_winner, reason, dimension_scores
+                FROM sbs_reviews
+                WHERE task_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (task_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SBSReview(
+            task_id=row[0],
+            reviewer=row[1],
+            revision=int(row[2]),
+            winner=row[3],
+            canonical_winner=row[4],
+            reason=row[5] or "",
+            dimension_scores=dict(row[6] or {}),
+        )
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,

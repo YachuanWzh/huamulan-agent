@@ -14,7 +14,7 @@
 2. **持久化 EvalRun**：每次评测保存数据集哈希、脱敏配置、运行状态、完整报告和逐用例结果，并关联 `trace_id` / `thread_id`。
 3. **自动回归门禁**：同一套比较器同时服务 API 和 CI CLI，识别通过变失败、安全退化、禁用工具、缺失用例、通过率下降、延迟和 Token 退化。
 4. **Replay Debugger**：对两个 Checkpoint 做递归状态 Diff，区分新增、删除、修改；提供不执行 Agent 的安全 Fork 描述对象。
-5. **真实 A/B 运行与盲测 SBS**：同一提示词并行调用两套模型/Agent 配置，复用项目 AgentHarness、工具链、安全策略与 Trace；运行完成后隐藏候选身份，稳定随机展示 A/B，支持 tie / both_bad、1–5 维度评分、评审 revision 和 NDJSON 导出。
+5. **真实 A/B 运行与盲测 SBS**：同一提示词并行调用两套模型/Agent 配置，复用项目 AgentHarness、工具链、安全策略与 Trace；运行完成后隐藏候选身份，稳定随机展示 A/B，支持 tie / both_bad、1–5 维度评分、保存后锁定和 NDJSON 导出。
 6. **Agent Engineering 前端工作台**：一个入口覆盖 Trace、Regression、Replay diff、SBS review 四类工程任务。
 7. **工程基线恢复**：修复了配置环境污染等历史问题；当前完整后端和前端测试全部通过，前端生产构建通过。
 
@@ -58,7 +58,7 @@
 | 评测结果不完整持久化 | 主要保存按 Skill 聚合后的快照 | 无法精确比较两次运行的逐 Case 变化 |
 | 没有统一回归门禁 | 有评分，但没有 baseline/candidate gate | CI 无法阻断安全或能力退化 |
 | Replay 只能查看 | 缺少两个 Checkpoint 的状态差异 | Debug 时需要人工翻大段 JSON |
-| 缺少 SBS | 没有盲测、人工偏好和 revision | 无法沉淀人类偏好数据与模型/Agent 对比证据 |
+| 缺少 SBS | 没有盲测、人工偏好和不可变评审记录 | 无法沉淀人类偏好数据与模型/Agent 对比证据 |
 | 工程入口分散 | 执行日志、评测、Checkpoint 分散在不同区域 | 复盘路径长，缺少面向 Agent 工程师的统一工作台 |
 
 ---
@@ -84,7 +84,7 @@ flowchart LR
     Cases --> Compare["Regression Comparator"]
     Compare --> Gate["API / CI Exit Code"]
     Cases --> SBS["Blinded SBS"]
-    SBS --> Preference["Review Revisions / NDJSON"]
+    SBS --> Preference["Locked Review / NDJSON"]
 
     Checkpoint["LangGraph Checkpoints"] --> Diff["Replay State Diff"]
     Diff --> Fork["Safe Fork Descriptor\nexecute=false"]
@@ -405,7 +405,7 @@ sequenceDiagram
     API->>Human: Candidate A / Candidate B（隐藏身份）
     Human->>API: winner + reason + dimension scores
     API->>API: display winner 映射 canonical winner
-    API->>DB: 新增 revision，不覆盖历史
+    API->>DB: 首次保存评审并锁定任务
 ```
 
 ### 8.3 领域规则
@@ -413,8 +413,8 @@ sequenceDiagram
 - Winner 可选 A、B、tie、both_bad；
 - `both_bad` 必须填写理由；
 - 每个维度评分必须在 1–5；
-- 同一 reviewer 的新评审自动增加 revision；
-- 评审后任务状态更新为 reviewed；
+- 首次保存后任务状态更新为 reviewed，评审内容与胜出项不可修改；
+- reviewed 任务只返回只读评审结果；如需重新比较，必须创建新的 SBS 任务；
 - 导出时按 `task_id` 排序，并保留 provenance。
 - 模型和 Agent 身份只存在于服务端任务元数据，在盲评响应中不返回。
 
@@ -427,7 +427,7 @@ sequenceDiagram
 | POST | `/api/sbs/tasks` | 导入两份已有输出并创建 SBS 任务（高级入口） |
 | GET | `/api/sbs/tasks` | 列出任务 |
 | GET | `/api/sbs/tasks/{task_id}` | 获取盲化任务 |
-| POST | `/api/sbs/tasks/{task_id}/reviews` | 保存评审 revision |
+| POST | `/api/sbs/tasks/{task_id}/reviews` | 首次保存评审并锁定任务；重复提交返回 409 |
 | GET | `/api/sbs/export` | 导出 NDJSON |
 
 ---
@@ -482,7 +482,7 @@ Sidebar 新增 `Agent Engineering` 入口，包含四个标签：
 | A/B testing | baseline/candidate 比较 + SBS 盲测 | 已具备离线 A/B；未做线上流量分桶 |
 | regression detection | 可解释规则、API、CI CLI、退出码 | 已落地 |
 | Agent debugging | Checkpoint recursive diff、失败 Span、orphan、safe fork descriptor | 已落地第一版 |
-| 标注 / SBS / 数据管道 | SBS Task/Review/revision/NDJSON；Eval Case 持久化 | 已落地最小完整链路 |
+| 标注 / SBS / 数据管道 | SBS Task/不可变 Review/NDJSON；Eval Case 持久化 | 已落地最小完整链路 |
 | 全栈与系统设计 | FastAPI、PostgreSQL JSONB、Pydantic、React、TypeScript、测试和构建 | 有直接代码证据 |
 | agentic coding failure mode | 环境污染、Mock 契约漂移、流式链路漏埋点、固定 0ms、半成品运行比较等均有修复记录 | 可作为面试复盘材料 |
 | Code Agent 独立思考 | 统一证据模型、API/CLI 共用 comparator、safe fork 不隐式执行、SBS 不泄露身份 | 有明确工程取舍 |
@@ -598,7 +598,7 @@ npm run lint
 1. 创建一条 baseline/candidate SBS Task；
 2. 评审端只看到 Candidate A/B；
 3. 提交 winner、reason；
-4. 后端映射到真实候选并新增 revision；
+4. 后端映射到真实候选，保存后锁定任务；
 5. 导出 NDJSON 作为偏好数据或后续训练/分析输入。
 
 ---

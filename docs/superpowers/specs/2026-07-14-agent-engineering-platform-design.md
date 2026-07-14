@@ -215,7 +215,7 @@ Tasks can be created by running two model/Agent configurations through the exist
 - candidate identity, model, and run labels are hidden during review;
 - presentation order is randomized per task;
 - raw secrets and configured sensitive fields are redacted before persistence;
-- changing an SBS result creates a new revision instead of overwriting history.
+- the first saved SBS result locks the task; reviewed tasks expose a read-only result and reject later edits. A new comparison requires a new task.
 
 ## 5. API Surface
 
@@ -291,7 +291,7 @@ Backend unit tests:
 - evaluation run persistence and complete report retention;
 - comparator rules, missing cases, safety regression, warning thresholds, and CLI exit codes;
 - recursive checkpoint diff and safe replay-fork descriptor creation;
-- SBS randomization, canonical winner mapping, revision history, and export provenance.
+- SBS randomization, canonical winner mapping, immutable reviewed state, and export provenance.
 
 Backend integration/API tests:
 

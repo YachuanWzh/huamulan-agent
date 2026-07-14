@@ -77,10 +77,21 @@ describe('EngineeringPanel', () => {
     api.listSBSTasks.mockResolvedValue([{
       task_id: 'sbs-1', prompt: '诊断超时', status: 'pending',
     }])
-    api.getSBSTask.mockResolvedValue({
-      task_id: 'sbs-1', prompt: '诊断超时',
-      candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
-    })
+    api.getSBSTask
+      .mockResolvedValueOnce({
+        task_id: 'sbs-1', prompt: '诊断超时',
+        candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
+        status: 'pending', review: null,
+      })
+      .mockResolvedValueOnce({
+        task_id: 'sbs-1', prompt: '诊断超时',
+        candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
+        status: 'reviewed',
+        review: {
+          reviewer: 'alice', winner: 'both_bad', reason: '两边都缺少证据',
+          dimension_scores: {}, revision: 1,
+        },
+      })
     api.submitSBSReview.mockResolvedValue({
       task_id: 'sbs-1', reviewer: 'alice', winner: 'both_bad', reason: '两边都缺少证据',
       dimension_scores: {}, revision: 1, canonical_winner: 'both_bad',
@@ -97,8 +108,35 @@ describe('EngineeringPanel', () => {
     await user.type(screen.getByLabelText('理由'), '两边都缺少证据')
     await waitFor(() => expect(screen.getByRole('button', { name: '保存评审' })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: '保存评审' }))
-    expect(await screen.findByText('评审已保存')).toBeInTheDocument()
+    expect(await screen.findByText('评审已保存，任务已锁定')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '评审结果' })).toBeInTheDocument()
     expect(api.listSBSTasks).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders reviewed SBS tasks as a locked read-only result', async () => {
+    api.listSBSTasks.mockResolvedValue([{
+      task_id: 'sbs-reviewed', prompt: '诊断超时', status: 'reviewed',
+    }])
+    api.getSBSTask.mockResolvedValue({
+      task_id: 'sbs-reviewed', prompt: '诊断超时', status: 'reviewed',
+      candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
+      review: {
+        reviewer: 'alice', winner: 'B', reason: 'B 的证据更完整',
+        dimension_scores: {}, revision: 2,
+      },
+    })
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
+    await user.click(await screen.findByRole('button', { name: /诊断超时/ }))
+
+    expect(await screen.findByRole('region', { name: '评审结果' })).toBeInTheDocument()
+    expect(screen.getByText('候选 B 胜出')).toBeInTheDocument()
+    expect(screen.getByText('alice')).toBeInTheDocument()
+    expect(screen.getByText('B 的证据更完整')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存评审' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('评审人')).not.toBeInTheDocument()
   })
 
   it('creates a persisted EvalRun in Regression and selects it as the baseline', async () => {
@@ -180,6 +218,7 @@ describe('EngineeringPanel', () => {
     api.getSBSTask.mockResolvedValue({
       task_id: task.task_id, prompt: task.prompt,
       candidates: [{ label: 'A', output: 'Answer two' }, { label: 'B', output: 'Answer one' }],
+      status: 'pending', review: null,
     })
     const user = userEvent.setup()
     render(<EngineeringPanel threadId="thread-1" />)
@@ -229,6 +268,7 @@ describe('EngineeringPanel', () => {
     api.getSBSTask.mockResolvedValue({
       task_id: 'sbs-created', prompt: task.prompt,
       candidates: [{ label: 'A', output: 'Old answer' }, { label: 'B', output: 'New answer' }],
+      status: 'pending', review: null,
     })
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('sbs-created' as `${string}-${string}-${string}-${string}-${string}`)
     const user = userEvent.setup()

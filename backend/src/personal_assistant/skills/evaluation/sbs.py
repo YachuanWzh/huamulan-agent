@@ -68,10 +68,20 @@ class BlindedCandidate(BaseModel):
     output: str
 
 
+class SBSReviewDisplay(BaseModel):
+    reviewer: str
+    winner: Literal["A", "B", "tie", "both_bad"]
+    reason: str = ""
+    dimension_scores: dict[str, int] = Field(default_factory=dict)
+    revision: int = 1
+
+
 class BlindedSBSTask(BaseModel):
     task_id: str
     prompt: str
     candidates: list[BlindedCandidate]
+    status: Literal["pending", "reviewed"] = "pending"
+    review: SBSReviewDisplay | None = None
     identity_map: dict[str, str] = Field(exclude=True)
 
 
@@ -105,6 +115,7 @@ def present_blinded_task(task: SBSTask, *, seed: int | str | None = None) -> Bli
     return BlindedSBSTask(
         task_id=task.task_id,
         prompt=task.prompt,
+        status=task.status,
         candidates=[
             BlindedCandidate(label=label, output=candidate.output)
             for label, candidate in zip(labels, candidates, strict=True)
@@ -113,6 +124,16 @@ def present_blinded_task(task: SBSTask, *, seed: int | str | None = None) -> Bli
             label: candidate.candidate_id
             for label, candidate in zip(labels, candidates, strict=True)
         },
+    )
+
+
+def display_sbs_review(review: SBSReview) -> SBSReviewDisplay:
+    return SBSReviewDisplay(
+        reviewer=review.reviewer,
+        winner=review.winner,
+        reason=review.reason,
+        dimension_scores=review.dimension_scores,
+        revision=review.revision,
     )
 
 

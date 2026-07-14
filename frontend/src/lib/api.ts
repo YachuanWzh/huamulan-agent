@@ -767,6 +767,12 @@ export interface SBSTaskSummary {
 }
 export interface BlindedSBSTask {
   task_id: string; prompt: string; candidates: { label: 'A' | 'B'; output: string }[]
+  status: 'pending' | 'reviewed'
+  review: SBSReviewDisplay | null
+}
+export interface SBSReviewDisplay {
+  reviewer: string; winner: 'A' | 'B' | 'tie' | 'both_bad'
+  reason: string; dimension_scores: Record<string, number>; revision: number
 }
 export interface SBSReview {
   task_id: string; reviewer: string; winner: 'A' | 'B' | 'tie' | 'both_bad'

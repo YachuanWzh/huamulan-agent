@@ -125,6 +125,7 @@ from personal_assistant.skills.evaluation.sbs import (
     SBSTask,
     SBSTaskSummary,
     canonical_winner,
+    display_sbs_review,
     export_sbs_jsonl,
     present_blinded_task,
     summarize_sbs_task,
@@ -1380,7 +1381,12 @@ async def get_sbs_task(task_id: str) -> BlindedSBSTask:
     task = await memory.get_sbs_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="SBS task not found")
-    return present_blinded_task(task, seed=task.task_id)
+    blinded = present_blinded_task(task, seed=task.task_id)
+    if task.status == "reviewed":
+        review = await memory.get_latest_sbs_review(task_id)
+        if review is not None:
+            blinded = blinded.model_copy(update={"review": display_sbs_review(review)})
+    return blinded
 
 
 @app.post("/api/sbs/tasks/{task_id}/reviews", response_model=SBSReview)
@@ -1388,6 +1394,8 @@ async def submit_sbs_review(task_id: str, review: SBSReview) -> SBSReview:
     task = await memory.get_sbs_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="SBS task not found")
+    if task.status == "reviewed":
+        raise HTTPException(status_code=409, detail="该 SBS 任务已评审，不能再次修改")
     blinded = present_blinded_task(task, seed=task.task_id)
     canonical = canonical_winner(review, blinded)
     normalized = review.model_copy(

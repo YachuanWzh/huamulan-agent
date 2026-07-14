@@ -139,6 +139,67 @@ async def test_sbs_api_returns_blinded_task_and_canonicalizes_review(monkeypatch
     assert reviews == [review]
 
 
+async def test_reviewed_sbs_task_returns_saved_review_for_read_only_display(monkeypatch) -> None:
+    from personal_assistant.api import server
+
+    task = _task().model_copy(update={"status": "reviewed"})
+    saved_review = SBSReview(
+        task_id=task.task_id,
+        reviewer="alice",
+        winner="B",
+        reason="B 的证据更完整",
+        revision=2,
+        canonical_winner="model-v2",
+    )
+
+    class _Memory:
+        async def get_sbs_task(self, task_id):
+            return task if task_id == task.task_id else None
+
+        async def get_latest_sbs_review(self, task_id):
+            return saved_review if task_id == task.task_id else None
+
+    monkeypatch.setattr(server, "memory", _Memory())
+
+    blinded = await server.get_sbs_task(task.task_id)
+
+    assert blinded.status == "reviewed"
+    assert blinded.review is not None
+    assert blinded.review.reviewer == "alice"
+    assert blinded.review.winner == "B"
+    assert blinded.review.reason == "B 的证据更完整"
+    assert "canonical_winner" not in blinded.model_dump_json()
+
+
+async def test_reviewed_sbs_task_rejects_another_review(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from personal_assistant.api import server
+
+    task = _task().model_copy(update={"status": "reviewed"})
+
+    class _Memory:
+        async def get_sbs_task(self, task_id):
+            return task if task_id == task.task_id else None
+
+        async def record_sbs_review(self, _review):
+            raise AssertionError("reviewed tasks must not create another revision")
+
+    monkeypatch.setattr(server, "memory", _Memory())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server.submit_sbs_review(
+            task.task_id,
+            SBSReview(
+                task_id=task.task_id,
+                reviewer="bob",
+                winner="A",
+                reason="attempted edit",
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
 async def test_sbs_queue_does_not_expose_candidate_identity(monkeypatch) -> None:
     from personal_assistant.api import server
 

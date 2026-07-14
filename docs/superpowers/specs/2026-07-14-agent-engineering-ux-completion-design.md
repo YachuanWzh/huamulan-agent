@@ -100,7 +100,7 @@ The existing huamulan visual language remains intact. The design signature is an
 
 **Outputs:** A persisted SBS task, a randomized blinded candidate order, and a persisted review mapped back to canonical candidate identities by the backend.
 
-**Workflow:** Configure two distinct candidates, run the same prompt through both project Agent paths, automatically create a task from the completed outputs, then read the blinded candidates, choose A, B, Tie, or Both bad, enter the required review evidence, and save. The queue refreshes and the reviewed task no longer appears pending.
+**Workflow:** Configure two distinct candidates, run the same prompt through both project Agent paths, automatically create a task from the completed outputs, then read the blinded candidates, choose A, B, Tie, or Both bad, enter the required review evidence, and save. The queue refreshes and the task immediately switches to a locked result card showing the winner, reviewer, reason, and revision. Reviewed tasks cannot be edited or submitted again; a new comparison requires a new task.
 
 **Out of scope:** SBS Review does not expose model identity before judgment, automatically choose a winner, auto-approve risky tools, or replace automated Regression gates. It uses the project's evaluation approval policy so read-only safe tools can run without interruption while dangerous or mutating calls remain blocked.
 
