@@ -111,6 +111,42 @@ async def test_list_execution_logs_returns_thread_logs_in_database_order() -> No
     assert params == ("thread-1", 500)
 
 
+async def test_list_trace_logs_filters_by_trace_metadata() -> None:
+    created_at = datetime(2026, 7, 14, 1, 2, 3, tzinfo=UTC)
+    conn = FakeConnection(
+        rows=[
+            (
+                8, created_at, "thread-1", "span-1", None, "turn",
+                "completed", "user_turn", {}, {}, {}, 42, {},
+                {"trace_id": "trace-1", "span_id": "span-1"},
+            )
+        ]
+    )
+    memory = PostgresMemory("postgresql://example")
+    memory.pool = FakePool(conn)
+
+    logs = await memory.list_trace_logs("trace-1")
+
+    assert [log.run_id for log in logs] == ["span-1"]
+    sql, params = conn.calls[0]
+    assert "metadata->>'trace_id' = %s" in sql
+    assert params == ("trace-1", 2000)
+
+
+async def test_list_thread_trace_ids_returns_most_recent_trace_first() -> None:
+    conn = FakeConnection(rows=[("trace-new",), ("trace-old",)])
+    memory = PostgresMemory("postgresql://example")
+    memory.pool = FakePool(conn)
+
+    trace_ids = await memory.list_thread_trace_ids("thread-1", limit=1000)
+
+    assert trace_ids == ["trace-new", "trace-old"]
+    sql, params = conn.calls[0]
+    assert "DISTINCT ON (metadata->>'trace_id')" in sql
+    assert "WHERE thread_id = %s" in sql
+    assert params == ("thread-1", 200)
+
+
 async def test_execution_log_summary_aggregates_counts_and_tokens() -> None:
     conn = FakeConnection(
         rows=[
@@ -317,3 +353,25 @@ async def test_tool_retries_record_execution_logs_for_each_failed_attempt() -> N
     assert len(tool_logs) == 1
     assert tool_logs[0].status == "completed"
     assert tool_logs[0].metadata["tool_call_id"] == "call-1"
+
+
+async def test_tool_logs_are_child_spans_of_configured_trace() -> None:
+    from personal_assistant.observability.traces import TraceContext
+
+    memory = RetryMemory()
+    tool = FlakyTool()
+    root = TraceContext.create("thread-1")
+
+    await _execute_tool_calls_with_retry(
+        [tool],
+        [{"id": "call-1", "name": "lookup", "args": {"query": "alpha"}}],
+        config={"configurable": {"trace_context": root.to_dict()}},
+        memory=memory,
+        thread_id="thread-1",
+        sleep=no_sleep,
+    )
+
+    assert memory.execution_logs
+    assert {log.metadata["trace_id"] for log in memory.execution_logs} == {root.trace_id}
+    assert {log.parent_id for log in memory.execution_logs} == {root.span_id}
+    assert all(log.run_id for log in memory.execution_logs)

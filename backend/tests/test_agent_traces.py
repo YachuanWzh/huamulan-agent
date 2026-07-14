@@ -10,6 +10,14 @@ from personal_assistant.observability.traces import (
 )
 
 
+class _RecordingMemory:
+    def __init__(self) -> None:
+        self.logs = []
+
+    async def record_execution_log(self, log) -> None:
+        self.logs.append(log)
+
+
 def _log(
     log_id: int,
     *,
@@ -169,3 +177,57 @@ def test_build_trace_view_merges_started_and_completed_lifecycle_rows() -> None:
     assert view.summary.total_spans == 1
     assert view.roots[0].span.status == "completed"
     assert view.roots[0].span.duration_ms == 90
+
+
+async def test_run_user_turn_propagates_one_root_trace_to_config_and_logs() -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from personal_assistant.agent.harness import AgentHarness
+
+    app = MagicMock()
+    app.ainvoke = AsyncMock(return_value={"messages": [], "pending_approvals": []})
+    memory = _RecordingMemory()
+    settings = MagicMock()
+    settings.prompt_guard_llm_enabled = False
+    harness = AgentHarness(settings=settings, registry=MagicMock(), memory=memory)
+
+    with patch.object(harness, "_compile", return_value=app):
+        await harness.run_user_turn("thread-1", "hello")
+
+    config = app.ainvoke.call_args.kwargs["config"]
+    context = context_from_config(config)
+    assert context is not None
+    assert context.thread_id == "thread-1"
+    assert [log.status for log in memory.logs] == ["started", "completed"]
+    assert {log.run_id for log in memory.logs} == {context.span_id}
+    assert {log.metadata["trace_id"] for log in memory.logs} == {context.trace_id}
+
+
+async def test_trace_api_returns_topology_and_thread_summaries(monkeypatch) -> None:
+    from personal_assistant.api import server
+
+    logs = [
+        _log(
+            1,
+            trace_id="trace-1",
+            span_id="root",
+            name="user_turn",
+            event_type="turn",
+            duration_ms=25,
+        )
+    ]
+
+    class _TraceMemory:
+        async def list_trace_logs(self, trace_id: str):
+            return logs if trace_id == "trace-1" else []
+
+        async def list_thread_trace_ids(self, thread_id: str, limit: int = 200):
+            return ["trace-1"] if thread_id == "thread-1" else []
+
+    monkeypatch.setattr(server.harness, "memory", _TraceMemory())
+
+    view = await server.get_trace("trace-1")
+    summaries = await server.list_thread_traces("thread-1")
+
+    assert view.summary.duration_ms == 25
+    assert summaries[0].trace_id == "trace-1"

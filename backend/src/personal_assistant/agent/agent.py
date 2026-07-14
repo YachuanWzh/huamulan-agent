@@ -33,6 +33,7 @@ from personal_assistant.config import Settings
 from personal_assistant.memory.compaction import ContextCompactor, TOOL_RESULT_REFERENCE_TEMPLATE
 from personal_assistant.memory.long_term import LongTermMemoryStore
 from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.observability.traces import context_from_config, trace_metadata
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.tools import build_basic_tools
 
@@ -187,10 +188,14 @@ def compile_agent(
         thread_id = _thread_id_from_config(config)
         started = time.perf_counter()
         response = await llm.bind_tools(active_tools).ainvoke(messages, config=config)
+        trace = context_from_config(config)
+        span = trace.child(node="agent", kind="llm") if trace else None
         await _record_execution_log(
             memory,
             ExecutionLogCreate(
                 thread_id=thread_id or "",
+                run_id=span.span_id if span else None,
+                parent_id=span.parent_span_id if span else None,
                 event_type="llm",
                 status="completed",
                 name="agent",
@@ -199,6 +204,7 @@ def compile_agent(
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 token_usage=_extract_token_usage(response),
                 metadata={
+                    **trace_metadata(span),
                     "selected_skills": state.get("selected_skills", []),
                     "routing_trace": state.get("routing_trace", []),
                 },
@@ -537,6 +543,16 @@ async def _execute_tool_calls_with_retry(
         last_error: Exception | None = None
         max_attempts = max_retries + 1
         for attempt in range(1, max_attempts + 1):
+            trace = context_from_config(config)
+            span = (
+                trace.child(
+                    kind="tool",
+                    tool_call_id=tool_call_id,
+                    attempt=attempt,
+                )
+                if trace
+                else None
+            )
             try:
                 output = await tool.ainvoke(tool_args, config=config)
                 content = _tool_output_content(output)
@@ -550,13 +566,19 @@ async def _execute_tool_calls_with_retry(
                     memory,
                     ExecutionLogCreate(
                         thread_id=thread_id or "",
+                        run_id=span.span_id if span else None,
+                        parent_id=span.parent_span_id if span else None,
                         event_type="tool",
                         status="completed",
                         name=tool_name,
                         input=tool_args,
                         output={"content": content},
                         duration_ms=int((time.perf_counter() - tool_started) * 1000),
-                        metadata={"tool_call_id": tool_call_id, "attempt": attempt},
+                        metadata={
+                            **trace_metadata(span),
+                            "tool_call_id": tool_call_id,
+                            "attempt": attempt,
+                        },
                     ),
                 )
                 last_error = None
@@ -580,6 +602,8 @@ async def _execute_tool_calls_with_retry(
                     memory,
                     ExecutionLogCreate(
                         thread_id=thread_id or "",
+                        run_id=span.span_id if span else None,
+                        parent_id=span.parent_span_id if span else None,
                         event_type="tool_retry",
                         status="retrying" if will_retry else "failed",
                         name=tool_name,
@@ -590,6 +614,7 @@ async def _execute_tool_calls_with_retry(
                         },
                         duration_ms=int((time.perf_counter() - tool_started) * 1000),
                         metadata={
+                            **trace_metadata(span),
                             "tool_call_id": tool_call_id,
                             "attempt": attempt,
                             "max_attempts": max_attempts,
@@ -604,6 +629,8 @@ async def _execute_tool_calls_with_retry(
                 memory,
                 ExecutionLogCreate(
                     thread_id=thread_id or "",
+                    run_id=span.span_id if span else None,
+                    parent_id=span.parent_span_id if span else None,
                     event_type="tool",
                     status="failed",
                     name=tool_name,
@@ -613,7 +640,11 @@ async def _execute_tool_calls_with_retry(
                         "message": str(last_error) or last_error.__class__.__name__,
                     },
                     duration_ms=int((time.perf_counter() - tool_started) * 1000),
-                    metadata={"tool_call_id": tool_call_id, "attempt": max_attempts},
+                    metadata={
+                        **trace_metadata(span),
+                        "tool_call_id": tool_call_id,
+                        "attempt": max_attempts,
+                    },
                 ),
             )
             messages.append(

@@ -601,6 +601,58 @@ class PostgresMemory:
             for row in rows
         ]
 
+    async def list_trace_logs(
+        self,
+        trace_id: str,
+        limit: int = 2000,
+    ) -> list[ExecutionLog]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 2000))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT id, created_at, thread_id, run_id, parent_id, event_type,
+                       status, name, input, output, error, duration_ms,
+                       token_usage, metadata
+                FROM agent_execution_logs
+                WHERE metadata->>'trace_id' = %s
+                ORDER BY created_at ASC, id ASC
+                LIMIT %s
+                """,
+                (trace_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [_execution_log_from_row(row) for row in rows]
+
+    async def list_thread_trace_ids(
+        self,
+        thread_id: str,
+        limit: int = 200,
+    ) -> list[str]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 200))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT trace_id
+                FROM (
+                    SELECT DISTINCT ON (metadata->>'trace_id')
+                           metadata->>'trace_id' AS trace_id, created_at, id
+                    FROM agent_execution_logs
+                    WHERE thread_id = %s
+                      AND metadata->>'trace_id' IS NOT NULL
+                    ORDER BY metadata->>'trace_id', created_at DESC, id DESC
+                ) recent
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                (thread_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [str(row[0]) for row in rows]
+
     async def execution_log_summary(self, thread_id: str) -> ExecutionSummary:
         if self.pool is None:
             raise RuntimeError("Postgres memory is not started")
@@ -1221,6 +1273,25 @@ def _alert_row_to_dict(row: Any) -> dict:
 
 def _jsonable(value: Any) -> Any:
     return jsonable_encoder(value, custom_encoder=_SEND_CUSTOM_ENCODER)
+
+
+def _execution_log_from_row(row: Any) -> ExecutionLog:
+    return ExecutionLog(
+        id=row[0],
+        created_at=row[1],
+        thread_id=row[2],
+        run_id=row[3],
+        parent_id=row[4],
+        event_type=row[5],
+        status=row[6],
+        name=row[7],
+        input=row[8] or {},
+        output=row[9] or {},
+        error=row[10] or {},
+        duration_ms=row[11],
+        token_usage=row[12] or {},
+        metadata=row[13] or {},
+    )
 
 
 # Lazily built custom encoder for LangGraph Send objects

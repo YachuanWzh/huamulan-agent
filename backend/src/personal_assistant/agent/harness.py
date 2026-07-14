@@ -23,6 +23,7 @@ from personal_assistant.api.schemas import (
 )
 from personal_assistant.config import Settings
 from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.observability.traces import TraceContext, trace_metadata
 from personal_assistant.skills import SkillRegistry
 
 logger = logging.getLogger(__name__)
@@ -351,17 +352,26 @@ class AgentHarness:
             if agent_mode == "multi"
             else self._compile_without_memory_reflection(llm_config, requires_approval=requires_approval)
         )
-        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        trace = TraceContext.create(thread_id, metadata={"agent_mode": agent_mode})
+        config: dict[str, Any] = {
+            "configurable": {
+                "thread_id": thread_id,
+                "trace_context": trace.to_dict(),
+            }
+        }
         _merge_callbacks(config, self.callbacks, thread_id, callbacks)
         started = time.perf_counter()
         await _record_execution_log(
             self.memory,
             ExecutionLogCreate(
                 thread_id=thread_id,
+                run_id=trace.span_id,
+                parent_id=trace.parent_span_id,
                 event_type="turn",
                 status="started",
                 name="user_turn",
                 input={"message": _clip_subject(message), "agent_mode": agent_mode},
+                metadata=trace_metadata(trace),
             ),
         )
         try:
@@ -374,11 +384,14 @@ class AgentHarness:
                 self.memory,
                 ExecutionLogCreate(
                     thread_id=thread_id,
+                    run_id=trace.span_id,
+                    parent_id=trace.parent_span_id,
                     event_type="turn",
                     status="failed",
                     name="user_turn",
                     duration_ms=int((time.perf_counter() - started) * 1000),
                     error={"type": exc.__class__.__name__, "message": str(exc)},
+                    metadata=trace_metadata(trace),
                 ),
             )
             raise
@@ -386,10 +399,13 @@ class AgentHarness:
             self.memory,
             ExecutionLogCreate(
                 thread_id=thread_id,
+                run_id=trace.span_id,
+                parent_id=trace.parent_span_id,
                 event_type="turn",
                 status="completed",
                 name="user_turn",
                 duration_ms=int((time.perf_counter() - started) * 1000),
+                metadata=trace_metadata(trace),
             ),
         )
         self._schedule_memory_reflection(thread_id, result, llm_config, callbacks)

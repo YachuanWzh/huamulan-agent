@@ -65,6 +65,11 @@ from personal_assistant.governance.policy import InMemoryPolicyStore, PolicyServ
 from personal_assistant.config import get_settings
 from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.observability.traces import (
+    TraceSummary,
+    TraceView,
+    build_trace_view,
+)
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.skills.evaluation.models import (
     AgentEvaluationCase,
@@ -615,6 +620,28 @@ async def list_execution_logs(thread_id: str, limit: int = 500) -> list[Executio
 @app.get("/api/threads/{thread_id}/execution-summary", response_model=ExecutionSummary)
 async def execution_log_summary(thread_id: str) -> ExecutionSummary:
     return await harness.execution_log_summary(thread_id=thread_id)
+
+
+@app.get("/api/traces/{trace_id}", response_model=TraceView)
+async def get_trace(trace_id: str) -> TraceView:
+    logs = await harness.memory.list_trace_logs(trace_id)
+    if not logs:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return build_trace_view(logs, trace_id)
+
+
+@app.get("/api/threads/{thread_id}/traces", response_model=list[TraceSummary])
+async def list_thread_traces(
+    thread_id: str,
+    limit: int = 200,
+) -> list[TraceSummary]:
+    trace_ids = await harness.memory.list_thread_trace_ids(thread_id, limit=limit)
+    summaries: list[TraceSummary] = []
+    for trace_id in trace_ids:
+        logs = await harness.memory.list_trace_logs(trace_id)
+        if logs:
+            summaries.append(build_trace_view(logs, trace_id).summary)
+    return summaries
 
 
 @app.get("/api/threads/{thread_id}/pending-approvals", response_model=list[ToolCallApproval])
