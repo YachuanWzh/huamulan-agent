@@ -1,0 +1,52 @@
+# langgraph-claw CI Pipeline
+
+when:
+  branch: [master, main]
+  event: [push, pull_request]
+
+steps:
+  # ─── Backend ───
+  lint-backend:
+    image: python:3.12-slim
+    commands:
+      - pip install --quiet uv
+      - cd backend
+      - uv pip install --system ruff
+      - ruff check src/ tests/
+
+  test-backend:
+    image: python:3.12-slim
+    commands:
+      - pip install --quiet uv
+      - cd backend
+      - uv pip install --system -e ".[dev]"
+      - uv run pytest -v -m "not integration" --timeout=120
+
+  # ─── Frontend ───
+  lint-frontend:
+    image: node:22-alpine
+    directory: frontend
+    commands:
+      - npm ci
+      - npm run lint
+
+  typecheck-frontend:
+    image: node:22-alpine
+    directory: frontend
+    commands:
+      - npm ci
+      - npx tsc --noEmit
+
+  test-frontend:
+    image: node:22-alpine
+    directory: frontend
+    commands:
+      - npm ci
+      - npm test
+
+  build-frontend:
+    image: node:22-alpine
+    directory: frontend
+    commands:
+      - npm ci
+      - npm run build
