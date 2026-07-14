@@ -162,6 +162,7 @@ async def test_sbs_run_executes_two_project_agents_and_persists_outputs(monkeypa
 
     calls = []
     created = []
+    approval_policies = []
 
     class _Memory:
         async def create_sbs_task(self, task):
@@ -174,8 +175,17 @@ async def test_sbs_run_executes_two_project_agents_and_persists_outputs(monkeypa
             return []
 
     class _Harness:
-        async def run_user_turn(self, thread_id, message, llm_config, *, agent_mode):
+        async def run_user_turn(
+            self,
+            thread_id,
+            message,
+            llm_config,
+            *,
+            agent_mode,
+            requires_approval=None,
+        ):
             calls.append((thread_id, message, llm_config.model, agent_mode))
+            approval_policies.append(requires_approval)
             return ChatResponse(
                 thread_id=thread_id,
                 status="completed",
@@ -204,6 +214,12 @@ async def test_sbs_run_executes_two_project_agents_and_persists_outputs(monkeypa
     assert task.candidate_b.metadata["trace_id"].startswith("trace-")
     assert task.provenance["source"] == "project_agent_ab_run"
     assert created == [task]
+    assert all(callable(policy) for policy in approval_policies)
+    assert all(policy("query_metrics", {}) is False for policy in approval_policies)
+    assert all(
+        policy("run_shell", {"command": "rm -rf /"}) is True
+        for policy in approval_policies
+    )
 
 
 async def test_sbs_run_rejects_identical_candidate_configurations(monkeypatch) -> None:

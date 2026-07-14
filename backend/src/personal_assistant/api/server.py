@@ -18,7 +18,7 @@ from personal_assistant.agent.agent import (
     build_skill_router_components,
     warmup_skill_routing,
 )
-from personal_assistant.agent.harness import AgentHarness
+from personal_assistant.agent.harness import AgentHarness, requires_rca_tool_approval
 from personal_assistant.agent.harness import scan_prompt_guard, scan_prompt_guard_with_llm, scan_tool_guard
 from personal_assistant.agent.llm import build_llm
 from personal_assistant.agent.router import route_skill_names_with_trace
@@ -1293,6 +1293,7 @@ async def _run_sbs_candidate(
             prompt,
             LLMConfig(model=model),
             agent_mode=config.agent_mode,
+            requires_approval=requires_rca_tool_approval,
         )
     except Exception as exc:
         raise HTTPException(
