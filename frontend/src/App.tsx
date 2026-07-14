@@ -88,7 +88,7 @@ function App() {
             agentMode={agentMode}
           />
         ) : activePanel === 'engineering' ? (
-          <EngineeringPanel threadId={threadId} />
+          <EngineeringPanel threadId={threadId} agentMode={agentMode} />
         ) : (
           <WorkspacePanel
             panel={activePanel}

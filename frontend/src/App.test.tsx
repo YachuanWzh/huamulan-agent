@@ -46,7 +46,7 @@ vi.mock('./components/Sidebar', () => ({
     onThreadCleared: () => void
     onThreadSelected: (threadId: string) => void
     onReplayState: (state: { checkpoint_id: string }) => void
-    onPanelChange: (panel: 'chat' | 'checkpoint' | 'audit') => void
+    onPanelChange: (panel: 'chat' | 'checkpoint' | 'audit' | 'engineering') => void
   }) => (
     <div data-testid="sidebar-shell">
       <div data-testid="sidebar-thread">{threadId}</div>
@@ -61,6 +61,7 @@ vi.mock('./components/Sidebar', () => ({
       </button>
       <button onClick={() => onPanelChange('audit')}>Mock audit panel</button>
       <button onClick={() => onPanelChange('checkpoint')}>Mock checkpoint panel</button>
+      <button onClick={() => onPanelChange('engineering')}>Mock engineering panel</button>
     </div>
   ),
 }))
@@ -78,6 +79,12 @@ vi.mock('./components/WorkspacePanel', () => ({
     <div data-testid="workspace-panel">
       Workspace {panel} {threadId} {agentMode}
     </div>
+  ),
+}))
+
+vi.mock('./components/EngineeringPanel', () => ({
+  EngineeringPanel: ({ agentMode }: { agentMode: 'single' | 'multi' }) => (
+    <div data-testid="engineering-panel">Engineering {agentMode}</div>
   ),
 }))
 
@@ -126,6 +133,16 @@ describe('App thread id', () => {
     expect(randomUUID).toHaveBeenCalledOnce()
     expect(localStorage.getItem('threadId')).toBe('created-thread')
     expect(screen.getByTestId('sidebar-thread')).toHaveTextContent('created-thread')
+  })
+
+  it('passes the global agent mode into Agent Engineering', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: 'Multi agent' }))
+    await user.click(screen.getByRole('button', { name: 'Mock engineering panel' }))
+
+    expect(screen.getByTestId('engineering-panel')).toHaveTextContent('Engineering multi')
   })
 
   it('keeps the chat panel mounted when the first message creates a thread', async () => {

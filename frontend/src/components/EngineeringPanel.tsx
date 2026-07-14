@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   api,
+  type AgentMode,
   type BlindedSBSTask,
   type EvaluationComparison,
   type EvaluationRun,
@@ -8,6 +9,7 @@ import {
   type ReplayForkDescriptor,
   type SBSReview,
   type SBSTask,
+  type SkillEvaluationDataset,
   type TraceNode,
   type TraceSummary,
   type TraceView,
@@ -15,7 +17,13 @@ import {
 
 type Tool = 'trace' | 'regression' | 'replay' | 'sbs'
 
-export function EngineeringPanel({ threadId }: { threadId: string | null }) {
+export function EngineeringPanel({
+  threadId,
+  agentMode = 'single',
+}: {
+  threadId: string | null
+  agentMode?: AgentMode
+}) {
   const [tool, setTool] = useState<Tool>('trace')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -25,6 +33,15 @@ export function EngineeringPanel({ threadId }: { threadId: string | null }) {
   const [baseline, setBaseline] = useState('')
   const [candidate, setCandidate] = useState('')
   const [comparison, setComparison] = useState<EvaluationComparison | null>(null)
+  const [datasets, setDatasets] = useState<SkillEvaluationDataset[]>([])
+  const [selectedDataset, setSelectedDataset] = useState('')
+  const [evaluationMode, setEvaluationMode] = useState<'quick' | 'e2e'>('quick')
+  const [evaluationRunning, setEvaluationRunning] = useState(false)
+  const [evaluationProgress, setEvaluationProgress] = useState<{
+    total: number
+    completed: number
+    percent: number
+  } | null>(null)
   const [beforeCheckpoint, setBeforeCheckpoint] = useState('')
   const [afterCheckpoint, setAfterCheckpoint] = useState('')
   const [replayDiff, setReplayDiff] = useState<ReplayDiff | null>(null)
@@ -45,18 +62,64 @@ export function EngineeringPanel({ threadId }: { threadId: string | null }) {
   }, [threadId])
 
   useEffect(() => {
-    if (tool === 'regression' && runs.length === 0) {
+    if (tool === 'regression') {
       api.listEvaluationRuns().then(setRuns).catch((cause) => setError(message(cause)))
+      api.listSkillEvaluationDatasets(agentMode)
+        .then((items) => {
+          setDatasets(items)
+          setSelectedDataset((current) => current || items[0]?.path || '')
+        })
+        .catch((cause) => setError(message(cause)))
     }
     if (tool === 'sbs' && sbsTasks.length === 0) {
       api.listSBSTasks().then(setSbsTasks).catch((cause) => setError(message(cause)))
     }
-  }, [runs.length, sbsTasks.length, tool])
+  }, [agentMode, sbsTasks.length, tool])
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError('')
     try { await action() } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
   }
+
+  const createEvaluationRun = async () => {
+    if (!selectedDataset || evaluationRunning) return
+    setEvaluationRunning(true)
+    setEvaluationProgress(null)
+    setError('')
+    let createdRunId = ''
+    try {
+      for await (const event of api.runSkillEvaluationStream({
+        golden_path: selectedDataset,
+        evaluation_mode: evaluationMode,
+        agent_mode: agentMode,
+      })) {
+        if ('run_id' in event && event.run_id) createdRunId = event.run_id
+        if ('total' in event && 'completed' in event) {
+          const percent = 'percent' in event && typeof event.percent === 'number'
+            ? event.percent
+            : event.total > 0 ? Math.round((event.completed / event.total) * 100) : 0
+          setEvaluationProgress({ total: event.total, completed: event.completed, percent })
+        }
+      }
+      const nextRuns = await api.listEvaluationRuns()
+      setRuns(nextRuns)
+      const completed = nextRuns.find((item) => item.run_id === createdRunId && item.status === 'completed')
+      if (completed) {
+        if (!baseline) setBaseline(completed.run_id)
+        else setCandidate(completed.run_id)
+      }
+    } catch (cause) {
+      setError(`Unable to create EvalRun: ${message(cause)}`)
+    } finally {
+      setEvaluationRunning(false)
+    }
+  }
+
+  const canCompare = baseline !== ''
+    && candidate !== ''
+    && baseline !== candidate
+    && runs.some((item) => item.run_id === baseline && item.status === 'completed')
+    && runs.some((item) => item.run_id === candidate && item.status === 'completed')
 
   return (
     <section className="engineering-workspace" aria-label="Agent engineering workspace">
@@ -97,11 +160,34 @@ export function EngineeringPanel({ threadId }: { threadId: string | null }) {
       </div>}
 
       {tool === 'regression' && <div className="evidence-canvas engineering-form">
+        <section className="evalrun-create" aria-label="Create EvalRun">
+          <div>
+            <h3>Create EvalRun</h3>
+            <p>Run a Golden Dataset here. Completed runs become available for comparison below.</p>
+          </div>
+          <div className="form-row">
+            <label>Golden dataset<select value={selectedDataset} onChange={(e) => setSelectedDataset(e.target.value)}>
+              <option value="">Select dataset</option>
+              {datasets.map((item) => <option key={item.path} value={item.path}>{item.label}</option>)}
+            </select></label>
+            <label>Evaluation mode<select value={evaluationMode} onChange={(e) => setEvaluationMode(e.target.value as 'quick' | 'e2e')}>
+              <option value="quick">Quick</option><option value="e2e">E2E</option>
+            </select></label>
+            <button disabled={!selectedDataset || evaluationRunning} onClick={createEvaluationRun}>
+              {evaluationRunning ? 'Running…' : 'Create EvalRun'}
+            </button>
+          </div>
+          {evaluationProgress && <div className="evalrun-progress" role="status">
+            <strong>{evaluationProgress.completed} / {evaluationProgress.total} cases</strong>
+            <span><i style={{ width: `${evaluationProgress.percent}%` }} /></span>
+          </div>}
+          {runs.length === 0 && !evaluationRunning && <p className="engineering-empty-note">No EvalRuns yet. Create the first run above.</p>}
+        </section>
         <h3>Compare two EvalRuns</h3>
         <div className="form-row">
-          <label>Baseline<select value={baseline} onChange={(e) => setBaseline(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id}>{item.run_id} · {item.status}</option>)}</select></label>
-          <label>Candidate<select value={candidate} onChange={(e) => setCandidate(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id}>{item.run_id} · {item.status}</option>)}</select></label>
-          <button disabled={!baseline || !candidate} onClick={() => run(async () => setComparison(await api.compareEvaluationRuns(baseline, candidate)))}>Run gate</button>
+          <label>Baseline<select value={baseline} onChange={(e) => setBaseline(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
+          <label>Candidate<select value={candidate} onChange={(e) => setCandidate(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
+          <button disabled={!canCompare} onClick={() => run(async () => setComparison(await api.compareEvaluationRuns(baseline, candidate)))}>Run gate</button>
         </div>
         {comparison && <><div className={`gate-status ${comparison.status}`}>{comparison.status.toUpperCase()} · {(comparison.baseline_pass_rate * 100).toFixed(1)}% → {(comparison.candidate_pass_rate * 100).toFixed(1)}%</div>
           <ul className="finding-list">{comparison.findings.map((item, index) => <li key={`${item.rule}-${index}`} data-severity={item.severity}><code>{item.rule}</code><span>{item.case_id || 'run'}</span><p>{item.message}</p></li>)}</ul></>}
@@ -170,3 +256,7 @@ function ChangeList({ diff }: { diff: ReplayDiff }) {
 
 function EmptyEvidence({ text }: { text: string }) { return <div className="engineering-empty"><span>⌁</span><p>{text}</p></div> }
 function message(cause: unknown) { return cause instanceof Error ? cause.message : 'Unable to load evidence.' }
+function evaluationRunLabel(run: EvaluationRun) {
+  const created = new Date(run.created_at).toLocaleString()
+  return `${created} · ${run.dataset_path} · ${run.mode} · ${run.completed_cases}/${run.total_cases} · ${run.status}`
+}
