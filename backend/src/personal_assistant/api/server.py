@@ -65,6 +65,15 @@ from personal_assistant.governance.policy import InMemoryPolicyStore, PolicyServ
 from personal_assistant.config import get_settings
 from personal_assistant.memory.cached import CachedPostgresMemory
 from personal_assistant.memory.postgres import PostgresMemory
+from personal_assistant.debugging.replay import (
+    ForkDescriptor,
+    ReplayDiff,
+    ReplayDiffRequest,
+    ReplayForkRequest,
+    create_fork_descriptor,
+    diff_checkpoint_states,
+    find_checkpoint,
+)
 from personal_assistant.observability.traces import (
     TraceSummary,
     TraceView,
@@ -619,6 +628,34 @@ async def replay(thread_id: str) -> ReplayResponse:
             thread_id, len(states), msg_count,
         )
     return ReplayResponse(thread_id=thread_id, states=states)
+
+
+@app.post("/api/threads/{thread_id}/replay/diff", response_model=ReplayDiff)
+async def diff_replay(thread_id: str, request: ReplayDiffRequest) -> ReplayDiff:
+    states = await harness.replay(thread_id)
+    try:
+        before = find_checkpoint(states, request.before_checkpoint_id)
+        after = find_checkpoint(states, request.after_checkpoint_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return diff_checkpoint_states(before.state, after.state)
+
+
+@app.post("/api/threads/{thread_id}/replay/fork", response_model=ForkDescriptor)
+async def create_replay_fork(
+    thread_id: str,
+    request: ReplayForkRequest,
+) -> ForkDescriptor:
+    states = await harness.replay(thread_id)
+    try:
+        checkpoint = find_checkpoint(states, request.checkpoint_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return create_fork_descriptor(
+        source_thread_id=thread_id,
+        checkpoint=checkpoint,
+        target_thread_id=request.target_thread_id,
+    )
 
 
 @app.get("/api/threads/{thread_id}/execution-logs", response_model=list[ExecutionLog])
