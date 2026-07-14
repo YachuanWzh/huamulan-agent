@@ -703,6 +703,8 @@ export interface TraceSpan {
   created_at: string
   duration_ms?: number | null
   token_usage: Record<string, unknown>
+  input: Record<string, unknown>
+  output: Record<string, unknown>
   error: Record<string, unknown>
   metadata: Record<string, unknown>
 }

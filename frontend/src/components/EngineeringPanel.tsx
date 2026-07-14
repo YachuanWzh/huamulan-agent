@@ -83,7 +83,14 @@ export function EngineeringPanel({ threadId }: { threadId: string | null }) {
         </aside>
         <div className="evidence-canvas">
           {!trace ? <EmptyEvidence text="选择一条 Trace 查看执行脊柱。" /> : <>
-            <div className="trace-facts"><span>{trace.summary.duration_ms} ms</span><span>{trace.summary.total_tokens} tokens</span><span>{trace.summary.error_count} errors</span></div>
+            <div className="trace-facts">
+              <span>{trace.summary.duration_ms} ms</span>
+              <span>{trace.summary.total_spans} spans</span>
+              <span>{trace.summary.total_tokens} tokens</span>
+              <span>{trace.summary.tool_calls} tools</span>
+              <span>{trace.summary.retry_count} retries</span>
+              <span>{trace.summary.error_count} errors</span>
+            </div>
             <ol className="trace-spine">{trace.roots.map((node) => <TraceBranch key={node.span.span_id} node={node} />)}</ol>
           </>}
         </div>
@@ -125,7 +132,35 @@ export function EngineeringPanel({ threadId }: { threadId: string | null }) {
 }
 
 function TraceBranch({ node }: { node: TraceNode }) {
-  return <li><div className={`trace-node status-${node.span.status}`}><strong>{node.span.name || node.span.kind}</strong><code>{node.span.kind}</code><span>{node.span.duration_ms ?? 0} ms</span></div>{node.children.length > 0 && <ol>{node.children.map((child) => <TraceBranch key={child.span.span_id} node={child} />)}</ol>}</li>
+  const { span } = node
+  return <li>
+    <details className={`trace-branch status-${span.status}`}>
+      <summary className={`trace-node status-${span.status}`}>
+        <strong>{span.name || span.kind}</strong>
+        <code>{span.kind}</code>
+        <span>{span.status}</span>
+        <span>{span.duration_ms ?? 0} ms</span>
+      </summary>
+      <div className="trace-detail">
+        <dl className="trace-identifiers">
+          <div><dt>Started</dt><dd><time dateTime={span.created_at}>{new Date(span.created_at).toLocaleString()}</time></dd></div>
+          <div><dt>Span ID</dt><dd><code>{span.span_id}</code></dd></div>
+          {span.parent_span_id && <div><dt>Parent ID</dt><dd><code>{span.parent_span_id}</code></dd></div>}
+        </dl>
+        <TracePayload label="Tokens" value={span.token_usage} />
+        <TracePayload label="Input" value={span.input} />
+        <TracePayload label="Output" value={span.output} />
+        <TracePayload label="Error" value={span.error} />
+        <TracePayload label="Metadata" value={span.metadata} />
+      </div>
+    </details>
+    {node.children.length > 0 && <ol>{node.children.map((child) => <TraceBranch key={child.span.span_id} node={child} />)}</ol>}
+  </li>
+}
+
+function TracePayload({ label, value }: { label: string; value: Record<string, unknown> }) {
+  if (Object.keys(value).length === 0) return null
+  return <section className="trace-payload"><h4>{label}</h4><pre>{JSON.stringify(value, null, 2)}</pre></section>
 }
 
 function ChangeList({ diff }: { diff: ReplayDiff }) {

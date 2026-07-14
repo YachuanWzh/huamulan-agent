@@ -72,6 +72,16 @@ describe('App stylesheet decorations', () => {
     )
   })
 
+  it('keeps Agent Engineering tabs intrinsic and evidence panes scrollable', () => {
+    expect(appCss).toMatch(
+      /\.engineering-workspace\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0,\s*1fr\)/s,
+    )
+    expect(appCss).toMatch(/\.engineering-grid\s*\{[^}]*min-height:\s*0/s)
+    expect(appCss).toMatch(
+      /\.evidence-index,\s*\.evidence-canvas\s*\{[^}]*overflow:\s*auto/s,
+    )
+  })
+
   it('presents the e2e topology as swimlanes with arrowed lane transitions', () => {
     expect(appCss).toMatch(/\.topology-lanes\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(220px,\s*1fr\)\)/s)
     expect(appCss).toMatch(/\.topology-lane\s*\{[^}]*min-height:\s*132px/s)

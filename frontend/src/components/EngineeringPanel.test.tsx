@@ -26,7 +26,13 @@ describe('EngineeringPanel', () => {
       spans: [],
       roots: [{
         orphaned: false,
-        span: { id: 1, trace_id: 'trace-1', span_id: 'root', thread_id: 'thread-1', kind: 'turn', status: 'completed', name: 'user_turn', created_at: '2026-07-14T00:00:00Z', duration_ms: 120, token_usage: {}, error: {}, metadata: {} },
+        span: {
+          id: 1, trace_id: 'trace-1', span_id: 'root', thread_id: 'thread-1',
+          kind: 'turn', status: 'completed', name: 'user_turn',
+          created_at: '2026-07-14T00:00:00Z', duration_ms: 120,
+          token_usage: { total_tokens: 42 }, input: { message: 'hello' },
+          output: { answer: 'world' }, error: {}, metadata: { agent_mode: 'single' },
+        },
         children: [],
       }],
     })
@@ -45,6 +51,17 @@ describe('EngineeringPanel', () => {
     await user.click(await screen.findByRole('button', { name: /trace-1/ }))
     expect(await screen.findByText('user_turn')).toBeInTheDocument()
     expect(screen.getAllByText('120 ms')).toHaveLength(2)
+    expect(screen.getByText('1 tools')).toBeInTheDocument()
+    expect(screen.getByText('0 retries')).toBeInTheDocument()
+
+    await user.click(screen.getByText('user_turn'))
+    expect(screen.getByText('Span ID')).toBeInTheDocument()
+    expect(screen.getByText('root')).toBeInTheDocument()
+    expect(screen.getByText('Tokens')).toBeInTheDocument()
+    expect(screen.getByText('Input')).toBeInTheDocument()
+    expect(screen.getByText('Output')).toBeInTheDocument()
+    expect(screen.getByText(/hello/)).toBeInTheDocument()
+    expect(screen.getByText(/world/)).toBeInTheDocument()
   })
 
   it('requires a reason before submitting both-bad SBS review', async () => {
