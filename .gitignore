@@ -37,3 +37,7 @@ backend/knowledge/*.md
 # Other
 test.md
 knowledge
+.flavor
+FLAVOR.md
+# superharness brainstorm mind-map session state (transient)
+.superharness/
