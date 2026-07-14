@@ -161,7 +161,7 @@ describe('EngineeringPanel', () => {
     await user.click(screen.getByRole('tab', { name: '回放差异' }))
     expect(screen.getByText(/比较两个检查点/)).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
-    expect(screen.getByText(/创建盲化 A\/B 任务/)).toBeInTheDocument()
+    expect(screen.getByText(/本模块不调用模型/)).toBeInTheDocument()
   })
 
   it('creates and opens a blinded SBS task from the SBS module', async () => {

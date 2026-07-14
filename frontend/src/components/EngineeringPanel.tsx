@@ -253,7 +253,7 @@ export function EngineeringPanel({
       {tool === 'sbs' && <div className="engineering-grid">
         <aside className="evidence-index"><h3>评审队列</h3>{sbsTasks.length === 0 && <p>暂无待评审的 SBS 任务。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{statusLabel(item.status)}</span></button>)}</aside>
         <div className="evidence-canvas engineering-form">
-          <ToolIntro title="盲化偏好评审">创建盲化 A/B 任务，在隐藏模型身份的情况下评判输出，并将理由保存为可审计证据。</ToolIntro>
+          <ToolIntro title="盲化偏好评审">本模块不调用模型；它将两份已有输出随机映射为 A/B，供人工盲评，并保存结论与理由。</ToolIntro>
           <section className="sbs-create" aria-label="创建 SBS 任务">
             <h3>创建 SBS 任务</h3>
             <div className="form-row">
@@ -265,8 +265,11 @@ export function EngineeringPanel({
           </section>
           {!sbsTask ? <EmptyEvidence text="创建任务，或从评审队列中选择一个任务。" /> : <>
           <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>候选 {item.label}</strong><p>{item.output}</p></article>)}</div>
-          <div className="form-row"><label>评审人<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label><label>胜出项<select aria-label="胜出项" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">平局</option><option value="both_bad">两者都不合格</option></select></label><label>理由<textarea aria-label="理由" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-          <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
+          <div className="form-row sbs-review-form">
+            <label>评审人<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label>
+            <label>胜出项<select aria-label="胜出项" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">平局</option><option value="both_bad">两者都不合格</option></select></label>
+            <label className="sbs-review-reason">理由<textarea aria-label="理由" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+            <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
             await api.submitSBSReview(sbsTask.task_id, { task_id: sbsTask.task_id, reviewer, winner, reason, dimension_scores: {}, revision: 1 })
             setSbsTasks(await api.listSBSTasks())
             setSbsTask(null)
@@ -274,7 +277,8 @@ export function EngineeringPanel({
             setWinner('A')
             setReason('')
             setNotice('评审已保存')
-          })}>保存评审</button></div>
+            })}>保存评审</button>
+          </div>
         </>}
         </div>
       </div>}
