@@ -18,6 +18,14 @@ Build a closed loop inside Agent Engineering and reuse the existing evaluation s
 
 The existing huamulan visual language remains intact. The design signature is an evidence workflow rail: each module starts with one sentence explaining the decision it supports and presents its required producer action in the same surface as its result.
 
+## English Copy Contract
+
+- All user-facing copy inside Agent Engineering is written in English.
+- Necessary technical abbreviations remain abbreviated where the abbreviation is the established product or engineering term: `SBS`, `ID`, `E2E`, `API`, `JSON`, `UX`, `A/B`, and `EvalRun`.
+- Domain names such as Trace, Regression, Replay Diff, Golden Dataset, Baseline, Candidate, checkpoint, span, and token remain in their standard English engineering form.
+- This contract applies only to Agent Engineering. It does not translate the surrounding huamulan application shell or its thematic navigation copy.
+- Component tests scan the rendered Agent Engineering workspace for Han characters so new untranslated user-facing copy cannot be introduced silently.
+
 ## Layout Contract
 
 - `engineering-workspace` occupies the available application-body height with rows `auto auto minmax(0, 1fr)`.
@@ -30,6 +38,16 @@ The existing huamulan visual language remains intact. The design signature is an
 
 ### Trace
 
+**Purpose:** Trace is the execution-evidence module. It explains what happened during one Agent turn and where time, tokens, tool calls, retries, or failures were introduced.
+
+**Inputs:** A selected conversation thread, its persisted trace summaries, and the complete span tree returned by the trace API. Each span may contain timestamps, identifiers, kind, status, duration, token usage, input, output, error, and metadata.
+
+**Outputs:** A navigable execution spine, aggregate facts, and expandable span evidence. Trace does not mutate the Agent run or create new execution data.
+
+**Workflow:** Select a thread, select a trace, inspect the aggregate facts, then expand the relevant spans and their payloads. The trace list and evidence canvas scroll independently so large runs remain inspectable.
+
+**Out of scope:** Trace does not score answer quality, compare releases, replay checkpoints, rerun tools, or collect human preference.
+
 - Show summary facts for latency, spans, tokens, tools, retries, and errors.
 - Render every span as an accessible disclosure control.
 - The collapsed row shows name, kind, status, and duration.
@@ -38,6 +56,16 @@ The existing huamulan visual language remains intact. The design signature is an
 - The trace index indicates the selected trace and both columns remain scrollable.
 
 ### Regression
+
+**Purpose:** Regression is the automated quality-gate module. It produces persisted EvalRuns from a Golden Dataset and determines whether a Candidate run improves, preserves, or degrades quality relative to a Baseline run.
+
+**Inputs:** A Golden Dataset, Quick or E2E evaluation mode, the active single-agent or multi-agent mode, and two distinct completed EvalRuns for comparison.
+
+**Outputs:** Persisted EvalRuns, evaluation progress, pass-rate changes, a gate status, and case-level findings. Findings that contain comparable evidence can be forwarded into SBS Review.
+
+**Workflow:** Choose a Golden Dataset and evaluation mode, create at least two EvalRuns, select a completed Baseline and Candidate, then run the gate. The module refreshes persisted runs after evaluation so both selectors are populated without leaving Agent Engineering.
+
+**Out of scope:** Regression does not invent demo runs, compare incomplete runs, perform blinded human review, or replace the underlying Golden Dataset authoring workflow.
 
 - Explain that Regression compares two persisted runs over the same dataset.
 - Add an inline EvalRun producer using the existing Golden Dataset selector and Quick/E2E evaluation stream.
@@ -50,11 +78,31 @@ The existing huamulan visual language remains intact. The design signature is an
 
 ### Replay Diff
 
+**Purpose:** Replay Diff is the checkpoint-state inspection module. It shows how persisted Agent state changed between two checkpoints and can describe a provenance-preserving branch point without executing tools.
+
+**Inputs:** A Before checkpoint ID and an After checkpoint ID from the same thread. Safe-fork description additionally requires a source thread and source checkpoint.
+
+**Outputs:** Added, removed, and changed state paths plus an optional safe-fork descriptor containing source provenance and target state. All outputs are read-only descriptions.
+
+**Workflow:** Enter two checkpoint IDs, request the state diff, inspect the changed values, and optionally describe a safe fork from a chosen source checkpoint.
+
+**Out of scope:** Replay Diff does not invoke the Agent, execute tools, write checkpoint state, or automatically start the described fork.
+
 - Explain that Replay Diff compares two checkpoints without executing tools.
 - Keep the existing diff and safe-fork descriptor actions.
 - Clarify missing thread/checkpoint prerequisites and keep large change values scrollable.
 
 ### SBS Review
+
+**Purpose:** SBS Review is the human-preference module. It turns two candidate outputs into a blinded A/B task so a reviewer can select the stronger result and record an auditable reason without seeing candidate identity.
+
+**Inputs:** A prompt, Candidate A output, Candidate B output, provenance, and later a reviewer, winner, reason, and optional dimension scores. Tasks can be created manually or prefilled from Regression findings.
+
+**Outputs:** A persisted SBS task, a randomized blinded candidate order, and a persisted review mapped back to canonical candidate identities by the backend.
+
+**Workflow:** Create or select a task, read the blinded candidates, choose A, B, Tie, or Both bad, enter the required review evidence, then save. The queue refreshes and the reviewed task no longer appears pending.
+
+**Out of scope:** SBS Review does not expose model identity before judgment, automatically choose a winner, execute candidate prompts, or replace automated Regression gates.
 
 - Explain blinded A/B review and provenance.
 - Add a task-creation panel with prompt, candidate A output, candidate B output, and optional candidate IDs. Generate a task ID when the user does not provide one.
