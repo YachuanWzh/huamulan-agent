@@ -96,16 +96,17 @@ The existing huamulan visual language remains intact. The design signature is an
 
 **Purpose:** SBS Review is the human-preference module. It turns two candidate outputs into a blinded A/B task so a reviewer can select the stronger result and record an auditable reason without seeing candidate identity.
 
-**Inputs:** A prompt, Candidate A output, Candidate B output, provenance, and later a reviewer, winner, reason, and optional dimension scores. Tasks can be created manually or prefilled from Regression findings.
+**Inputs:** A shared prompt plus two model/Agent-mode configurations. The backend runs both configurations through the project's `AgentHarness` in parallel and records their outputs and Trace provenance. Existing outputs may still be imported manually or prefilled from Regression findings. Review input includes reviewer, winner, reason, and optional dimension scores.
 
 **Outputs:** A persisted SBS task, a randomized blinded candidate order, and a persisted review mapped back to canonical candidate identities by the backend.
 
-**Workflow:** Create or select a task, read the blinded candidates, choose A, B, Tie, or Both bad, enter the required review evidence, then save. The queue refreshes and the reviewed task no longer appears pending.
+**Workflow:** Configure two distinct candidates, run the same prompt through both project Agent paths, automatically create a task from the completed outputs, then read the blinded candidates, choose A, B, Tie, or Both bad, enter the required review evidence, and save. The queue refreshes and the reviewed task no longer appears pending.
 
-**Out of scope:** SBS Review does not expose model identity before judgment, automatically choose a winner, execute candidate prompts, or replace automated Regression gates.
+**Out of scope:** SBS Review does not expose model identity before judgment, automatically choose a winner, auto-approve risky tools, or replace automated Regression gates.
 
 - Explain blinded A/B review and provenance.
-- Add a task-creation panel with prompt, candidate A output, candidate B output, and optional candidate IDs. Generate a task ID when the user does not provide one.
+- Add a primary run panel with a shared prompt, model and Agent mode for configuration 1/2, plus run progress. Keep manual output import in a collapsed advanced section.
+- Add `GET /api/sbs/run-options` and `POST /api/sbs/tasks/run`; run both candidates concurrently via `AgentHarness`, attach independent thread/Trace evidence, and persist only when both outputs complete.
 - Add `createSBSTask` to the frontend API client and send the backend `SBSTask` contract.
 - After creation, refresh the queue and open the blinded task returned by the read endpoint.
 - Regression can switch to SBS and prefill the same creation form. Manual creation remains available.

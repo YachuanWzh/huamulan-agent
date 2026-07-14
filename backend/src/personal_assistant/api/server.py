@@ -6,6 +6,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 from typing import Any, Callable, Optional
 
@@ -116,11 +117,17 @@ from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
 from personal_assistant.skills.evaluation.sbs import (
     BlindedSBSTask,
+    SBSCandidate,
+    SBSCandidateRunConfig,
     SBSReview,
+    SBSRunOptions,
+    SBSRunRequest,
     SBSTask,
+    SBSTaskSummary,
     canonical_winner,
     export_sbs_jsonl,
     present_blinded_task,
+    summarize_sbs_task,
 )
 from personal_assistant.tracing import build_langfuse_callback
 
@@ -1251,9 +1258,120 @@ async def create_sbs_task_endpoint(task: SBSTask) -> SBSTask:
     return task
 
 
-@app.get("/api/sbs/tasks", response_model=list[SBSTask])
-async def list_sbs_tasks(limit: int = 100) -> list[SBSTask]:
-    return await memory.list_sbs_tasks(limit=limit)
+@app.get("/api/sbs/tasks", response_model=list[SBSTaskSummary])
+async def list_sbs_tasks(limit: int = 100) -> list[SBSTaskSummary]:
+    tasks = await memory.list_sbs_tasks(limit=limit)
+    return [summarize_sbs_task(task) for task in tasks]
+
+
+@app.get("/api/sbs/run-options", response_model=SBSRunOptions)
+async def get_sbs_run_options() -> SBSRunOptions:
+    configured = (
+        settings.llm_model,
+        settings.evaluation_judge_model,
+        settings.multi_agent_child_llm_model,
+        settings.multi_agent_intent_llm_model,
+        settings.skill_routing_llm_model,
+    )
+    known_models = list(dict.fromkeys(model for model in configured if model))
+    return SBSRunOptions(default_model=settings.llm_model, known_models=known_models)
+
+
+async def _run_sbs_candidate(
+    *,
+    task_id: str,
+    slot: str,
+    prompt: str,
+    config: SBSCandidateRunConfig,
+    model: str,
+) -> SBSCandidate:
+    thread_id = f"sbs-{task_id}-{slot}"
+    started = perf_counter()
+    try:
+        response = await harness.run_user_turn(
+            thread_id,
+            prompt,
+            LLMConfig(model=model),
+            agent_mode=config.agent_mode,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"候选配置 {slot[-1].upper()} 运行失败：{exc}",
+        ) from exc
+    if response.status == "requires_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"候选配置 {slot[-1].upper()} 需要工具审批，未创建 SBS 任务",
+        )
+    output = (response.message or "").strip()
+    if not output:
+        raise HTTPException(
+            status_code=502,
+            detail=f"候选配置 {slot[-1].upper()} 未返回可评审输出",
+        )
+
+    trace_ids = await memory.list_thread_trace_ids(thread_id, limit=1)
+    trace_id = trace_ids[0] if trace_ids else None
+    trace_summary = None
+    if trace_id:
+        logs = await memory.list_trace_logs(trace_id)
+        trace_summary = build_trace_view(logs, trace_id).summary.model_dump(mode="json")
+    return SBSCandidate(
+        candidate_id=slot,
+        output=output,
+        metadata={
+            "model": model,
+            "agent_mode": config.agent_mode,
+            "thread_id": thread_id,
+            "trace_id": trace_id,
+            "duration_ms": round((perf_counter() - started) * 1000),
+            "trace_summary": trace_summary,
+        },
+    )
+
+
+@app.post("/api/sbs/tasks/run", response_model=SBSTask)
+async def run_sbs_candidates(request: SBSRunRequest) -> SBSTask:
+    model_a = request.candidate_a.model or settings.llm_model
+    model_b = request.candidate_b.model or settings.llm_model
+    if (
+        model_a == model_b
+        and request.candidate_a.agent_mode == request.candidate_b.agent_mode
+    ):
+        raise HTTPException(status_code=422, detail="两套候选配置不能完全相同")
+
+    task_id = str(uuid4())
+    candidate_a, candidate_b = await asyncio.gather(
+        _run_sbs_candidate(
+            task_id=task_id,
+            slot="candidate-a",
+            prompt=request.prompt,
+            config=request.candidate_a,
+            model=model_a,
+        ),
+        _run_sbs_candidate(
+            task_id=task_id,
+            slot="candidate-b",
+            prompt=request.prompt,
+            config=request.candidate_b,
+            model=model_b,
+        ),
+    )
+    task = SBSTask(
+        task_id=task_id,
+        prompt=request.prompt,
+        candidate_a=candidate_a,
+        candidate_b=candidate_b,
+        provenance={
+            "source": "project_agent_ab_run",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "candidate_a": candidate_a.metadata,
+            "candidate_b": candidate_b.metadata,
+        },
+    )
+    await memory.create_sbs_task(task)
+    return task
 
 
 @app.get("/api/sbs/tasks/{task_id}", response_model=BlindedSBSTask)

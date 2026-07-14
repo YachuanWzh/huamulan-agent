@@ -10,7 +10,7 @@ vi.mock('../lib/api', () => ({
     compareEvaluationRuns: vi.fn(), diffReplay: vi.fn(), createReplayFork: vi.fn(),
     listSkillEvaluationDatasets: vi.fn(), runSkillEvaluationStream: vi.fn(),
     listSBSTasks: vi.fn(), getSBSTask: vi.fn(), submitSBSReview: vi.fn(), exportSBS: vi.fn(),
-    createSBSTask: vi.fn(),
+    createSBSTask: vi.fn(), getSBSRunOptions: vi.fn(), runSBSCandidates: vi.fn(),
   },
 }))
 
@@ -43,6 +43,10 @@ describe('EngineeringPanel', () => {
       { name: 'claw_eval_smoke', path: 'claw_eval_smoke', label: 'Smoke dataset' },
     ])
     api.listSBSTasks.mockResolvedValue([])
+    api.getSBSRunOptions.mockResolvedValue({
+      default_model: 'model-one', known_models: ['model-one', 'model-two'],
+      agent_modes: ['single', 'multi'],
+    })
   })
 
   it('renders the four tools and drills into a trace tree', async () => {
@@ -71,9 +75,7 @@ describe('EngineeringPanel', () => {
 
   it('requires a reason before submitting both-bad SBS review', async () => {
     api.listSBSTasks.mockResolvedValue([{
-      task_id: 'sbs-1', prompt: '诊断超时', status: 'pending', provenance: {},
-      candidate_a: { candidate_id: 'one', output: 'answer A', metadata: {} },
-      candidate_b: { candidate_id: 'two', output: 'answer B', metadata: {} },
+      task_id: 'sbs-1', prompt: '诊断超时', status: 'pending',
     }])
     api.getSBSTask.mockResolvedValue({
       task_id: 'sbs-1', prompt: '诊断超时',
@@ -161,7 +163,43 @@ describe('EngineeringPanel', () => {
     await user.click(screen.getByRole('tab', { name: '回放差异' }))
     expect(screen.getByText(/比较两个检查点/)).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
-    expect(screen.getByText(/本模块不调用模型/)).toBeInTheDocument()
+    expect(screen.getByText(/同一提示词并行运行两套模型或智能体配置/)).toBeInTheDocument()
+  })
+
+  it('runs two project Agent configurations and opens the blinded SBS task', async () => {
+    const task = {
+      task_id: 'sbs-run', prompt: '诊断接口超时', status: 'pending' as const,
+      provenance: { source: 'project_agent_ab_run' },
+      candidate_a: { candidate_id: 'candidate-a', output: 'Answer one', metadata: {} },
+      candidate_b: { candidate_id: 'candidate-b', output: 'Answer two', metadata: {} },
+    }
+    api.runSBSCandidates.mockResolvedValue(task)
+    api.listSBSTasks.mockResolvedValueOnce([]).mockResolvedValueOnce([{
+      task_id: task.task_id, prompt: task.prompt, status: task.status,
+    }])
+    api.getSBSTask.mockResolvedValue({
+      task_id: task.task_id, prompt: task.prompt,
+      candidates: [{ label: 'A', output: 'Answer two' }, { label: 'B', output: 'Answer one' }],
+    })
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
+    await user.type(await screen.findByLabelText('评测提示词'), task.prompt)
+    await user.clear(screen.getByLabelText('配置 1 模型'))
+    await user.type(screen.getByLabelText('配置 1 模型'), 'model-one')
+    await user.clear(screen.getByLabelText('配置 2 模型'))
+    await user.type(screen.getByLabelText('配置 2 模型'), 'model-two')
+    await user.selectOptions(screen.getByLabelText('配置 2 智能体模式'), 'multi')
+    await user.click(screen.getByRole('button', { name: '运行并创建盲评' }))
+
+    await waitFor(() => expect(api.runSBSCandidates).toHaveBeenCalledWith({
+      prompt: task.prompt,
+      candidate_a: { model: 'model-one', agent_mode: 'single' },
+      candidate_b: { model: 'model-two', agent_mode: 'multi' },
+    }))
+    expect(await screen.findByText('Answer one')).toBeInTheDocument()
+    expect(screen.getByText('Answer two')).toBeInTheDocument()
   })
 
   it('creates and opens a blinded SBS task from the SBS module', async () => {
@@ -171,7 +209,9 @@ describe('EngineeringPanel', () => {
       candidate_a: { candidate_id: 'baseline', output: 'Old answer', metadata: {} },
       candidate_b: { candidate_id: 'candidate', output: 'New answer', metadata: {} },
     }
-    api.listSBSTasks.mockResolvedValueOnce([]).mockResolvedValueOnce([task])
+    api.listSBSTasks.mockResolvedValueOnce([]).mockResolvedValueOnce([{
+      task_id: task.task_id, prompt: task.prompt, status: task.status,
+    }])
     api.createSBSTask.mockResolvedValue(task)
     api.getSBSTask.mockResolvedValue({
       task_id: 'sbs-created', prompt: task.prompt,
@@ -182,6 +222,7 @@ describe('EngineeringPanel', () => {
     render(<EngineeringPanel threadId="thread-1" />)
 
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
+    await user.click(screen.getByText('导入已有输出（高级）'))
     await user.type(screen.getByLabelText('提示词'), task.prompt)
     await user.type(screen.getByLabelText('候选 A 输出'), 'Old answer')
     await user.type(screen.getByLabelText('候选 B 输出'), 'New answer')

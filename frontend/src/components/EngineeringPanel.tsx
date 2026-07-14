@@ -8,7 +8,9 @@ import {
   type ReplayDiff,
   type ReplayForkDescriptor,
   type SBSReview,
+  type SBSRunOptions,
   type SBSTask,
+  type SBSTaskSummary,
   type SkillEvaluationDataset,
   type TraceNode,
   type TraceSummary,
@@ -46,12 +48,19 @@ export function EngineeringPanel({
   const [afterCheckpoint, setAfterCheckpoint] = useState('')
   const [replayDiff, setReplayDiff] = useState<ReplayDiff | null>(null)
   const [fork, setFork] = useState<ReplayForkDescriptor | null>(null)
-  const [sbsTasks, setSbsTasks] = useState<SBSTask[]>([])
+  const [sbsTasks, setSbsTasks] = useState<SBSTaskSummary[]>([])
   const [sbsTask, setSbsTask] = useState<BlindedSBSTask | null>(null)
   const [reviewer, setReviewer] = useState('')
   const [winner, setWinner] = useState<SBSReview['winner']>('A')
   const [reason, setReason] = useState('')
   const [notice, setNotice] = useState('')
+  const [sbsRunOptions, setSbsRunOptions] = useState<SBSRunOptions | null>(null)
+  const [sbsRunning, setSbsRunning] = useState(false)
+  const [sbsImportOpen, setSbsImportOpen] = useState(false)
+  const [sbsRunDraft, setSbsRunDraft] = useState({
+    prompt: '', modelA: '', modeA: 'single' as AgentMode,
+    modelB: '', modeB: 'multi' as AgentMode,
+  })
   const [sbsDraft, setSbsDraft] = useState({
     prompt: '', candidateA: '', candidateB: '', provenance: {} as Record<string, unknown>,
   })
@@ -75,10 +84,26 @@ export function EngineeringPanel({
         })
         .catch((cause) => setError(message(cause)))
     }
-    if (tool === 'sbs' && sbsTasks.length === 0) {
-      api.listSBSTasks().then(setSbsTasks).catch((cause) => setError(message(cause)))
+    if (tool === 'sbs') {
+      if (sbsTasks.length === 0) {
+        api.listSBSTasks().then(setSbsTasks).catch((cause) => setError(message(cause)))
+      }
+      if (!sbsRunOptions) {
+        api.getSBSRunOptions()
+          .then((options) => {
+            setSbsRunOptions(options)
+            setSbsRunDraft((draft) => ({
+              ...draft,
+              modelA: draft.modelA || options.default_model,
+              modelB: draft.modelB || options.known_models.find(
+                (model) => model !== options.default_model,
+              ) || options.default_model,
+            }))
+          })
+          .catch((cause) => setError(message(cause)))
+      }
     }
-  }, [agentMode, sbsTasks.length, tool])
+  }, [agentMode, sbsRunOptions, sbsTasks.length, tool])
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError('')
@@ -142,8 +167,39 @@ export function EngineeringPanel({
     setSbsTasks(await api.listSBSTasks())
     setSbsTask(await api.getSBSTask(created.task_id))
     setSbsDraft({ prompt: '', candidateA: '', candidateB: '', provenance: {} })
+    setSbsImportOpen(false)
     setNotice('SBS 任务已创建')
   })
+
+  const sameSbsRunConfig = sbsRunDraft.modelA.trim() === sbsRunDraft.modelB.trim()
+    && sbsRunDraft.modeA === sbsRunDraft.modeB
+
+  const runSbsCandidates = async () => {
+    if (sbsRunning || sameSbsRunConfig) return
+    setSbsRunning(true)
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const created = await api.runSBSCandidates({
+        prompt: sbsRunDraft.prompt.trim(),
+        candidate_a: {
+          model: sbsRunDraft.modelA.trim(), agent_mode: sbsRunDraft.modeA,
+        },
+        candidate_b: {
+          model: sbsRunDraft.modelB.trim(), agent_mode: sbsRunDraft.modeB,
+        },
+      })
+      setSbsTasks(await api.listSBSTasks())
+      setSbsTask(await api.getSBSTask(created.task_id))
+      setNotice('两套配置运行完成，已创建盲评任务')
+    } catch (cause) {
+      setError(`无法运行 SBS 候选：${message(cause)}`)
+    } finally {
+      setSbsRunning(false)
+      setBusy(false)
+    }
+  }
 
   const prefillSbsFromFinding = (finding: EvaluationComparison['findings'][number]) => {
     setSbsDraft({
@@ -158,6 +214,7 @@ export function EngineeringPanel({
       },
     })
     setSbsTask(null)
+    setSbsImportOpen(true)
     setNotice('回归评测证据已复制到新的 SBS 任务')
     setTool('sbs')
   }
@@ -253,16 +310,44 @@ export function EngineeringPanel({
       {tool === 'sbs' && <div className="engineering-grid">
         <aside className="evidence-index"><h3>评审队列</h3>{sbsTasks.length === 0 && <p>暂无待评审的 SBS 任务。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{statusLabel(item.status)}</span></button>)}</aside>
         <div className="evidence-canvas engineering-form">
-          <ToolIntro title="盲化偏好评审">本模块不调用模型；它将两份已有输出随机映射为 A/B，供人工盲评，并保存结论与理由。</ToolIntro>
-          <section className="sbs-create" aria-label="创建 SBS 任务">
-            <h3>创建 SBS 任务</h3>
+          <ToolIntro title="盲化偏好评审">同一提示词并行运行两套模型或智能体配置，自动记录输出与链路追踪，再随机映射为 A/B 供人工盲评。</ToolIntro>
+          <section className="sbs-runner" aria-label="运行 SBS 候选">
+            <div className="sbs-runner-heading">
+              <div><h3>运行真实候选</h3><p>使用项目已配置的模型服务、工具和单/多智能体执行链。</p></div>
+              <span>并行执行</span>
+            </div>
+            <label className="sbs-prompt">评测提示词<textarea value={sbsRunDraft.prompt} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, prompt: e.target.value }))} /></label>
+            <div className="sbs-config-pair">
+              <fieldset>
+                <legend>配置 1</legend>
+                <label>模型<input aria-label="配置 1 模型" list="sbs-known-models" value={sbsRunDraft.modelA} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelA: e.target.value }))} /></label>
+                <label>智能体模式<select aria-label="配置 1 智能体模式" value={sbsRunDraft.modeA} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modeA: e.target.value as AgentMode }))}><option value="single">单智能体</option><option value="multi">多智能体</option></select></label>
+              </fieldset>
+              <fieldset>
+                <legend>配置 2</legend>
+                <label>模型<input aria-label="配置 2 模型" list="sbs-known-models" value={sbsRunDraft.modelB} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelB: e.target.value }))} /></label>
+                <label>智能体模式<select aria-label="配置 2 智能体模式" value={sbsRunDraft.modeB} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modeB: e.target.value as AgentMode }))}><option value="single">单智能体</option><option value="multi">多智能体</option></select></label>
+              </fieldset>
+            </div>
+            <datalist id="sbs-known-models">{sbsRunOptions?.known_models.map((model) => <option key={model} value={model} />)}</datalist>
+            <div className="sbs-run-actions">
+              {sameSbsRunConfig && sbsRunDraft.modelA && <p>两套配置完全相同，请更换模型或智能体模式。</p>}
+              {sbsRunning && <p role="status">正在并行运行两套配置，完成后自动进入盲评…</p>}
+              <button disabled={sbsRunning || !sbsRunDraft.prompt.trim() || !sbsRunDraft.modelA.trim() || !sbsRunDraft.modelB.trim() || sameSbsRunConfig} onClick={runSbsCandidates}>{sbsRunning ? '运行中…' : '运行并创建盲评'}</button>
+            </div>
+          </section>
+          <details className="sbs-import" open={sbsImportOpen} onToggle={(event) => setSbsImportOpen(event.currentTarget.open)}>
+            <summary>导入已有输出（高级）</summary>
+            <section className="sbs-create" aria-label="创建 SBS 任务">
+            <h3>导入已有输出</h3>
             <div className="form-row">
               <label>提示词<input value={sbsDraft.prompt} onChange={(e) => setSbsDraft((draft) => ({ ...draft, prompt: e.target.value }))} /></label>
               <label>候选 A 输出<textarea value={sbsDraft.candidateA} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateA: e.target.value }))} /></label>
               <label>候选 B 输出<textarea value={sbsDraft.candidateB} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateB: e.target.value }))} /></label>
               <button disabled={!sbsDraft.prompt.trim() || !sbsDraft.candidateA.trim() || !sbsDraft.candidateB.trim()} onClick={createSbsTask}>创建 SBS 任务</button>
             </div>
-          </section>
+            </section>
+          </details>
           {!sbsTask ? <EmptyEvidence text="创建任务，或从评审队列中选择一个任务。" /> : <>
           <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>候选 {item.label}</strong><p>{item.output}</p></article>)}</div>
           <div className="form-row sbs-review-form">

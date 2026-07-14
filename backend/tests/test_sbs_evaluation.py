@@ -6,7 +6,9 @@ from pydantic import ValidationError
 from personal_assistant.memory.postgres import PostgresMemory
 from personal_assistant.skills.evaluation.sbs import (
     SBSCandidate,
+    SBSCandidateRunConfig,
     SBSReview,
+    SBSRunRequest,
     SBSTask,
     canonical_winner,
     export_sbs_jsonl,
@@ -135,3 +137,92 @@ async def test_sbs_api_returns_blinded_task_and_canonicalizes_review(monkeypatch
     assert "candidate_id" not in blinded.model_dump_json()
     assert review.canonical_winner in {"model-v1", "model-v2"}
     assert reviews == [review]
+
+
+async def test_sbs_queue_does_not_expose_candidate_identity(monkeypatch) -> None:
+    from personal_assistant.api import server
+
+    class _Memory:
+        async def list_sbs_tasks(self, limit=100):
+            return [_task()]
+
+    monkeypatch.setattr(server, "memory", _Memory())
+
+    queue = await server.list_sbs_tasks()
+
+    payload = json.dumps([item.model_dump(mode="json") for item in queue])
+    assert "candidate_a" not in payload
+    assert "model-v1" not in payload
+    assert "baseline answer" not in payload
+
+
+async def test_sbs_run_executes_two_project_agents_and_persists_outputs(monkeypatch) -> None:
+    from personal_assistant.api import server
+    from personal_assistant.api.schemas import ChatResponse
+
+    calls = []
+    created = []
+
+    class _Memory:
+        async def create_sbs_task(self, task):
+            created.append(task)
+
+        async def list_thread_trace_ids(self, thread_id, limit=1):
+            return [f"trace-{thread_id.rsplit('-', 1)[-1]}"]
+
+        async def list_trace_logs(self, trace_id):
+            return []
+
+    class _Harness:
+        async def run_user_turn(self, thread_id, message, llm_config, *, agent_mode):
+            calls.append((thread_id, message, llm_config.model, agent_mode))
+            return ChatResponse(
+                thread_id=thread_id,
+                status="completed",
+                message=f"{agent_mode} / {llm_config.model}",
+            )
+
+    monkeypatch.setattr(server, "memory", _Memory())
+    monkeypatch.setattr(server, "harness", _Harness())
+
+    task = await server.run_sbs_candidates(
+        SBSRunRequest(
+            prompt="诊断接口超时",
+            candidate_a=SBSCandidateRunConfig(model="model-one", agent_mode="single"),
+            candidate_b=SBSCandidateRunConfig(model="model-two", agent_mode="multi"),
+        )
+    )
+
+    assert len(calls) == 2
+    assert {(call[2], call[3]) for call in calls} == {
+        ("model-one", "single"),
+        ("model-two", "multi"),
+    }
+    assert task.candidate_a.output == "single / model-one"
+    assert task.candidate_b.output == "multi / model-two"
+    assert task.candidate_a.metadata["trace_id"].startswith("trace-")
+    assert task.candidate_b.metadata["trace_id"].startswith("trace-")
+    assert task.provenance["source"] == "project_agent_ab_run"
+    assert created == [task]
+
+
+async def test_sbs_run_rejects_identical_candidate_configurations(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from personal_assistant.api import server
+
+    class _Harness:
+        async def run_user_turn(self, *_args, **_kwargs):
+            raise AssertionError("identical configurations must not consume model tokens")
+
+    monkeypatch.setattr(server, "harness", _Harness())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server.run_sbs_candidates(
+            SBSRunRequest(
+                prompt="同一提示词",
+                candidate_a=SBSCandidateRunConfig(model="same-model", agent_mode="single"),
+                candidate_b=SBSCandidateRunConfig(model="same-model", agent_mode="single"),
+            )
+        )
+
+    assert exc_info.value.status_code == 422

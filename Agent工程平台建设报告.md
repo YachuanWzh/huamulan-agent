@@ -14,7 +14,7 @@
 2. **持久化 EvalRun**：每次评测保存数据集哈希、脱敏配置、运行状态、完整报告和逐用例结果，并关联 `trace_id` / `thread_id`。
 3. **自动回归门禁**：同一套比较器同时服务 API 和 CI CLI，识别通过变失败、安全退化、禁用工具、缺失用例、通过率下降、延迟和 Token 退化。
 4. **Replay Debugger**：对两个 Checkpoint 做递归状态 Diff，区分新增、删除、修改；提供不执行 Agent 的安全 Fork 描述对象。
-5. **盲测 SBS**：隐藏候选身份，稳定随机展示 A/B，支持 tie / both_bad、1–5 维度评分、评审 revision 和 NDJSON 导出。
+5. **真实 A/B 运行与盲测 SBS**：同一提示词并行调用两套模型/Agent 配置，复用项目 AgentHarness、工具链、安全策略与 Trace；运行完成后隐藏候选身份，稳定随机展示 A/B，支持 tie / both_bad、1–5 维度评分、评审 revision 和 NDJSON 导出。
 6. **Agent Engineering 前端工作台**：一个入口覆盖 Trace、Regression、Replay diff、SBS review 四类工程任务。
 7. **工程基线恢复**：修复了配置环境污染等历史问题；当前完整后端和前端测试全部通过，前端生产构建通过。
 
@@ -377,7 +377,13 @@ Fork API 当前只返回：
 
 ## 八、SBS：盲测人工偏好工作流
 
-### 8.1 盲化逻辑
+### 8.1 工作机制
+
+SBS 的主入口不是随机生成内容，也不是只交换两段文本。用户先为“配置 1 / 配置 2”分别选择模型和单/多智能体模式；后端收到同一个提示词后，通过项目现有 `AgentHarness.run_user_turn` 并行执行两次。每次执行都会使用该项目的模型服务、Skill/工具、安全拦截、审批规则和 Trace 记录。运行成功后，输出、模型、Agent 模式、独立 `thread_id`、`trace_id`、耗时和 Trace 汇总写入候选元数据，再自动创建持久化 SBS 任务。
+
+两套配置不能完全相同，避免为无意义的重复执行消耗 Token。任一候选需要工具审批、运行失败或没有输出时，不创建 SBS 任务，并向前端返回明确错误。手工粘贴已有输出仍然保留，但只作为“导入已有输出（高级）”的兼容入口。
+
+### 8.2 盲化逻辑
 
 任务内部保留真实候选 ID 和来源，但返回评审端时只展示 Candidate A / B 和输出文本。`identity_map` 被 Pydantic 标记为不序列化，因此不会通过 API 泄露候选身份。
 
@@ -388,9 +394,13 @@ Fork API 当前只返回：
 
 ```mermaid
 sequenceDiagram
+    participant UI as Agent Engineering
+    participant Harness as AgentHarness
     participant DB as SBS Task
     participant API as Blinding API
     participant Human as Reviewer
+    UI->>Harness: 同一提示词 + 配置 1 / 配置 2（并行）
+    Harness->>DB: 两份输出 + thread_id + trace_id + 执行证据
     DB->>API: candidate_a / candidate_b + provenance
     API->>Human: Candidate A / Candidate B（隐藏身份）
     Human->>API: winner + reason + dimension scores
@@ -398,7 +408,7 @@ sequenceDiagram
     API->>DB: 新增 revision，不覆盖历史
 ```
 
-### 8.2 领域规则
+### 8.3 领域规则
 
 - Winner 可选 A、B、tie、both_bad；
 - `both_bad` 必须填写理由；
@@ -406,12 +416,15 @@ sequenceDiagram
 - 同一 reviewer 的新评审自动增加 revision；
 - 评审后任务状态更新为 reviewed；
 - 导出时按 `task_id` 排序，并保留 provenance。
+- 模型和 Agent 身份只存在于服务端任务元数据，在盲评响应中不返回。
 
-### 8.3 SBS API
+### 8.4 SBS API
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/sbs/tasks` | 创建 SBS 任务 |
+| GET | `/api/sbs/run-options` | 获取项目默认模型、已配置模型候选和可用 Agent 模式 |
+| POST | `/api/sbs/tasks/run` | 并行运行两套项目 Agent 配置并自动创建 SBS 任务 |
+| POST | `/api/sbs/tasks` | 导入两份已有输出并创建 SBS 任务（高级入口） |
 | GET | `/api/sbs/tasks` | 列出任务 |
 | GET | `/api/sbs/tasks/{task_id}` | 获取盲化任务 |
 | POST | `/api/sbs/tasks/{task_id}/reviews` | 保存评审 revision |
@@ -425,6 +438,7 @@ Sidebar 新增 `Agent Engineering` 入口，包含四个标签：
 
 ### 9.1 Trace
 
+- 用途：回答“一次 Agent 调用实际做了什么、慢在哪里、错在哪里”；
 - 按当前 thread 加载 Trace；
 - 展示耗时、Token、Error；
 - 用“时间脊柱”递归展示父子 Span；
@@ -432,12 +446,14 @@ Sidebar 新增 `Agent Engineering` 入口，包含四个标签：
 
 ### 9.2 Regression
 
+- 用途：回答“新版本相对基线是否发生能力、安全、延迟或 Token 回归”；
 - 选择 baseline 和 candidate EvalRun；
 - 调用统一回归比较 API；
 - 展示 gate 状态、通过率变化和逐条 finding。
 
 ### 9.3 Replay diff
 
+- 用途：回答“两个 Checkpoint 的状态从哪里开始不同”，默认不执行 Agent 或工具；
 - 输入 before / after Checkpoint ID；
 - 展示 added / removed / changed；
 - 生成 Safe Fork Descriptor；
@@ -445,6 +461,9 @@ Sidebar 新增 `Agent Engineering` 入口，包含四个标签：
 
 ### 9.4 SBS review
 
+- 用途：回答“面对同一问题，人更偏好哪套模型/Agent 配置的结果”；
+- 配置两个模型和单/多智能体模式，使用同一提示词并行真实运行；
+- 自动保存两侧输出及各自 Trace 来源，再创建评审任务；
 - 加载评审队列；
 - 只展示盲化后的 A/B；
 - 选择 winner、填写 reviewer 和 reason；

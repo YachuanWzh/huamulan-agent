@@ -22,6 +22,47 @@ class SBSTask(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
 
 
+class SBSTaskSummary(BaseModel):
+    task_id: str
+    prompt: str
+    status: Literal["pending", "reviewed"]
+
+
+class SBSCandidateRunConfig(BaseModel):
+    model: str | None = None
+    agent_mode: Literal["single", "multi"] = "single"
+
+    @field_validator("model")
+    @classmethod
+    def normalize_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class SBSRunRequest(BaseModel):
+    prompt: str
+    candidate_a: SBSCandidateRunConfig
+    candidate_b: SBSCandidateRunConfig
+
+    @field_validator("prompt")
+    @classmethod
+    def require_prompt(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("prompt is required")
+        return normalized
+
+
+class SBSRunOptions(BaseModel):
+    default_model: str
+    known_models: list[str]
+    agent_modes: list[Literal["single", "multi"]] = Field(
+        default_factory=lambda: ["single", "multi"]
+    )
+
+
 class BlindedCandidate(BaseModel):
     label: Literal["A", "B"]
     output: str
@@ -73,6 +114,10 @@ def present_blinded_task(task: SBSTask, *, seed: int | str | None = None) -> Bli
             for label, candidate in zip(labels, candidates, strict=True)
         },
     )
+
+
+def summarize_sbs_task(task: SBSTask) -> SBSTaskSummary:
+    return SBSTaskSummary(task_id=task.task_id, prompt=task.prompt, status=task.status)
 
 
 def canonical_winner(review: SBSReview, task: BlindedSBSTask) -> str:

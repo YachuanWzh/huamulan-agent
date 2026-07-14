@@ -760,6 +760,11 @@ export interface SBSTask {
   status: 'pending' | 'reviewed'
   provenance: Record<string, unknown>
 }
+export interface SBSTaskSummary {
+  task_id: string
+  prompt: string
+  status: 'pending' | 'reviewed'
+}
 export interface BlindedSBSTask {
   task_id: string; prompt: string; candidates: { label: 'A' | 'B'; output: string }[]
 }
@@ -767,6 +772,20 @@ export interface SBSReview {
   task_id: string; reviewer: string; winner: 'A' | 'B' | 'tie' | 'both_bad'
   reason: string; dimension_scores: Record<string, number>; revision: number
   canonical_winner?: string | null
+}
+export interface SBSCandidateRunConfig {
+  model: string
+  agent_mode: AgentMode
+}
+export interface SBSRunRequest {
+  prompt: string
+  candidate_a: SBSCandidateRunConfig
+  candidate_b: SBSCandidateRunConfig
+}
+export interface SBSRunOptions {
+  default_model: string
+  known_models: string[]
+  agent_modes: AgentMode[]
 }
 
 // ── API client ────────────────────────────────────────────────────
@@ -858,7 +877,12 @@ export const api = {
       body: JSON.stringify({ checkpoint_id: checkpointId, target_thread_id: targetThreadId }),
     }),
 
-  listSBSTasks: () => request<SBSTask[]>('/api/sbs/tasks'),
+  listSBSTasks: () => request<SBSTaskSummary[]>('/api/sbs/tasks'),
+  getSBSRunOptions: () => request<SBSRunOptions>('/api/sbs/run-options'),
+  runSBSCandidates: (body: SBSRunRequest) =>
+    request<SBSTask>('/api/sbs/tasks/run', {
+      method: 'POST', body: JSON.stringify(body),
+    }),
   createSBSTask: (task: SBSTask) =>
     request<SBSTask>('/api/sbs/tasks', {
       method: 'POST', body: JSON.stringify(task),

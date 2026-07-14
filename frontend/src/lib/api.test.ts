@@ -109,6 +109,37 @@ describe('api', () => {
 
       await expect(api.createSBSTask(task)).resolves.toMatchObject({ task_id: 'sbs-new' })
     })
+
+    it('loads SBS run options and runs two project candidates', async () => {
+      const body = {
+        prompt: '诊断接口超时',
+        candidate_a: { model: 'model-one', agent_mode: 'single' as const },
+        candidate_b: { model: 'model-two', agent_mode: 'multi' as const },
+      }
+      const task: SBSTask = {
+        task_id: 'sbs-run', prompt: body.prompt, status: 'pending',
+        provenance: { source: 'project_agent_ab_run' },
+        candidate_a: { candidate_id: 'candidate-a', output: 'Answer one', metadata: {} },
+        candidate_b: { candidate_id: 'candidate-b', output: 'Answer two', metadata: {} },
+      }
+      server.use(
+        http.get(`${BASE}/api/sbs/run-options`, () => HttpResponse.json({
+          default_model: 'model-one', known_models: ['model-one', 'model-two'],
+          agent_modes: ['single', 'multi'],
+        })),
+        http.post(`${BASE}/api/sbs/tasks/run`, async ({ request }) => {
+          expect(await request.json()).toEqual(body)
+          return HttpResponse.json(task)
+        }),
+      )
+
+      await expect(api.getSBSRunOptions()).resolves.toMatchObject({
+        default_model: 'model-one', known_models: ['model-one', 'model-two'],
+      })
+      await expect(api.runSBSCandidates(body)).resolves.toMatchObject({
+        task_id: 'sbs-run', provenance: { source: 'project_agent_ab_run' },
+      })
+    })
   })
   describe('health', () => {
     it('returns status ok', async () => {

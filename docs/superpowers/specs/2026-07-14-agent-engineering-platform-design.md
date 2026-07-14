@@ -208,7 +208,7 @@ The reviewer sees randomized A/B ordering. The stored result records the canonic
 
 ### 4.2 Sources and Feedback Loop
 
-Tasks can be created manually or from a baseline/candidate regression comparison. The MVP does not automatically rewrite the Golden Dataset. Instead, accepted SBS results can be exported as JSONL proposals containing provenance, rubric, winner, and reviewer reason. This keeps human labels auditable and prevents accidental contamination of the canonical dataset.
+Tasks can be created by running two model/Agent configurations through the existing AgentHarness with the same prompt, manually importing existing outputs, or forwarding a baseline/candidate regression comparison. Direct runs retain model, Agent mode, thread, Trace, duration, and token provenance. The workflow does not automatically rewrite the Golden Dataset. Instead, accepted SBS results can be exported as JSONL proposals containing provenance, rubric, winner, and reviewer reason. This keeps human labels auditable and prevents accidental contamination of the canonical dataset.
 
 ### 4.3 Bias and Safety
 
