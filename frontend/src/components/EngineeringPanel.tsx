@@ -171,6 +171,16 @@ export function EngineeringPanel({
     setNotice('SBS 任务已创建')
   })
 
+  const deleteSbsTask = (item: SBSTaskSummary) => {
+    if (!window.confirm(`确定删除评审记录“${item.prompt}”吗？删除后无法恢复。`)) return
+    void run(async () => {
+      await api.deleteSBSTask(item.task_id)
+      setSbsTasks(await api.listSBSTasks())
+      if (sbsTask?.task_id === item.task_id) setSbsTask(null)
+      setNotice('评审记录已删除')
+    })
+  }
+
   const sameSbsRunConfig = sbsRunDraft.modelA.trim() === sbsRunDraft.modelB.trim()
     && sbsRunDraft.modeA === sbsRunDraft.modeB
 
@@ -309,7 +319,14 @@ export function EngineeringPanel({
       </div>}
 
       {tool === 'sbs' && <div className="engineering-grid">
-        <aside className="evidence-index"><h3>评审队列</h3>{sbsTasks.length === 0 && <p>暂无待评审的 SBS 任务。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{statusLabel(item.status)}</span></button>)}</aside>
+        <aside className="evidence-index">
+          <h3>评审队列</h3>
+          {sbsTasks.length === 0 && <p>暂无 SBS 评审记录。</p>}
+          {sbsTasks.map((item) => <div className="sbs-queue-item" key={item.task_id}>
+            <button className="sbs-queue-select" onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{statusLabel(item.status)}</span></button>
+            <button className="sbs-queue-delete" aria-label={`删除评审记录：${item.prompt}`} onClick={() => deleteSbsTask(item)}>删除</button>
+          </div>)}
+        </aside>
         <div className="evidence-canvas engineering-form">
           <ToolIntro title="盲化偏好评审">同一提示词并行运行两套模型或智能体配置，自动记录输出与链路追踪，再随机映射为 A/B 供人工盲评。</ToolIntro>
           <section className="sbs-runner" aria-label="运行 SBS 候选">

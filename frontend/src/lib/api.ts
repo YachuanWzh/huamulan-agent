@@ -537,6 +537,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(`API error ${res.status}: ${text}`)
   }
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
@@ -893,6 +894,8 @@ export const api = {
     request<SBSTask>('/api/sbs/tasks', {
       method: 'POST', body: JSON.stringify(task),
     }),
+  deleteSBSTask: (taskId: string) =>
+    request<void>(`/api/sbs/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' }),
   getSBSTask: (taskId: string) =>
     request<BlindedSBSTask>(`/api/sbs/tasks/${encodeURIComponent(taskId)}`),
   submitSBSReview: (taskId: string, review: SBSReview) =>

@@ -110,6 +110,19 @@ describe('api', () => {
       await expect(api.createSBSTask(task)).resolves.toMatchObject({ task_id: 'sbs-new' })
     })
 
+    it('deletes an SBS task', async () => {
+      let deletedTaskId = ''
+      server.use(
+        http.delete(`${BASE}/api/sbs/tasks/:taskId`, ({ params }) => {
+          deletedTaskId = String(params.taskId)
+          return new HttpResponse(null, { status: 204 })
+        }),
+      )
+
+      await expect(api.deleteSBSTask('sbs-1')).resolves.toBeUndefined()
+      expect(deletedTaskId).toBe('sbs-1')
+    })
+
     it('loads SBS run options and runs two project candidates', async () => {
       const body = {
         prompt: '诊断接口超时',

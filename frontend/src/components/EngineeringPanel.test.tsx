@@ -10,7 +10,7 @@ vi.mock('../lib/api', () => ({
     compareEvaluationRuns: vi.fn(), diffReplay: vi.fn(), createReplayFork: vi.fn(),
     listSkillEvaluationDatasets: vi.fn(), runSkillEvaluationStream: vi.fn(),
     listSBSTasks: vi.fn(), getSBSTask: vi.fn(), submitSBSReview: vi.fn(), exportSBS: vi.fn(),
-    createSBSTask: vi.fn(), getSBSRunOptions: vi.fn(), runSBSCandidates: vi.fn(),
+    createSBSTask: vi.fn(), deleteSBSTask: vi.fn(), getSBSRunOptions: vi.fn(), runSBSCandidates: vi.fn(),
   },
 }))
 
@@ -100,7 +100,7 @@ describe('EngineeringPanel', () => {
     render(<EngineeringPanel threadId="thread-1" />)
 
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
-    await user.click(await screen.findByRole('button', { name: /诊断超时/ }))
+    await user.click(await screen.findByRole('button', { name: '诊断超时待处理' }))
     await user.selectOptions(await screen.findByLabelText('胜出项'), 'both_bad')
 
     expect(screen.getByRole('button', { name: '保存评审' })).toBeDisabled()
@@ -129,7 +129,7 @@ describe('EngineeringPanel', () => {
     render(<EngineeringPanel threadId="thread-1" />)
 
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
-    await user.click(await screen.findByRole('button', { name: /诊断超时/ }))
+    await user.click(await screen.findByRole('button', { name: '诊断超时已评审' }))
 
     expect(await screen.findByRole('region', { name: '评审结果' })).toBeInTheDocument()
     expect(screen.getByText('候选 B 胜出')).toBeInTheDocument()
@@ -137,6 +137,35 @@ describe('EngineeringPanel', () => {
     expect(screen.getByText('B 的证据更完整')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '保存评审' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('评审人')).not.toBeInTheDocument()
+  })
+
+  it('deletes the selected SBS queue record after confirmation', async () => {
+    api.listSBSTasks
+      .mockResolvedValueOnce([{
+        task_id: 'sbs-reviewed', prompt: '诊断超时', status: 'reviewed',
+      }])
+      .mockResolvedValue([])
+    api.getSBSTask.mockResolvedValue({
+      task_id: 'sbs-reviewed', prompt: '诊断超时', status: 'reviewed',
+      candidates: [{ label: 'A', output: 'answer A' }, { label: 'B', output: 'answer B' }],
+      review: {
+        reviewer: 'alice', winner: 'B', reason: 'B 的证据更完整',
+        dimension_scores: {}, revision: 1,
+      },
+    })
+    api.deleteSBSTask.mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
+    await user.click(await screen.findByRole('button', { name: '诊断超时已评审' }))
+    expect(await screen.findByRole('region', { name: '评审结果' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '删除评审记录：诊断超时' }))
+
+    await waitFor(() => expect(api.deleteSBSTask).toHaveBeenCalledWith('sbs-reviewed'))
+    expect(await screen.findByText('评审记录已删除')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '评审结果' })).not.toBeInTheDocument()
   })
 
   it('creates a persisted EvalRun in Regression and selects it as the baseline', async () => {

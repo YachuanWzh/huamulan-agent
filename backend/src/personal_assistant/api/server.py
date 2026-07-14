@@ -1265,6 +1265,13 @@ async def list_sbs_tasks(limit: int = 100) -> list[SBSTaskSummary]:
     return [summarize_sbs_task(task) for task in tasks]
 
 
+@app.delete("/api/sbs/tasks/{task_id}", status_code=204)
+async def delete_sbs_task(task_id: str) -> Response:
+    if not await memory.delete_sbs_task(task_id):
+        raise HTTPException(status_code=404, detail="SBS task not found")
+    return Response(status_code=204)
+
+
 @app.get("/api/sbs/run-options", response_model=SBSRunOptions)
 async def get_sbs_run_options() -> SBSRunOptions:
     configured = (

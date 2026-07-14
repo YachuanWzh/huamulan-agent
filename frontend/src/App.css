@@ -3997,6 +3997,10 @@ button {
 .evidence-index button:hover, .evidence-index button:focus-visible { border-color: #48808a; outline: none; background: #f2ede2; }
 .evidence-index code { overflow: hidden; text-overflow: ellipsis; font-size: .74rem; }
 .evidence-index button span { color: #887866; font-size: .7rem; }
+.sbs-queue-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 6px; }
+.evidence-index .sbs-queue-select { min-width: 0; }
+.evidence-index .sbs-queue-delete { display: flex; align-items: center; justify-content: center; border: 1px solid #d8b6aa; border-left-width: 1px; background: #fff8f2; color: #984238; padding: 0 9px; font-size: .7rem; font-weight: 750; text-align: center; }
+.evidence-index .sbs-queue-delete:hover, .evidence-index .sbs-queue-delete:focus-visible { border-color: #a9483e; background: #f9e7df; color: #7f2e27; }
 .evidence-canvas { min-width: 0; padding: 24px; }
 .trace-facts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
 .trace-facts span { padding: 5px 9px; border: 1px solid #c7d9d9; background: #edf5f3; color: #315e66; font: 750 .72rem/1 ui-monospace, SFMono-Regular, Consolas, monospace; }

@@ -217,6 +217,40 @@ async def test_sbs_queue_does_not_expose_candidate_identity(monkeypatch) -> None
     assert "baseline answer" not in payload
 
 
+async def test_delete_sbs_task_removes_the_task(monkeypatch) -> None:
+    from personal_assistant.api import server
+
+    deleted = []
+
+    class _Memory:
+        async def delete_sbs_task(self, task_id):
+            deleted.append(task_id)
+            return True
+
+    monkeypatch.setattr(server, "memory", _Memory())
+
+    response = await server.delete_sbs_task("sbs-1")
+
+    assert response.status_code == 204
+    assert deleted == ["sbs-1"]
+
+
+async def test_delete_sbs_task_returns_404_when_missing(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from personal_assistant.api import server
+
+    class _Memory:
+        async def delete_sbs_task(self, _task_id):
+            return False
+
+    monkeypatch.setattr(server, "memory", _Memory())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server.delete_sbs_task("missing")
+
+    assert exc_info.value.status_code == 404
+
+
 async def test_sbs_run_executes_two_project_agents_and_persists_outputs(monkeypatch) -> None:
     from personal_assistant.api import server
     from personal_assistant.api.schemas import ChatResponse

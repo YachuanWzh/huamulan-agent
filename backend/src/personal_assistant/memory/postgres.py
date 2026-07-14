@@ -689,6 +689,16 @@ class PostgresMemory:
             row = await cursor.fetchone()
         return _sbs_task_from_row(row) if row is not None else None
 
+    async def delete_sbs_task(self, task_id: str) -> bool:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                "DELETE FROM sbs_tasks WHERE task_id = %s",
+                (task_id,),
+            )
+        return cursor.rowcount > 0
+
     async def record_sbs_review(self, review: SBSReview) -> SBSReview:
         if self.pool is None:
             raise RuntimeError("Postgres memory is not started")
