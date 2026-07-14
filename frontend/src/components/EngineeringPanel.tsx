@@ -113,7 +113,7 @@ export function EngineeringPanel({
         else setCandidate(completed.run_id)
       }
     } catch (cause) {
-      setError(`Unable to create EvalRun: ${message(cause)}`)
+      setError(`无法创建 EvalRun：${message(cause)}`)
     } finally {
       setEvaluationRunning(false)
     }
@@ -142,7 +142,7 @@ export function EngineeringPanel({
     setSbsTasks(await api.listSBSTasks())
     setSbsTask(await api.getSBSTask(created.task_id))
     setSbsDraft({ prompt: '', candidateA: '', candidateB: '', provenance: {} })
-    setNotice('SBS task created')
+    setNotice('SBS 任务已创建')
   })
 
   const prefillSbsFromFinding = (finding: EvaluationComparison['findings'][number]) => {
@@ -158,44 +158,44 @@ export function EngineeringPanel({
       },
     })
     setSbsTask(null)
-    setNotice('Regression evidence copied into a new SBS task')
+    setNotice('回归评测证据已复制到新的 SBS 任务')
     setTool('sbs')
   }
 
   return (
-    <section className="engineering-workspace" aria-label="Agent engineering workspace">
+    <section className="engineering-workspace" aria-label="智能体工程工作区">
       <header className="engineering-header">
-        <div><span>FLIGHT RECORDER</span><h2>Agent Engineering</h2></div>
-        <p>Review the execution path and make decisions from evaluation evidence.</p>
+        <div><span>飞行记录器</span><h2>智能体工程</h2></div>
+        <p>沿执行链路复盘，基于评测证据做决策。</p>
       </header>
       <div className="engineering-tools" role="tablist">
-        {([['trace', 'Trace'], ['regression', 'Regression'], ['replay', 'Replay diff'], ['sbs', 'SBS review']] as const).map(([id, label]) => (
+        {([['trace', '链路追踪'], ['regression', '回归评测'], ['replay', '回放差异'], ['sbs', 'SBS 评审']] as const).map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tool === id} onClick={() => setTool(id)}>{label}</button>
         ))}
       </div>
       {error && <div className="engineering-error" role="alert">{error}</div>}
-      {busy && <div className="engineering-loading">Loading evidence…</div>}
+      {busy && <div className="engineering-loading">正在加载证据…</div>}
       {notice && <div className="engineering-notice" role="status">{notice}</div>}
 
       {tool === 'trace' && <div className="engineering-grid">
         <aside className="evidence-index">
-          <h3>Thread traces</h3>
-          {!threadId && <p>Select a conversation thread first.</p>}
-          {threadId && traces.length === 0 && !busy && <p>This thread has no traces yet.</p>}
+          <h3>线程追踪记录</h3>
+          {!threadId && <p>请先选择一个对话线程。</p>}
+          {threadId && traces.length === 0 && !busy && <p>该线程还没有追踪记录。</p>}
           {traces.map((item) => <button key={item.trace_id} onClick={() => run(async () => setTrace(await api.getTrace(item.trace_id)))}>
-            <code>{item.trace_id}</code><span>{item.duration_ms} ms · {item.total_spans} spans</span>
+            <code>{item.trace_id}</code><span>{item.duration_ms} ms · {item.total_spans} 个执行片段</span>
           </button>)}
         </aside>
         <div className="evidence-canvas">
-          <ToolIntro title="Trace evidence">Inspect every span in one agent turn, including timing, tokens, inputs, outputs, errors, and metadata.</ToolIntro>
-          {!trace ? <EmptyEvidence text="Select a trace to inspect its execution spine." /> : <>
+          <ToolIntro title="追踪证据">检查单次智能体执行中的每个片段，包括耗时、令牌、输入、输出、错误和元数据。</ToolIntro>
+          {!trace ? <EmptyEvidence text="选择一条追踪记录以查看其执行链路。" /> : <>
             <div className="trace-facts">
               <span>{trace.summary.duration_ms} ms</span>
-              <span>{trace.summary.total_spans} spans</span>
-              <span>{trace.summary.total_tokens} tokens</span>
-              <span>{trace.summary.tool_calls} tools</span>
-              <span>{trace.summary.retry_count} retries</span>
-              <span>{trace.summary.error_count} errors</span>
+              <span>{trace.summary.total_spans} 个执行片段</span>
+              <span>{trace.summary.total_tokens} 个令牌</span>
+              <span>{trace.summary.tool_calls} 次工具调用</span>
+              <span>{trace.summary.retry_count} 次重试</span>
+              <span>{trace.summary.error_count} 个错误</span>
             </div>
             <ol className="trace-spine">{trace.roots.map((node) => <TraceBranch key={node.span.span_id} node={node} />)}</ol>
           </>}
@@ -203,69 +203,69 @@ export function EngineeringPanel({
       </div>}
 
       {tool === 'regression' && <div className="evidence-canvas engineering-form">
-        <ToolIntro title="Regression gate">Create persisted EvalRuns, then compare a baseline and candidate over the same Golden Dataset.</ToolIntro>
-        <section className="evalrun-create" aria-label="Create EvalRun">
+        <ToolIntro title="回归门禁">创建持久化 EvalRun，并在同一黄金数据集上比较基线与候选结果。</ToolIntro>
+        <section className="evalrun-create" aria-label="创建 EvalRun">
           <div>
-            <h3>Create EvalRun</h3>
-            <p>Run a Golden Dataset here. Completed runs become available for comparison below.</p>
+            <h3>创建 EvalRun</h3>
+            <p>在此运行黄金数据集。执行完成后，可在下方选择并比较结果。</p>
           </div>
           <div className="form-row">
-            <label>Golden dataset<select value={selectedDataset} onChange={(e) => setSelectedDataset(e.target.value)}>
-              <option value="">Select dataset</option>
+            <label>黄金数据集<select value={selectedDataset} onChange={(e) => setSelectedDataset(e.target.value)}>
+              <option value="">选择数据集</option>
               {datasets.map((item) => <option key={item.path} value={item.path}>{item.label}</option>)}
             </select></label>
-            <label>Evaluation mode<select value={evaluationMode} onChange={(e) => setEvaluationMode(e.target.value as 'quick' | 'e2e')}>
-              <option value="quick">Quick</option><option value="e2e">E2E</option>
+            <label>评测模式<select value={evaluationMode} onChange={(e) => setEvaluationMode(e.target.value as 'quick' | 'e2e')}>
+              <option value="quick">快速</option><option value="e2e">E2E</option>
             </select></label>
             <button disabled={!selectedDataset || evaluationRunning} onClick={createEvaluationRun}>
-              {evaluationRunning ? 'Running…' : 'Create EvalRun'}
+              {evaluationRunning ? '运行中…' : '创建 EvalRun'}
             </button>
           </div>
           {evaluationProgress && <div className="evalrun-progress" role="status">
-            <strong>{evaluationProgress.completed} / {evaluationProgress.total} cases</strong>
+            <strong>{evaluationProgress.completed} / {evaluationProgress.total} 个用例</strong>
             <span><i style={{ width: `${evaluationProgress.percent}%` }} /></span>
           </div>}
-          {runs.length === 0 && !evaluationRunning && <p className="engineering-empty-note">No EvalRuns yet. Create the first run above.</p>}
+          {runs.length === 0 && !evaluationRunning && <p className="engineering-empty-note">暂无 EvalRun，请先在上方创建。</p>}
         </section>
-        <h3>Compare two EvalRuns</h3>
+        <h3>比较两个 EvalRun</h3>
         <div className="form-row">
-          <label>Baseline<select value={baseline} onChange={(e) => setBaseline(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
-          <label>Candidate<select value={candidate} onChange={(e) => setCandidate(e.target.value)}><option value="">Select run</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
-          <button disabled={!canCompare} onClick={() => run(async () => setComparison(await api.compareEvaluationRuns(baseline, candidate)))}>Run gate</button>
+          <label>基线<select value={baseline} onChange={(e) => setBaseline(e.target.value)}><option value="">选择运行记录</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
+          <label>候选<select value={candidate} onChange={(e) => setCandidate(e.target.value)}><option value="">选择运行记录</option>{runs.map((item) => <option key={item.run_id} value={item.run_id} disabled={item.status !== 'completed'}>{evaluationRunLabel(item)}</option>)}</select></label>
+          <button disabled={!canCompare} onClick={() => run(async () => setComparison(await api.compareEvaluationRuns(baseline, candidate)))}>执行门禁</button>
         </div>
-        {comparison && <><div className={`gate-status ${comparison.status}`}>{comparison.status.toUpperCase()} · {(comparison.baseline_pass_rate * 100).toFixed(1)}% → {(comparison.candidate_pass_rate * 100).toFixed(1)}%</div>
-          <ul className="finding-list">{comparison.findings.map((item, index) => <li key={`${item.rule}-${index}`} data-severity={item.severity}><code>{item.rule}</code><span>{item.case_id || 'run'}</span><p>{item.message}</p>{(item.baseline !== undefined || item.candidate !== undefined) && <button onClick={() => prefillSbsFromFinding(item)}>Review side by side</button>}</li>)}</ul></>}
+        {comparison && <><div className={`gate-status ${comparison.status}`}>{gateStatusLabel(comparison.status)} · {(comparison.baseline_pass_rate * 100).toFixed(1)}% → {(comparison.candidate_pass_rate * 100).toFixed(1)}%</div>
+          <ul className="finding-list">{comparison.findings.map((item, index) => <li key={`${item.rule}-${index}`} data-severity={item.severity}><code>{item.rule}</code><span>{item.case_id || '运行'}</span><p>{item.message}</p>{(item.baseline !== undefined || item.candidate !== undefined) && <button onClick={() => prefillSbsFromFinding(item)}>并排评审</button>}</li>)}</ul></>}
       </div>}
 
       {tool === 'replay' && <div className="evidence-canvas engineering-form">
-        <ToolIntro title="Replay evidence">Compare two checkpoints without executing tools, then describe a provenance-preserving safe fork.</ToolIntro>
-        <h3>Checkpoint state diff</h3>
+        <ToolIntro title="回放证据">在不执行工具的情况下比较两个检查点，并描述保留来源信息的安全分支。</ToolIntro>
+        <h3>检查点状态差异</h3>
         <div className="form-row">
-          <label>Before<input value={beforeCheckpoint} onChange={(e) => setBeforeCheckpoint(e.target.value)} placeholder="checkpoint id" /></label>
-          <label>After<input value={afterCheckpoint} onChange={(e) => setAfterCheckpoint(e.target.value)} placeholder="checkpoint id" /></label>
-          <button disabled={!threadId || !beforeCheckpoint || !afterCheckpoint} onClick={() => run(async () => setReplayDiff(await api.diffReplay(threadId!, beforeCheckpoint, afterCheckpoint)))}>Show changes</button>
-          <button className="quiet" disabled={!threadId || !afterCheckpoint} onClick={() => run(async () => setFork(await api.createReplayFork(threadId!, afterCheckpoint)))}>Describe safe fork</button>
+          <label>变更前<input value={beforeCheckpoint} onChange={(e) => setBeforeCheckpoint(e.target.value)} placeholder="检查点 ID" /></label>
+          <label>变更后<input value={afterCheckpoint} onChange={(e) => setAfterCheckpoint(e.target.value)} placeholder="检查点 ID" /></label>
+          <button disabled={!threadId || !beforeCheckpoint || !afterCheckpoint} onClick={() => run(async () => setReplayDiff(await api.diffReplay(threadId!, beforeCheckpoint, afterCheckpoint)))}>显示变更</button>
+          <button className="quiet" disabled={!threadId || !afterCheckpoint} onClick={() => run(async () => setFork(await api.createReplayFork(threadId!, afterCheckpoint)))}>描述安全分支</button>
         </div>
         {replayDiff && <ChangeList diff={replayDiff} />}
-        {fork && <p className="fork-proof"><strong>No execution performed.</strong> Target <code>{fork.target_thread_id}</code> keeps provenance from <code>{fork.source_checkpoint_id}</code>.</p>}
+        {fork && <p className="fork-proof"><strong>未执行任何操作。</strong>目标线程 <code>{fork.target_thread_id}</code> 保留来自检查点 <code>{fork.source_checkpoint_id}</code> 的来源信息。</p>}
       </div>}
 
       {tool === 'sbs' && <div className="engineering-grid">
-        <aside className="evidence-index"><h3>Review queue</h3>{sbsTasks.length === 0 && <p>No SBS tasks are waiting for review.</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{item.status}</span></button>)}</aside>
+        <aside className="evidence-index"><h3>评审队列</h3>{sbsTasks.length === 0 && <p>暂无待评审的 SBS 任务。</p>}{sbsTasks.map((item) => <button key={item.task_id} onClick={() => run(async () => setSbsTask(await api.getSBSTask(item.task_id)))}>{item.prompt}<span>{statusLabel(item.status)}</span></button>)}</aside>
         <div className="evidence-canvas engineering-form">
-          <ToolIntro title="Blinded preference review">Create blinded A/B tasks, judge outputs without model identity, and keep the reason as auditable evidence.</ToolIntro>
-          <section className="sbs-create" aria-label="Create SBS task">
-            <h3>Create SBS task</h3>
+          <ToolIntro title="盲化偏好评审">创建盲化 A/B 任务，在隐藏模型身份的情况下评判输出，并将理由保存为可审计证据。</ToolIntro>
+          <section className="sbs-create" aria-label="创建 SBS 任务">
+            <h3>创建 SBS 任务</h3>
             <div className="form-row">
-              <label>Prompt<input value={sbsDraft.prompt} onChange={(e) => setSbsDraft((draft) => ({ ...draft, prompt: e.target.value }))} /></label>
-              <label>Candidate A output<textarea value={sbsDraft.candidateA} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateA: e.target.value }))} /></label>
-              <label>Candidate B output<textarea value={sbsDraft.candidateB} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateB: e.target.value }))} /></label>
-              <button disabled={!sbsDraft.prompt.trim() || !sbsDraft.candidateA.trim() || !sbsDraft.candidateB.trim()} onClick={createSbsTask}>Create SBS task</button>
+              <label>提示词<input value={sbsDraft.prompt} onChange={(e) => setSbsDraft((draft) => ({ ...draft, prompt: e.target.value }))} /></label>
+              <label>候选 A 输出<textarea value={sbsDraft.candidateA} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateA: e.target.value }))} /></label>
+              <label>候选 B 输出<textarea value={sbsDraft.candidateB} onChange={(e) => setSbsDraft((draft) => ({ ...draft, candidateB: e.target.value }))} /></label>
+              <button disabled={!sbsDraft.prompt.trim() || !sbsDraft.candidateA.trim() || !sbsDraft.candidateB.trim()} onClick={createSbsTask}>创建 SBS 任务</button>
             </div>
           </section>
-          {!sbsTask ? <EmptyEvidence text="Create a task or select one from the review queue." /> : <>
-          <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>Candidate {item.label}</strong><p>{item.output}</p></article>)}</div>
-          <div className="form-row"><label>Reviewer<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label><label>Winner<select aria-label="Winner" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">Tie</option><option value="both_bad">Both bad</option></select></label><label>Reason<textarea aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+          {!sbsTask ? <EmptyEvidence text="创建任务，或从评审队列中选择一个任务。" /> : <>
+          <h3>{sbsTask.prompt}</h3><div className="candidate-pair">{sbsTask.candidates.map((item) => <article key={item.label}><strong>候选 {item.label}</strong><p>{item.output}</p></article>)}</div>
+          <div className="form-row"><label>评审人<input value={reviewer} onChange={(e) => setReviewer(e.target.value)} /></label><label>胜出项<select aria-label="胜出项" value={winner} onChange={(e) => setWinner(e.target.value as SBSReview['winner'])}><option value="A">A</option><option value="B">B</option><option value="tie">平局</option><option value="both_bad">两者都不合格</option></select></label><label>理由<textarea aria-label="理由" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
           <button disabled={!reviewer || (winner === 'both_bad' && !reason.trim())} onClick={() => run(async () => {
             await api.submitSBSReview(sbsTask.task_id, { task_id: sbsTask.task_id, reviewer, winner, reason, dimension_scores: {}, revision: 1 })
             setSbsTasks(await api.listSBSTasks())
@@ -273,8 +273,8 @@ export function EngineeringPanel({
             setReviewer('')
             setWinner('A')
             setReason('')
-            setNotice('Review saved')
-          })}>Save review</button></div>
+            setNotice('评审已保存')
+          })}>保存评审</button></div>
         </>}
         </div>
       </div>}
@@ -288,21 +288,21 @@ function TraceBranch({ node }: { node: TraceNode }) {
     <details className={`trace-branch status-${span.status}`}>
       <summary className={`trace-node status-${span.status}`}>
         <strong>{span.name || span.kind}</strong>
-        <code>{span.kind}</code>
-        <span>{span.status}</span>
+        <code>{traceKindLabel(span.kind)}</code>
+        <span>{statusLabel(span.status)}</span>
         <span>{span.duration_ms ?? 0} ms</span>
       </summary>
       <div className="trace-detail">
         <dl className="trace-identifiers">
-          <div><dt>Started</dt><dd><time dateTime={span.created_at}>{new Date(span.created_at).toLocaleString()}</time></dd></div>
-          <div><dt>Span ID</dt><dd><code>{span.span_id}</code></dd></div>
-          {span.parent_span_id && <div><dt>Parent ID</dt><dd><code>{span.parent_span_id}</code></dd></div>}
+          <div><dt>开始时间</dt><dd><time dateTime={span.created_at}>{new Date(span.created_at).toLocaleString()}</time></dd></div>
+          <div><dt>执行片段 ID</dt><dd><code>{span.span_id}</code></dd></div>
+          {span.parent_span_id && <div><dt>父级 ID</dt><dd><code>{span.parent_span_id}</code></dd></div>}
         </dl>
-        <TracePayload label="Tokens" value={span.token_usage} />
-        <TracePayload label="Input" value={span.input} />
-        <TracePayload label="Output" value={span.output} />
-        <TracePayload label="Error" value={span.error} />
-        <TracePayload label="Metadata" value={span.metadata} />
+        <TracePayload label="令牌用量" value={span.token_usage} />
+        <TracePayload label="输入" value={span.input} />
+        <TracePayload label="输出" value={span.output} />
+        <TracePayload label="错误" value={span.error} />
+        <TracePayload label="元数据" value={span.metadata} />
       </div>
     </details>
     {node.children.length > 0 && <ol>{node.children.map((child) => <TraceBranch key={child.span.span_id} node={child} />)}</ol>}
@@ -316,18 +316,35 @@ function TracePayload({ label, value }: { label: string; value: Record<string, u
 
 function ChangeList({ diff }: { diff: ReplayDiff }) {
   const rows = [...diff.added, ...diff.removed, ...diff.changed]
-  return <ul className="change-list">{rows.map((item, index) => <li key={`${item.kind}-${item.path}-${index}`}><span>{item.kind}</span><code>{item.path}</code><pre>{JSON.stringify(item.before)} → {JSON.stringify(item.after)}</pre></li>)}</ul>
+  return <ul className="change-list">{rows.map((item, index) => <li key={`${item.kind}-${item.path}-${index}`}><span>{changeKindLabel(item.kind)}</span><code>{item.path}</code><pre>{JSON.stringify(item.before)} → {JSON.stringify(item.after)}</pre></li>)}</ul>
 }
 
 function EmptyEvidence({ text }: { text: string }) { return <div className="engineering-empty"><span>⌁</span><p>{text}</p></div> }
 function ToolIntro({ title, children }: { title: string; children: string }) { return <div className="tool-intro"><span>{title}</span><p>{children}</p></div> }
-function message(cause: unknown) { return cause instanceof Error ? cause.message : 'Unable to load evidence.' }
+function message(cause: unknown) { return cause instanceof Error ? cause.message : '无法加载证据。' }
 function evidenceText(value: unknown) {
   if (typeof value === 'string') return value
-  if (value === undefined || value === null) return 'No evidence recorded.'
+  if (value === undefined || value === null) return '未记录证据。'
   return JSON.stringify(value, null, 2)
 }
 function evaluationRunLabel(run: EvaluationRun) {
   const created = new Date(run.created_at).toLocaleString()
-  return `${created} · ${run.dataset_path} · ${run.mode} · ${run.completed_cases}/${run.total_cases} · ${run.status}`
+  return `${created} · ${run.dataset_path} · ${evaluationModeLabel(run.mode)} · ${run.completed_cases}/${run.total_cases} · ${statusLabel(run.status)}`
+}
+
+function evaluationModeLabel(mode: string) { return mode === 'e2e' ? 'E2E' : mode === 'quick' ? '快速' : mode }
+function gateStatusLabel(status: string) {
+  return ({ passed: '通过', failed: '未通过', warning: '警告' } as Record<string, string>)[status] || status
+}
+function statusLabel(status: string) {
+  return ({
+    pending: '待处理', running: '运行中', completed: '已完成', reviewed: '已评审',
+    failed: '失败', blocked: '已阻塞', cancelled: '已取消', error: '错误',
+  } as Record<string, string>)[status] || status
+}
+function traceKindLabel(kind: string) {
+  return ({ turn: '对话轮次', agent: '智能体', llm: '大模型', tool: '工具' } as Record<string, string>)[kind] || kind
+}
+function changeKindLabel(kind: string) {
+  return ({ added: '新增', removed: '移除', changed: '变更' } as Record<string, string>)[kind] || kind
 }

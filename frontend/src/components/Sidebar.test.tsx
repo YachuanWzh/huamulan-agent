@@ -46,7 +46,7 @@ describe('Sidebar', () => {
       'true',
     )
     expect(screen.getByRole('tab', { name: 'Governance' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Agent Engineering' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '智能体工程' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /tool errors/i })).not.toBeInTheDocument()
   })
 
@@ -66,7 +66,7 @@ describe('Sidebar', () => {
     expect(onPanelChange).toHaveBeenNthCalledWith(1, 'checkpoint')
     expect(onPanelChange).toHaveBeenNthCalledWith(2, 'audit')
     expect(onPanelChange).toHaveBeenNthCalledWith(3, 'skills')
-    await user.click(screen.getByRole('tab', { name: 'Agent Engineering' }))
+    await user.click(screen.getByRole('tab', { name: '智能体工程' }))
     expect(onPanelChange).toHaveBeenNthCalledWith(4, 'engineering')
   })
 

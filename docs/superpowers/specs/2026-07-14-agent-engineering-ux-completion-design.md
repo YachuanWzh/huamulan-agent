@@ -18,13 +18,13 @@ Build a closed loop inside Agent Engineering and reuse the existing evaluation s
 
 The existing huamulan visual language remains intact. The design signature is an evidence workflow rail: each module starts with one sentence explaining the decision it supports and presents its required producer action in the same surface as its result.
 
-## English Copy Contract
+## Chinese Copy Contract
 
-- All user-facing copy inside Agent Engineering is written in English.
+- All static user-facing copy inside Agent Engineering is written in Simplified Chinese.
 - Necessary technical abbreviations remain abbreviated where the abbreviation is the established product or engineering term: `SBS`, `ID`, `E2E`, `API`, `JSON`, `UX`, `A/B`, and `EvalRun`.
-- Domain names such as Trace, Regression, Replay Diff, Golden Dataset, Baseline, Candidate, checkpoint, span, and token remain in their standard English engineering form.
-- This contract applies only to Agent Engineering. It does not translate the surrounding huamulan application shell or its thematic navigation copy.
-- Component tests scan the rendered Agent Engineering workspace for Han characters so new untranslated user-facing copy cannot be introduced silently.
+- Domain concepts such as Agent Engineering, Trace, Regression, Replay Diff, Golden Dataset, Baseline, Candidate, checkpoint, span, and token are translated into concise Chinese interface terms. Backend-provided identifiers, tool names, dataset names, rule names, paths, and evidence payloads remain unchanged because they are source evidence rather than interface copy.
+- Enumerated backend states and kinds are mapped to Chinese display labels while their transport values remain unchanged.
+- This contract applies only to Agent Engineering. The surrounding huamulan application shell and its thematic navigation copy are outside this module's localization scope.
 
 ## Layout Contract
 

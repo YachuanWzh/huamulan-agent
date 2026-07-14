@@ -186,7 +186,7 @@ export function Sidebar({
           className={`tab ${tab === 'engineering' ? 'active' : ''}`}
           onClick={() => selectTab('engineering', 'engineering')}
         >
-          Agent Engineering
+          智能体工程
         </button>
       </div>
 
