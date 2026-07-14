@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from personal_assistant.agent.agent import (
     build_skill_router_components,
@@ -114,6 +114,14 @@ from personal_assistant.skills.evaluation.ops import (
 from personal_assistant.skills.evaluation.report import evaluate_skill_registry
 from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
+from personal_assistant.skills.evaluation.sbs import (
+    BlindedSBSTask,
+    SBSReview,
+    SBSTask,
+    canonical_winner,
+    export_sbs_jsonl,
+    present_blinded_task,
+)
 from personal_assistant.tracing import build_langfuse_callback
 
 
@@ -1235,6 +1243,48 @@ async def compare_evaluation_run_pair(
     if baseline.status != "completed" or candidate.status != "completed":
         raise HTTPException(status_code=409, detail="Only completed runs can be compared")
     return compare_evaluation_runs(baseline, candidate, request.thresholds)
+
+
+@app.post("/api/sbs/tasks", response_model=SBSTask)
+async def create_sbs_task_endpoint(task: SBSTask) -> SBSTask:
+    await memory.create_sbs_task(task)
+    return task
+
+
+@app.get("/api/sbs/tasks", response_model=list[SBSTask])
+async def list_sbs_tasks(limit: int = 100) -> list[SBSTask]:
+    return await memory.list_sbs_tasks(limit=limit)
+
+
+@app.get("/api/sbs/tasks/{task_id}", response_model=BlindedSBSTask)
+async def get_sbs_task(task_id: str) -> BlindedSBSTask:
+    task = await memory.get_sbs_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="SBS task not found")
+    return present_blinded_task(task, seed=task.task_id)
+
+
+@app.post("/api/sbs/tasks/{task_id}/reviews", response_model=SBSReview)
+async def submit_sbs_review(task_id: str, review: SBSReview) -> SBSReview:
+    task = await memory.get_sbs_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="SBS task not found")
+    blinded = present_blinded_task(task, seed=task.task_id)
+    canonical = canonical_winner(review, blinded)
+    normalized = review.model_copy(
+        update={"task_id": task_id, "canonical_winner": canonical}
+    )
+    return await memory.record_sbs_review(normalized)
+
+
+@app.get("/api/sbs/export")
+async def export_sbs(limit: int = 1000) -> Response:
+    tasks = await memory.list_sbs_tasks(limit=limit)
+    return Response(
+        export_sbs_jsonl(tasks),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": "attachment; filename=sbs-export.jsonl"},
+    )
 
 
 async def _reset_skill_evaluations(memory) -> SkillEvaluationResetResponse:

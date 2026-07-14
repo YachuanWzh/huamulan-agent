@@ -22,6 +22,7 @@ from personal_assistant.api.schemas import (
 )
 from personal_assistant.skills.evaluation.models import SkillEvaluationReport
 from personal_assistant.skills.evaluation.ops import EvaluationCaseResult, EvaluationRun
+from personal_assistant.skills.evaluation.sbs import SBSCandidate, SBSReview, SBSTask
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class PostgresMemory:
         await self._setup_tool_errors()
         await self._setup_skill_evaluation_results()
         await self._setup_evaluation_runs()
+        await self._setup_sbs()
         await self._setup_otel_alerts()
 
     async def stop(self) -> None:
@@ -635,6 +637,91 @@ class PostgresMemory:
         run.case_results = [_evaluation_case_from_row(item) for item in case_rows]
         return run
 
+    async def create_sbs_task(self, task: SBSTask) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO sbs_tasks
+                    (task_id, prompt, candidate_a, candidate_b, status, provenance)
+                VALUES (%s, %s, %s::jsonb, %s::jsonb, %s, %s::jsonb)
+                ON CONFLICT (task_id) DO NOTHING
+                """,
+                (
+                    task.task_id,
+                    task.prompt,
+                    Jsonb(task.candidate_a.model_dump(mode="json")),
+                    Jsonb(task.candidate_b.model_dump(mode="json")),
+                    task.status,
+                    Jsonb(_jsonable(task.provenance)),
+                ),
+            )
+
+    async def list_sbs_tasks(self, limit: int = 100) -> list[SBSTask]:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        limit = max(1, min(limit, 1000))
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT task_id, prompt, candidate_a, candidate_b, status, provenance
+                FROM sbs_tasks
+                ORDER BY created_at ASC, task_id ASC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+        return [_sbs_task_from_row(row) for row in rows]
+
+    async def get_sbs_task(self, task_id: str) -> SBSTask | None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT task_id, prompt, candidate_a, candidate_b, status, provenance
+                FROM sbs_tasks WHERE task_id = %s
+                """,
+                (task_id,),
+            )
+            row = await cursor.fetchone()
+        return _sbs_task_from_row(row) if row is not None else None
+
+    async def record_sbs_review(self, review: SBSReview) -> SBSReview:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT COALESCE(MAX(revision), 0) + 1
+                FROM sbs_reviews WHERE task_id = %s AND reviewer = %s
+                """,
+                (review.task_id, review.reviewer),
+            )
+            row = await cursor.fetchone()
+            revision = int(row[0]) if row else 1
+            saved = review.model_copy(update={"revision": revision})
+            await conn.execute(
+                """
+                INSERT INTO sbs_reviews
+                    (task_id, reviewer, revision, display_winner,
+                     canonical_winner, reason, dimension_scores)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                """,
+                (
+                    saved.task_id, saved.reviewer, revision, saved.winner,
+                    saved.canonical_winner or saved.winner, saved.reason,
+                    Jsonb(saved.dimension_scores),
+                ),
+            )
+            await conn.execute(
+                "UPDATE sbs_tasks SET status = 'reviewed', updated_at = now() WHERE task_id = %s",
+                (saved.task_id,),
+            )
+        return saved
+
     async def list_audit_events(
         self,
         thread_id: str | None = None,
@@ -1081,6 +1168,41 @@ class PostgresMemory:
                 """
             )
 
+    async def _setup_sbs(self) -> None:
+        if self.pool is None:
+            raise RuntimeError("Postgres memory is not started")
+        async with self.pool.connection() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sbs_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    prompt TEXT NOT NULL,
+                    candidate_a JSONB NOT NULL,
+                    candidate_b JSONB NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    provenance JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sbs_reviews (
+                    id BIGSERIAL PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    task_id TEXT NOT NULL REFERENCES sbs_tasks(task_id) ON DELETE CASCADE,
+                    reviewer TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    display_winner TEXT NOT NULL,
+                    canonical_winner TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    dimension_scores JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    UNIQUE (task_id, reviewer, revision)
+                )
+                """
+            )
+
 
     async def _setup_otel_alerts(self) -> None:
         if self.pool is None:
@@ -1505,6 +1627,17 @@ def _evaluation_case_from_row(row: Any) -> EvaluationCaseResult:
         trace_id=row[8],
         thread_id=row[9],
         detail=row[10] or {},
+    )
+
+
+def _sbs_task_from_row(row: Any) -> SBSTask:
+    return SBSTask(
+        task_id=row[0],
+        prompt=row[1],
+        candidate_a=SBSCandidate.model_validate(row[2]),
+        candidate_b=SBSCandidate.model_validate(row[3]),
+        status=row[4],
+        provenance=row[5] or {},
     )
 
 
