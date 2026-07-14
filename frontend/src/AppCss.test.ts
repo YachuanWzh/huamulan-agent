@@ -78,6 +78,9 @@ describe('App stylesheet decorations', () => {
     )
     expect(appCss).toMatch(/\.engineering-grid\s*\{[^}]*min-height:\s*0/s)
     expect(appCss).toMatch(
+      /\.engineering-body\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*min-height:\s*0/s,
+    )
+    expect(appCss).toMatch(
       /\.evidence-index,\s*\.evidence-canvas\s*\{[^}]*overflow:\s*auto/s,
     )
   })

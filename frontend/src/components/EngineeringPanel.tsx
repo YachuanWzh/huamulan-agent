@@ -230,6 +230,7 @@ export function EngineeringPanel({
           <button key={id} role="tab" aria-selected={tool === id} onClick={() => setTool(id)}>{label}</button>
         ))}
       </div>
+      <div className="engineering-body">
       {error && <div className="engineering-error" role="alert">{error}</div>}
       {busy && <div className="engineering-loading">正在加载证据…</div>}
       {notice && <div className="engineering-notice" role="status">{notice}</div>}
@@ -320,16 +321,21 @@ export function EngineeringPanel({
             <div className="sbs-config-pair">
               <fieldset>
                 <legend>配置 1</legend>
-                <label>模型<input aria-label="配置 1 模型" list="sbs-known-models" value={sbsRunDraft.modelA} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelA: e.target.value }))} /></label>
+                <label>模型<select aria-label="配置 1 模型" value={sbsRunDraft.modelA} disabled={!sbsRunOptions} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelA: e.target.value }))}>
+                  {!sbsRunOptions && <option value="">正在加载模型…</option>}
+                  {sbsRunOptions?.known_models.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select></label>
                 <label>智能体模式<select aria-label="配置 1 智能体模式" value={sbsRunDraft.modeA} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modeA: e.target.value as AgentMode }))}><option value="single">单智能体</option><option value="multi">多智能体</option></select></label>
               </fieldset>
               <fieldset>
                 <legend>配置 2</legend>
-                <label>模型<input aria-label="配置 2 模型" list="sbs-known-models" value={sbsRunDraft.modelB} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelB: e.target.value }))} /></label>
+                <label>模型<select aria-label="配置 2 模型" value={sbsRunDraft.modelB} disabled={!sbsRunOptions} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modelB: e.target.value }))}>
+                  {!sbsRunOptions && <option value="">正在加载模型…</option>}
+                  {sbsRunOptions?.known_models.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select></label>
                 <label>智能体模式<select aria-label="配置 2 智能体模式" value={sbsRunDraft.modeB} onChange={(e) => setSbsRunDraft((draft) => ({ ...draft, modeB: e.target.value as AgentMode }))}><option value="single">单智能体</option><option value="multi">多智能体</option></select></label>
               </fieldset>
             </div>
-            <datalist id="sbs-known-models">{sbsRunOptions?.known_models.map((model) => <option key={model} value={model} />)}</datalist>
             <div className="sbs-run-actions">
               {sameSbsRunConfig && sbsRunDraft.modelA && <p>两套配置完全相同，请更换模型或智能体模式。</p>}
               {sbsRunning && <p role="status">正在并行运行两套配置，完成后自动进入盲评…</p>}
@@ -367,6 +373,7 @@ export function EngineeringPanel({
         </>}
         </div>
       </div>}
+      </div>
     </section>
   )
 }

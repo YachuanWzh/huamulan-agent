@@ -186,10 +186,10 @@ describe('EngineeringPanel', () => {
 
     await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
     await user.type(await screen.findByLabelText('评测提示词'), task.prompt)
-    await user.clear(screen.getByLabelText('配置 1 模型'))
-    await user.type(screen.getByLabelText('配置 1 模型'), 'model-one')
-    await user.clear(screen.getByLabelText('配置 2 模型'))
-    await user.type(screen.getByLabelText('配置 2 模型'), 'model-two')
+    expect(screen.getByRole('combobox', { name: '配置 1 模型' })).toHaveValue('model-one')
+    expect(screen.getByRole('combobox', { name: '配置 2 模型' })).toHaveValue('model-two')
+    await user.selectOptions(screen.getByRole('combobox', { name: '配置 1 模型' }), 'model-one')
+    await user.selectOptions(screen.getByRole('combobox', { name: '配置 2 模型' }), 'model-two')
     await user.selectOptions(screen.getByLabelText('配置 2 智能体模式'), 'multi')
     await user.click(screen.getByRole('button', { name: '运行并创建盲评' }))
 
@@ -200,6 +200,19 @@ describe('EngineeringPanel', () => {
     }))
     expect(await screen.findByText('Answer one')).toBeInTheDocument()
     expect(screen.getByText('Answer two')).toBeInTheDocument()
+  })
+
+  it('keeps an SBS options error in a status slot without displacing the content pane', async () => {
+    api.getSBSRunOptions.mockRejectedValue(new Error('模型列表加载失败'))
+    const user = userEvent.setup()
+    render(<EngineeringPanel threadId="thread-1" />)
+
+    await user.click(screen.getByRole('tab', { name: 'SBS 评审' }))
+
+    const alert = await screen.findByRole('alert')
+    const body = alert.closest('.engineering-body')
+    expect(body).not.toBeNull()
+    expect(body).toContainElement(screen.getByLabelText('运行 SBS 候选'))
   })
 
   it('creates and opens a blinded SBS task from the SBS module', async () => {
