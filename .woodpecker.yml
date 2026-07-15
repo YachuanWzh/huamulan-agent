@@ -66,9 +66,10 @@ steps:
       - npm run build
 
   # ─── Smoke Eval ───
-  # 使用 DeepSeek LLM 做路由评估；需在 Woodpecker Secrets 中配置 openai_api_key
+  # 使用 DeepSeek LLM 做路由评估；语义层走 192.168.5.107 Ollama bge-m3
   smoke-eval:
     image: python:3.12-slim
+    network_mode: host
     when:
       path:
         include: ["backend/**", ".woodpecker.yml"]
