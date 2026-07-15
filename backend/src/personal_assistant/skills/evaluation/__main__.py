@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from personal_assistant.skills import SkillRegistry
@@ -17,11 +18,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--golden")
     parser.add_argument("--output-json")
     parser.add_argument("--output-md")
+    parser.add_argument(
+        "--llm-base-url",
+        default=os.environ.get("LLM_BASE_URL", "https://api.deepseek.com"),
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        default=os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY", ""),
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=os.environ.get("LLM_MODEL", ""),
+    )
     args = parser.parse_args(argv)
+
+    router_kwargs = {}
+    if args.llm_model and args.llm_api_key:
+        from langchain_deepseek import ChatDeepSeek
+
+        import httpx
+
+        llm = ChatDeepSeek(
+            api_base=args.llm_base_url,
+            api_key=args.llm_api_key,
+            model=args.llm_model,
+            timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=10.0),
+            max_retries=3,
+        )
+        router_kwargs["llm"] = llm
+        router_kwargs["llm_retry_count"] = 1
 
     registry = SkillRegistry(args.skills_dir)
     cases = _load_golden(Path(args.golden)) if args.golden else None
-    report = asyncio.run(evaluate_skill_registry(registry, cases=cases))
+    report = asyncio.run(
+        evaluate_skill_registry(registry, cases=cases, **router_kwargs)
+    )
 
     if args.output_json:
         Path(args.output_json).write_text(

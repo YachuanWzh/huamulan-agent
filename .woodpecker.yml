@@ -4,6 +4,10 @@ when:
   branch: [master, main]
   event: [push, pull_request]
 
+# 全局环境变量（CI 专用，非敏感值）
+variables:
+  PYTHONUNBUFFERED: "1"
+
 steps:
   # ─── Backend ───
   lint-backend:
@@ -50,3 +54,30 @@ steps:
     commands:
       - npm ci
       - npm run build
+
+  # ─── Smoke Eval ───
+  # 使用 DeepSeek LLM 做路由评估；需在 Woodpecker Secrets 中配置 openai_api_key
+  smoke-eval:
+    image: python:3.12-slim
+    secrets: [openai_api_key]
+    when:
+      path:
+        include: ["backend/**", ".woodpecker.yml"]
+        exclude: ["*.md", "docs/**"]
+    environment:
+      LLM_BASE_URL: https://api.deepseek.com
+      LLM_MODEL: deepseek-chat
+    commands:
+      - pip install --quiet uv
+      - cd backend
+      - uv pip install --system -e ".[dev]"
+      - |
+        uv run python -m personal_assistant.skills.evaluation \
+          --skills-dir src/personal_assistant/skills \
+          --golden evaluation/golden/claw_eval_smoke.jsonl \
+          --llm-base-url "$LLM_BASE_URL" \
+          --llm-api-key "$OPENAI_API_KEY" \
+          --llm-model "$LLM_MODEL" \
+          --output-md ../eval-report.md
+      - echo "=== Smoke Eval Report ==="
+      - cat ../eval-report.md
