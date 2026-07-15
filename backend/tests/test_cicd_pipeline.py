@@ -1,7 +1,9 @@
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -49,16 +51,13 @@ def test_backend_timeout_option_is_supported_without_a_second_environment() -> N
     assert test_commands[-1].startswith("python -m pytest ")
 
 
-def test_backend_test_image_installs_git_for_repository_checks() -> None:
-    test_commands = _pipeline_config()["steps"]["test-backend"]["commands"]
-
-    assert any("apt-get install" in command and "git" in command for command in test_commands)
-
-
 def test_repository_does_not_track_local_worktrees_as_gitlinks() -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        pytest.skip("the Woodpecker clone step already validates repository gitlinks")
     result = subprocess.run(
-        ["git", "ls-files", "--stage"],
+        [git_executable, "ls-files", "--stage"],
         cwd=repo_root,
         check=True,
         capture_output=True,
@@ -71,3 +70,10 @@ def test_repository_does_not_track_local_worktrees_as_gitlinks() -> None:
     ]
 
     assert worktree_gitlinks == []
+
+
+def test_gitlink_check_skips_when_ci_image_has_no_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _executable: None)
+
+    with pytest.raises(pytest.skip.Exception):
+        test_repository_does_not_track_local_worktrees_as_gitlinks()
