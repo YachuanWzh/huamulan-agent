@@ -1,5 +1,7 @@
 # huamulan-agent
 
+> **版本**: 1.0.0 | **状态**: ✅ CICD + 快检全流程已跑通
+
 > Agent 工程平台改造的能力盘点、架构、使用方式、验证证据和后续路线见：[Agent工程平台建设报告.md](./Agent工程平台建设报告.md)
 
 > Governance update: OTEL alert ingress supports HMAC-SHA256 (`X-Alert-Timestamp` + `X-Alert-Signature`) with a five-minute replay window. The console exposes incidents, recovery actions, current budget totals, and the active automatic-RCA/budget policy through `/api/incidents` and `/api/governance/*`.
@@ -10,7 +12,7 @@
 
 > “东市买骏马，西市买鞍鞯，南市买辔头，北市买长鞭。” 本项目用这条战备线索组织产品隐喻：任务先整备，再出征，最后校阅。
 
-> 详细技术方案见 [技术方案报告.md](./技术方案报告.md)
+> 详细技术方案见 [技术方案报告.md](./技术方案报告.md) | CI/CD 流水线见 [CICD.md](./CICD.md)
 
 ## 功能特性
 
@@ -126,7 +128,7 @@ flowchart LR
 | 智能排障 Skill | `backend/src/personal_assistant/skills/troubleshoot` | 面向错误堆栈、性能异常、资源失败、retry chain 的排障 SOP，并带 `analyze_apm_incident` 脚本 |
 | 巡检 Skill | `backend/src/personal_assistant/skills/patrol` | 面向告警规则、健康检查、异常分流和人工审批修复闭环 |
 | APM 指标知识库 | `backend/src/personal_assistant/skills/apm-metrics` | 收录 LCP、CLS、INP、TTFB、Error Rate、Apdex 等指标定义和阈值 |
-| RAG 知识库检索 | `backend/src/personal_assistant/knowledge/` | 单 Agent 模式可选启用：Markdown 分块 → BGE-M3 embedding → Qdrant 向量搜索；v0.9.0 新增混合检索（向量 + BM25 关键词 + RRF 融合 + LLM 相关性过滤），提升中英混合术语的召回质量；前端展示 📚 参考知识文档卡片；详见[技术方案报告 §4.7](./技术方案报告.md#47-rag-知识库) |
+| RAG 知识库检索 | `backend/src/personal_assistant/knowledge/` | 单 Agent 模式可选启用：Markdown 分块 → BGE-M3 embedding → Qdrant 向量搜索；v1.0.0 新增混合检索（向量 + BM25 关键词 + RRF 融合 + LLM 相关性过滤），提升中英混合术语的召回质量；前端展示 📚 参考知识文档卡片；详见[技术方案报告 §4.7](./技术方案报告.md#47-rag-知识库) |
 | 排障 Runbook | `backend/src/personal_assistant/skills/troubleshoot-runbook` | 收录 JS Error、Resource Failure、Slow API、Memory Leak 等 SOP |
 | 业务治理巡检 | `audit-sop` 升级 | 从单线程日志审计扩展到跨线程 retry/error/security/token 趋势治理 |
 | APM 评测 case | `backend/evaluation/golden/golden_dataset.jsonl` | `apm-*` 用例覆盖 troubleshoot、patrol、metrics、runbook、audit-sop |
@@ -1087,3 +1089,68 @@ uv run python -m personal_assistant.skills.evaluation `
 ```
 
 Langfuse 可以承载 trace、dataset、experiment、score 和 LLM-as-a-judge；ClawEval 负责项目内真实执行逻辑，例如 Skill 路由、审批自动化、ToolGuard 拦截和本地评分。推荐做法是：ClawEval 计算确定性指标，Langfuse 保存 trace 和长期趋势。
+
+## CI/CD 与快检全流程
+
+项目采用 **Woodpecker CI + ClawEval 快检** 双引擎质量门禁，实现"提交即检查、合并即验证"。详细文档见 [CICD.md](./CICD.md)。
+
+### 流水线概览
+
+```mermaid
+flowchart LR
+    PUSH["Git Push / PR"] --> BACKEND["后端流水线"]
+    PUSH --> FRONTEND["前端流水线"]
+    BACKEND --> LINT_BE["Ruff Lint"] --> TEST_BE["Pytest 测试"] --> SMOKE["Smoke Eval 快检"]
+    FRONTEND --> LINT_FE["Oxlint"] --> TC_FE["TypeScript 类型检查"] --> TEST_FE["Vitest 测试"] --> BUILD_FE["Vite 构建"]
+    SMOKE --> REPORT["eval-report.md"]
+```
+
+### 六大阶段
+
+| 阶段 | 工具 | 说明 |
+|------|------|------|
+| `lint-backend` | Ruff | Python 代码风格检查 |
+| `test-backend` | Pytest + pytest-asyncio | 异步单元测试（跳过 integration） |
+| `lint-frontend` | Oxlint | JavaScript/TypeScript 代码检查 |
+| `typecheck-frontend` | tsc --noEmit | TypeScript 严格类型检查 |
+| `test-frontend` | Vitest + MSW | 前端组件与 Hook 测试 |
+| `build-frontend` | Vite build | 生产构建验证 |
+| `smoke-eval` | ClawEval | Agent 路由快检（仅 backend 变更触发） |
+
+### 快检机制
+
+快检用 **Golden Dataset**（标准用例集）验证 Agent 路由行为是否退化。CI 中使用精简集 `otel_routing.jsonl`（约 40 条），完整评测可使用 515 条全量数据集。
+
+```mermaid
+flowchart LR
+    G["Golden Dataset<br/>标准问法 + 期望 Skill"] --> ROUTE["三层漏斗路由<br/>Regex → BGE-M3 语义 → LLM"]
+    ROUTE --> COMPARE["对比期望 vs 实际"]
+    COMPARE --> SCORE["输出评分<br/>路由准确率 / 误触发率"]
+```
+
+### 本地运行
+
+```powershell
+# 后端
+cd backend
+ruff check src/ tests/
+python -m pytest -v -m "not integration" --timeout=120
+
+# 前端
+cd frontend
+npm run lint
+npx tsc --noEmit
+npm test -- --maxWorkers=1
+npm run build
+
+# 快检
+cd backend
+uv run python -m personal_assistant.skills.evaluation \
+  --skills-dir src/personal_assistant/skills \
+  --golden evaluation/golden/otel_routing.jsonl \
+  --llm-base-url "https://api.deepseek.com" \
+  --llm-model "deepseek-chat" \
+  --output-md eval-report.md
+```
+
+> 📘 完整 CI/CD 文档见 [CICD.md](./CICD.md)
