@@ -1,4 +1,5 @@
 import subprocess
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -34,6 +35,18 @@ def test_backend_tests_receive_required_offline_settings() -> None:
     }
 
     assert {name: environment[name] for name in required_settings} == required_settings
+
+
+def test_backend_timeout_option_is_supported_without_a_second_environment() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads(
+        (backend_root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    dev_dependencies = pyproject["project"]["optional-dependencies"]["dev"]
+    test_commands = _pipeline_config()["steps"]["test-backend"]["commands"]
+
+    assert any(dependency.startswith("pytest-timeout") for dependency in dev_dependencies)
+    assert test_commands[-1].startswith("python -m pytest ")
 
 
 def test_repository_does_not_track_local_worktrees_as_gitlinks() -> None:

@@ -30,7 +30,7 @@ steps:
       - pip install --quiet uv
       - cd backend
       - uv pip install --system -e ".[dev]"
-      - uv run pytest -v -m "not integration" --timeout=120
+      - python -m pytest -v -m "not integration" --timeout=120
 
   # ─── Frontend ───
   lint-frontend:
