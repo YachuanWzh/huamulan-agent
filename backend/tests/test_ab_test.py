@@ -1,7 +1,6 @@
 """Tests for the A/B testing framework."""
 
 import math
-from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -12,7 +11,6 @@ from personal_assistant.skills.evaluation.ab_test import (
     ABTestReport,
     ABTestRunner,
     ABVariant,
-    PairwiseJudgeResult,
     _betainc_reg,
     _judge_pairwise,
     _normal_cdf,
@@ -390,8 +388,6 @@ class _FakeHarness:
         self._latencies = latencies or {}
 
     async def run_user_turn(self, thread_id, message, llm_config, *, agent_mode, requires_approval=None):
-        import time
-
         model = llm_config.model if llm_config else "default"
         self.calls.append({
             "thread_id": thread_id,

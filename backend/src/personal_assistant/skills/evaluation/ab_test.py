@@ -758,7 +758,7 @@ def format_ab_report(report: ABTestReport) -> str:
     lines.append("─" * 72)
     lines.append("")
     lines.append(f"n = {report.n_queries} queries × {report.n_samples} samples")
-    lines.append(f"Test methods: " + ", ".join(
+    lines.append("Test methods: " + ", ".join(
         f"{m.metric_name}: {m.test_method}" for m in report.metrics if m.test_method
     ))
     lines.append("")
