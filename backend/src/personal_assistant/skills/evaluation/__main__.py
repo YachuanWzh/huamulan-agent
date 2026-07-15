@@ -12,6 +12,28 @@ from personal_assistant.skills.evaluation.report import (
 )
 
 
+class _CIFakeSemanticIndex:
+    """CI 专用假语义索引：不依赖 embedding 服务，直接返回所有已注册 skill。"""
+
+    async def warmup(self, registry: SkillRegistry) -> None:
+        pass
+
+    async def search(
+        self,
+        registry: SkillRegistry,
+        query: str,
+        top_k: int,
+    ):
+        # 延迟导入避免循环依赖
+        from personal_assistant.agent.router import SkillSemanticCandidate
+
+        candidates = [
+            SkillSemanticCandidate(name=skill.name, description=skill.description, score=0.0)
+            for skill in registry.skills.values()
+        ]
+        return candidates[:top_k]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate Skill quality metrics.")
     parser.add_argument("--skills-dir", required=True)
@@ -47,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         router_kwargs["llm"] = llm
         router_kwargs["llm_retry_count"] = 1
+        # CI 无 embedding 服务时，注入 Fake 语义索引让三级漏斗全部走通：
+        # 正则 → 语义（Fake，score=0）→ LLM（score 低于阈值，送 LLM 判定）
+        router_kwargs["semantic_index"] = _CIFakeSemanticIndex()
+        router_kwargs["semantic_threshold"] = 0.01
+        router_kwargs["semantic_top_k"] = 10
 
     registry = SkillRegistry(args.skills_dir)
     cases = _load_golden(Path(args.golden)) if args.golden else None
