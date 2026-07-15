@@ -49,6 +49,12 @@ def test_backend_timeout_option_is_supported_without_a_second_environment() -> N
     assert test_commands[-1].startswith("python -m pytest ")
 
 
+def test_backend_test_image_installs_git_for_repository_checks() -> None:
+    test_commands = _pipeline_config()["steps"]["test-backend"]["commands"]
+
+    assert any("apt-get install" in command and "git" in command for command in test_commands)
+
+
 def test_repository_does_not_track_local_worktrees_as_gitlinks() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(

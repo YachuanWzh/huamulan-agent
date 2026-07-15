@@ -27,6 +27,7 @@ steps:
       OTEL_JAEGER_API_URL: http://jaeger.test/api
       OTEL_PROMETHEUS_PROXY_URL: http://prometheus.test/api/v1
     commands:
+      - apt-get update && apt-get install --yes --no-install-recommends git
       - pip install --quiet uv
       - cd backend
       - uv pip install --system -e ".[dev]"
