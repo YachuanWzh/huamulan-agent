@@ -187,3 +187,23 @@ class SkillEvaluationReport(BaseModel):
     answers: AnswerEvaluationMetrics | None = None
     hallucinations: HallucinationEvaluationMetrics | None = None
     case_details: list[CaseEvaluationDetail] = Field(default_factory=list)
+
+
+class ABTestResult(BaseModel):
+    """Persistable A/B test result summary.
+
+    Stores a compact serialization of an ABTestReport suitable for
+    database storage and later comparison.
+    """
+
+    run_id: str
+    variant_a_name: str
+    variant_b_name: str
+    variant_a_model: str | None = None
+    variant_b_model: str | None = None
+    agent_mode: str = "multi"
+    n_queries: int = 0
+    n_samples: int = 1
+    metrics: list[dict[str, Any]] = Field(default_factory=list)
+    conclusion: str = ""
+    created_at: str = ""

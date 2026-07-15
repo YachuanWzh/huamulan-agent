@@ -1,4 +1,5 @@
 from personal_assistant.skills.evaluation.models import (
+    ABTestResult,
     AgentEvaluationCase,
     AnswerEvaluationMetrics,
     CaseDiagnosis,
@@ -40,6 +41,7 @@ from personal_assistant.skills.evaluation.safety import evaluate_safety_cases
 from personal_assistant.skills.evaluation.static import evaluate_static_skill
 
 __all__ = [
+    "ABTestResult",
     "GoldenSkillCase",
     "HallucinationEvaluationMetrics",
     "AgentEvaluationCase",
