@@ -1,5 +1,4 @@
 """Tests for knowledge models (DocMeta, Chunk, SearchResult, SourceAttribution)."""
-import json
 import uuid
 
 import pytest

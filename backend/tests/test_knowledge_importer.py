@@ -1,6 +1,5 @@
 """Tests for KnowledgeImporter."""
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,7 +10,7 @@ from personal_assistant.knowledge.importer import (
     _extract_title,
     doc_id_from_path,
 )
-from personal_assistant.knowledge.models import Chunk, DocMeta
+from personal_assistant.knowledge.models import DocMeta
 from personal_assistant.knowledge.qdrant_store import QdrantKnowledgeStore
 
 

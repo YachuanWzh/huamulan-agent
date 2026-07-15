@@ -2,7 +2,11 @@ from typing import Any
 
 from personal_assistant.agent.router import route_skill_names
 from personal_assistant.skills import SkillRegistry
-from personal_assistant.skills.evaluation.models import GoldenSkillCase, RoutingMetrics
+from personal_assistant.skills.evaluation.models import (
+    GoldenSkillCase,
+    MultiAgentRoutingMetrics,
+    RoutingMetrics,
+)
 
 
 async def evaluate_routing_cases(
@@ -91,11 +95,9 @@ def _f1(precision: float | None, recall: float | None) -> float | None:
 
 def evaluate_multi_agent_intent_cases(
     cases: list[GoldenSkillCase],
-) -> "MultiAgentRoutingMetrics":
+) -> MultiAgentRoutingMetrics:
     """Evaluate multi-agent intent routing against expected intent/slots."""
     from personal_assistant.agent.multi_agent import rewrite_query_and_slots
-    from personal_assistant.skills.evaluation.models import MultiAgentRoutingMetrics
-
     relevant = [c for c in cases if c.expected_intent is not None]
     if not relevant:
         return MultiAgentRoutingMetrics(total_cases=0)

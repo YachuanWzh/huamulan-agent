@@ -2,7 +2,7 @@
 
 when:
   branch: [master, main]
-  event: [push, pull_request]
+  event: [push, pull_request, manual]
 
 # 全局环境变量（CI 专用，非敏感值）
 variables:
@@ -12,6 +12,9 @@ steps:
   # ─── Backend ───
   lint-backend:
     image: python:3.12-slim
+    environment:
+      PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+      UV_DEFAULT_INDEX: https://mirrors.aliyun.com/pypi/simple/
     commands:
       - pip install --quiet uv
       - cd backend
@@ -20,11 +23,18 @@ steps:
 
   test-backend:
     image: python:3.12-slim
+    environment:
+      PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+      UV_DEFAULT_INDEX: https://mirrors.aliyun.com/pypi/simple/
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+      LLM_MODEL: test-model
+      OTEL_JAEGER_API_URL: http://jaeger.test/api
+      OTEL_PROMETHEUS_PROXY_URL: http://prometheus.test/api/v1
     commands:
       - pip install --quiet uv
       - cd backend
       - uv pip install --system -e ".[dev]"
-      - uv run pytest -v -m "not integration" --timeout=120
+      - python -m pytest -v -m "not integration" --timeout=120
 
   # ─── Frontend ───
   lint-frontend:
@@ -46,7 +56,7 @@ steps:
     directory: frontend
     commands:
       - npm ci
-      - npm test
+      - npm test -- --maxWorkers=1
 
   build-frontend:
     image: node:22-alpine

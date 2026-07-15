@@ -202,14 +202,12 @@ def calc_solar_to_lunar(
     # Walk through months to find which lunar month and day
     remaining = offset
     lunar_month = 1
-    physical_idx = 0
     found = False
     is_leap = False
 
     for i, month_len in enumerate(month_lengths):
         if remaining < month_len:
             lunar_day = remaining + 1
-            physical_idx = i
             found = True
             # Convert physical index back to logical lunar month
             if leap_idx > 0:

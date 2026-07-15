@@ -1,13 +1,8 @@
 """Tests for QdrantKnowledgeStore CRUD operations (mocked HTTP)."""
 import json
-import uuid
-from io import BytesIO
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
-from personal_assistant.knowledge.chunker import ChunkConfig, MarkdownChunker
 from personal_assistant.knowledge.models import Chunk, DocMeta
 from personal_assistant.knowledge.qdrant_store import QdrantKnowledgeStore
 

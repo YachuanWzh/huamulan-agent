@@ -298,8 +298,8 @@ def test_audit_agent_gets_builtin_memory_tools_when_registry_empty(monkeypatch) 
     ))
 
     assert len(tool_names_bound) > 0, (
-        f"audit agent 应有 memory 工具，但 bind_tools 未被调用，"
-        f"说明 audit agent 走了无工具路径"
+        "audit agent 应有 memory 工具，但 bind_tools 未被调用，"
+        "说明 audit agent 走了无工具路径"
     )
     assert any(
         name.startswith("query_") for name in tool_names_bound

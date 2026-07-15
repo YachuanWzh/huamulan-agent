@@ -1,5 +1,4 @@
 """Tests for BM25Searcher."""
-import pytest
 from personal_assistant.knowledge.bm25_searcher import BM25Searcher, _tokenize
 
 

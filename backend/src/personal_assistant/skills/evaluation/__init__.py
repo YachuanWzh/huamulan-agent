@@ -51,6 +51,7 @@ __all__ = [
     "EvaluationCheck",
     "RoutingMetrics",
     "JudgeEvaluation",
+    "MultiAgentRoutingMetrics",
     "RuntimeSkillMetrics",
     "SafetyEvaluationMetrics",
     "SkillEvaluationReport",
