@@ -66,10 +66,9 @@ steps:
       - npm run build
 
   # ─── Smoke Eval ───
-  # 使用 DeepSeek LLM 做路由评估；语义层走 192.168.5.107 Ollama bge-m3
+  # 使用 DeepSeek LLM 做路由评估；语义层走宿主机 Ollama bge-m3
   smoke-eval:
     image: python:3.12-slim
-    network_mode: host
     when:
       path:
         include: ["backend/**", ".woodpecker.yml"]
@@ -77,7 +76,7 @@ steps:
     environment:
       LLM_BASE_URL: https://api.deepseek.com
       LLM_MODEL: deepseek-chat
-      SKILL_EMBEDDING_URL: http://192.168.5.107:11434
+      SKILL_EMBEDDING_URL: http://192.168.5.7:11434
       OPENAI_API_KEY:
         from_secret: openai_api_key
     commands:
