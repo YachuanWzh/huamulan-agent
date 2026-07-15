@@ -69,7 +69,6 @@ steps:
   # 使用 DeepSeek LLM 做路由评估；需在 Woodpecker Secrets 中配置 openai_api_key
   smoke-eval:
     image: python:3.12-slim
-    secrets: [openai_api_key]
     when:
       path:
         include: ["backend/**", ".woodpecker.yml"]
@@ -77,6 +76,8 @@ steps:
     environment:
       LLM_BASE_URL: https://api.deepseek.com
       LLM_MODEL: deepseek-chat
+      OPENAI_API_KEY:
+        from_secret: openai_api_key
     commands:
       - pip install --quiet uv
       - cd backend
@@ -86,7 +87,6 @@ steps:
           --skills-dir src/personal_assistant/skills \
           --golden evaluation/golden/claw_eval_smoke.jsonl \
           --llm-base-url "$LLM_BASE_URL" \
-          --llm-api-key "$OPENAI_API_KEY" \
           --llm-model "$LLM_MODEL" \
           --output-md ../eval-report.md
       - echo "=== Smoke Eval Report ==="
