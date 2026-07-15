@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from personal_assistant.skills import SkillRegistry
 from personal_assistant.skills.evaluation.models import AgentEvaluationCase
@@ -10,28 +11,6 @@ from personal_assistant.skills.evaluation.report import (
     evaluate_skill_registry,
     render_markdown_report,
 )
-
-
-class _CIFakeSemanticIndex:
-    """CI 专用假语义索引：不依赖 embedding 服务，直接返回所有已注册 skill。"""
-
-    async def warmup(self, registry: SkillRegistry) -> None:
-        pass
-
-    async def search(
-        self,
-        registry: SkillRegistry,
-        query: str,
-        top_k: int,
-    ):
-        # 延迟导入避免循环依赖
-        from personal_assistant.agent.router import SkillSemanticCandidate
-
-        candidates = [
-            SkillSemanticCandidate(name=skill.name, description=skill.description, score=0.0)
-            for skill in registry.skills.values()
-        ]
-        return candidates[:top_k]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,17 +48,30 @@ def main(argv: list[str] | None = None) -> int:
         )
         router_kwargs["llm"] = llm
         router_kwargs["llm_retry_count"] = 1
-        # CI 无 embedding 服务时，注入 Fake 语义索引让三级漏斗全部走通：
-        # 正则 → 语义（Fake，score=0）→ LLM（score 低于阈值，送 LLM 判定）
-        router_kwargs["semantic_index"] = _CIFakeSemanticIndex()
-        router_kwargs["semantic_threshold"] = 0.01
-        router_kwargs["semantic_top_k"] = 10
+        # 真实语义层：连接内网 Ollama bge-m3，走完整三级漏斗
+        from personal_assistant.agent.router import (
+            InMemorySkillVectorIndex,
+            OllamaBgeM3EmbeddingProvider,
+        )
+
+        embedding_url = os.environ.get("SKILL_EMBEDDING_URL", "http://192.168.5.107:11434")
+        router_kwargs["semantic_index"] = InMemorySkillVectorIndex(
+            OllamaBgeM3EmbeddingProvider(base_url=embedding_url, timeout_seconds=30.0),
+        )
+        router_kwargs["semantic_threshold"] = 0.72
+        router_kwargs["semantic_top_k"] = 3
 
     registry = SkillRegistry(args.skills_dir)
     cases = _load_golden(Path(args.golden)) if args.golden else None
-    report = asyncio.run(
-        evaluate_skill_registry(registry, cases=cases, **router_kwargs)
-    )
+
+    async def _run_eval() -> Any:
+        semantic_index = router_kwargs.get("semantic_index")
+        if semantic_index is not None:
+            # warmup 会在 Ollama 上对每个 skill 做一次 bge-m3 embedding
+            await semantic_index.warmup(registry)
+        return await evaluate_skill_registry(registry, cases=cases, **router_kwargs)
+
+    report = asyncio.run(_run_eval())
 
     if args.output_json:
         Path(args.output_json).write_text(

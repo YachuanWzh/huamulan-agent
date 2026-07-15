@@ -76,6 +76,7 @@ steps:
     environment:
       LLM_BASE_URL: https://api.deepseek.com
       LLM_MODEL: deepseek-chat
+      SKILL_EMBEDDING_URL: http://192.168.5.107:11434
       OPENAI_API_KEY:
         from_secret: openai_api_key
     commands:
