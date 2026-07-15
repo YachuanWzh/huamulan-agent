@@ -1,14 +1,11 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from personal_assistant.agent.harness import (
-    AgentHarness,
     GuardMatch,
     scan_prompt_guard,
     scan_prompt_guard_with_llm,
-    _PROMPT_GUARD_MESSAGE,
 )
-from personal_assistant.config import Settings
 
 
 class TestLLMPromptGuard:

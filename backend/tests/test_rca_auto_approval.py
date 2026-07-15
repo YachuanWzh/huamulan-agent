@@ -6,7 +6,6 @@ References e2e golden cases from evaluation/golden/otel_push.jsonl:
   - otel-push-005: Multi-P0 cascade → independent RCA per alert
 """
 
-from typing import Any
 
 import pytest
 

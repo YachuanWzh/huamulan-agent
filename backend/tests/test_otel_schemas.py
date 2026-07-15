@@ -1,6 +1,5 @@
 """Tests for OTEL push schemas — AlertManager v4 webhook payload models."""
-import json
-from personal_assistant.api.schemas import AlertManagerWebhook, OtelAlert
+from personal_assistant.api.schemas import AlertManagerWebhook
 
 
 ALERTMANAGER_P0_PAYLOAD = {

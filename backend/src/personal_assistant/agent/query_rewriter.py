@@ -25,7 +25,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
@@ -245,7 +244,6 @@ def rewrite_query_fast(query: str) -> RewrittenQuery:
         metrics/entities, and signal-counting intent classification.
     """
     from personal_assistant.agent.intent_router import _regex_intent_with_confidence
-    from personal_assistant.agent.multi_agent import _looks_like_apm
 
     # 1) Whitespace normalization
     normalized = " ".join(query.split())
@@ -567,7 +565,7 @@ class QueryRewriter:
 
         # Call LLM
         try:
-            from langchain_core.messages import HumanMessage, SystemMessage
+            from langchain_core.messages import HumanMessage
 
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             decision = _parse_rewrite_llm_response(response, user_query)

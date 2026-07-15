@@ -14,7 +14,6 @@ from personal_assistant.api.feishu_stream import (
     _chunk_content,
     _extract_command_text,
     _parse_event_to_message,
-    FEISHU_SDK_AVAILABLE,
 )
 
 

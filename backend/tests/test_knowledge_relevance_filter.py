@@ -2,10 +2,9 @@
 from unittest.mock import MagicMock, AsyncMock
 import pytest
 from personal_assistant.knowledge.models import (
-    RelevanceFilterResult,
     SearchResult,
 )
-from personal_assistant.knowledge.relevance_filter import RelevanceFilter, NO_KNOWLEDGE_MESSAGE
+from personal_assistant.knowledge.relevance_filter import RelevanceFilter
 
 
 def make_doc(idx: int, title: str, source_file: str, category: str = "apm_knowledge") -> SearchResult:

@@ -11,7 +11,6 @@ import pytest
 from personal_assistant.apm import (
     FrontendRumEvent,
     ExecutionLog,
-    ObservabilitySnapshot,
     build_observability_snapshot,
     from_jaeger_trace,
     from_jaeger_trace_to_logs,
