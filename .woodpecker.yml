@@ -85,7 +85,7 @@ steps:
       - |
         uv run python -m personal_assistant.skills.evaluation \
           --skills-dir src/personal_assistant/skills \
-          --golden evaluation/golden/claw_eval_smoke.jsonl \
+          --golden evaluation/golden/otel_routing.jsonl \
           --llm-base-url "$LLM_BASE_URL" \
           --llm-model "$LLM_MODEL" \
           --output-md ../eval-report.md
