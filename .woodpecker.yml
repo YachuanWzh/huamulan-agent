@@ -52,7 +52,7 @@ steps:
     directory: frontend
     commands:
       - npm ci
-      - npm test
+      - npm test -- --maxWorkers=1
 
   build-frontend:
     image: node:22-alpine
