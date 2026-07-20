@@ -1,0 +1,32 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-006",
+    "alert_name": "FlavorToolFailure:ApplyPatch",
+    "level": "P0",
+    "severity": "critical",
+    "service_name": "flavor-code",
+    "agent_type": "main",
+    "workspace": "C:\\idea\\monorepo",
+    "git_branch": "release/v2.0",
+    "git_commit": "jkl3456"
+  },
+  "alert_data": {
+    "tool": "ApplyPatch",
+    "error_code": "tool_error",
+    "error_message": "[tool_error] Patch application failed: hunk mismatch at line 142",
+    "input": {
+      "patch": "@@ -140,10 +142,12 @@ ..."
+    },
+    "workspace": "C:\\idea\\monorepo",
+    "git_branch": "release/v2.0",
+    "git_commit": "jkl3456",
+    "agent": "main"
+  },
+  "description": "Tool: ApplyPatch\nAgent: main\nError: [tool_error] Patch application failed: hunk mismatch at line 142\nBranch: release/v2.0\nCommit: jkl3456\nWorkspace: C:\\idea\\monorepo\nInput: {\"patch\":\"@@ -140,10 +142,12 @@ ...\"}",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["ApplyPatch", "hunk mismatch", "line 142", "merge conflict"]
+  }
+}

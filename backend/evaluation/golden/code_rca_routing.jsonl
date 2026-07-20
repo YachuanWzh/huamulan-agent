@@ -1,0 +1,43 @@
+{"id": "cr-rt-001", "query": "code rca", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-002", "query": "code RCA", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-003", "query": "code analysis", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-004", "query": "code root cause", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-005", "query": "code root cause analysis", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-006", "query": "tool failure", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-007", "query": "flavor-code alert", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-008", "query": "帮我做代码根因分析", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-009", "query": "代码RCA分析", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-010", "query": "代码工具调用失败了，帮我排查一下原因", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-011", "query": "Flavor-code 告警，做代码层面分析", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-012", "query": "code rca 分析一下这个错误", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-013", "query": "生成一个代码RCA报告", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-014", "query": "分析代码中的根本原因", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-015", "query": "code rca the tool error in my workspace", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-016", "query": "analyze this code failure", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-017", "query": "RCA this tool error", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-018", "query": "我收到了一个flavor-code的告警，帮我做代码层面的根因分析", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-019", "query": "工具调用出错了，分析一下源代码的问题", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-020", "query": "做一次 code analysis，检查工具失败的原因", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-021", "query": "帮我run一下code rca", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-022", "query": "执行代码根因分析流程", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-023", "query": "code root cause: Shell tool failed with exit code 1", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-024", "query": "analyze code issue", "expected_skills": ["code-rca"]}
+{"id": "cr-rt-025", "query": "分析这个coding agent的tool failure", "expected_skills": ["code-rca"]}
+{"id": "cr-neg-001", "query": "排查服务超时问题", "expected_skills": ["troubleshoot"]}
+{"id": "cr-neg-002", "query": "RCA 延迟尖刺", "expected_skills": ["troubleshoot"]}
+{"id": "cr-neg-003", "query": "根因分析生产故障", "expected_skills": ["troubleshoot"]}
+{"id": "cr-neg-004", "query": "排查一下API超时的根因", "expected_skills": ["troubleshoot"]}
+{"id": "cr-neg-005", "query": "帮我debug这段代码", "expected_skills": []}
+{"id": "cr-neg-006", "query": "分析代码性能瓶颈", "expected_skills": []}
+{"id": "cr-neg-007", "query": "代码审计", "expected_skills": ["audit-sop"]}
+{"id": "cr-neg-008", "query": "审计工具调用日志", "expected_skills": ["audit-sop"]}
+{"id": "cr-edge-001", "query": "code rca帮我看看刚才那个Shell工具为什么失败了，workspace在C:\\project", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-002", "query": "flavor-code那边发了个P0的tool failure告警，code rca走起", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-003", "query": "之前那个代码工具报错了，帮我做RCA分析", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-004", "query": "怎么做code root cause analysis？", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-005", "query": "analyze code issue: Write tool permission_denied in workspace C:\\dev\\myapp", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-006", "query": "我的coding agent的Read工具挂了，帮我跑一下code analysis", "expected_skills": ["code-rca"]}
+{"id": "cr-edge-007", "query": "RCA一下这个tool error：Shell command exited with code 1", "expected_skills": ["code-rca"]}
+{"id": "cr-hard-001", "query": "先做code rca分析代码问题，如果发现是基础设施问题再转troubleshoot", "expected_skills": ["code-rca"]}
+{"id": "cr-hard-002", "query": "flavor-code报了tool failure，同时前端的error rate也升高了，先做代码层面的根因分析", "expected_skills": ["code-rca"]}
+{"id": "cr-hard-003", "query": "我需要代码级别的root cause analysis，不是基础设施层面的排查", "expected_skills": ["code-rca"]}

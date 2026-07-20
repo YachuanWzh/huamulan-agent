@@ -1,0 +1,33 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-004",
+    "alert_name": "FlavorToolFailure:Write",
+    "level": "P1",
+    "severity": "warning",
+    "service_name": "flavor-code",
+    "agent_type": "main",
+    "workspace": "C:\\project\\config",
+    "git_branch": "main",
+    "git_commit": "ghi9012"
+  },
+  "alert_data": {
+    "tool": "Write",
+    "error_code": "hook_denied",
+    "error_message": "[hook_denied] Write operation blocked by hook 'security-check'",
+    "input": {
+      "path": "config/production.json",
+      "content": "{...}"
+    },
+    "workspace": "C:\\project\\config",
+    "git_branch": "main",
+    "git_commit": "ghi9012",
+    "agent": "main"
+  },
+  "description": "Tool: Write\nAgent: main\nError: [hook_denied] Write operation blocked by hook 'security-check'\nBranch: main\nCommit: ghi9012\nWorkspace: C:\\project\\config\nInput: {\"path\":\"config/production.json\",\"content\":\"{...}\"}",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["Write", "hook_denied", "security-check", "hook handler"]
+  }
+}

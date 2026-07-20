@@ -287,15 +287,36 @@ def _build_rca_prompt(alert_data: dict) -> str:
 
     References e2e golden cases in evaluation/golden/otel_push.jsonl
     (otel-push-001 through otel-push-005).
+
+    When ``service_name`` is ``flavor-code``, routes to the ``code-rca`` skill
+    for code-level source analysis instead of the generic OTEL trace/metric path.
     """
+    service = alert_data.get("service_name", "")
+    description = alert_data.get("description", "")
+
+    # ── flavor-code: code-level RCA ──────────────────────────────
+    if service == "flavor-code":
+        # Extract workspace path from the multi-line description sent by
+        # flavor-code's IncidentReporter (src/incidents/reporter.ts).
+        workspace = _parse_workspace_from_description(description)
+        tool_name = _parse_line(description, "Tool:")
+        error_code = _extract_error_code_from_description(description)
+        return _build_flavor_code_rca_prompt(
+            alert_data=alert_data,
+            tool_name=tool_name,
+            error_code=error_code,
+            workspace=workspace,
+        )
+
+    # ── Generic OTEL services: trace + metric RCA ────────────────
     parts = [
         f"\U0001f6a8 {alert_data['level']} Alert received from OTEL push: **{alert_data['alert_name']}**",
         f"- Service: **{alert_data['service_name']}**",
         f"- Severity: {alert_data['severity']}",
         f"- Summary: {alert_data['summary']}",
     ]
-    if alert_data.get("description"):
-        parts.append(f"- Details: {alert_data['description']}")
+    if description:
+        parts.append(f"- Details: {description}")
     if alert_data.get("starts_at"):
         parts.append(f"- Alert started: {alert_data['starts_at']}")
     parts.extend([
@@ -304,6 +325,79 @@ def _build_rca_prompt(alert_data: dict) -> str:
         "1. Pull Jaeger traces for the affected service",
         "2. Query Prometheus for correlated metrics",
         "3. Identify the root cause and recommend fixes",
+    ])
+    return "\n".join(parts)
+
+
+def _parse_workspace_from_description(description: str) -> str:
+    """Extract the workspace absolute path from a flavor-code alert description."""
+    return _parse_line(description, "Workspace:")
+
+
+def _parse_line(text: str, prefix: str) -> str:
+    """Extract the value after a ``prefix`` in a multi-line text."""
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return ""
+
+
+def _extract_error_code_from_description(description: str) -> str:
+    """Extract the error code (e.g. ``tool_error``) from the description."""
+    error_line = _parse_line(description, "Error:")
+    if not error_line:
+        return "unknown"
+    # "Error: [tool_error] Command exited with code 1"
+    if error_line.startswith("[") and "]" in error_line:
+        return error_line[1:error_line.index("]")]
+    return "unknown"
+
+
+def _build_flavor_code_rca_prompt(
+    *,
+    alert_data: dict,
+    tool_name: str,
+    error_code: str,
+    workspace: str,
+) -> str:
+    """Build a code-RCA prompt for a flavor-code tool-failure alert.
+
+    The agent is expected to use the ``code-rca`` skill, which provides
+    ``scripts/analyze_code_issue.py`` to search the failing workspace's
+    source code and produce a structured RCA report.
+    """
+    parts = [
+        f"\U0001f6a8 {alert_data['level']} Alert: **{alert_data['alert_name']}**",
+        f"- Service: **{alert_data['service_name']}** (coding agent tool failure)",
+        f"- Severity: {alert_data['severity']}",
+        f"- Tool: {tool_name}",
+        f"- Error Code: {error_code}",
+        f"- Summary: {alert_data['summary']}",
+    ]
+    if alert_data.get("description"):
+        parts.append(f"- Details: {alert_data['description']}")
+    if alert_data.get("starts_at"):
+        parts.append(f"- Alert started: {alert_data['starts_at']}")
+
+    if workspace:
+        parts.extend([
+            "",
+            f"The failing project workspace is: **{workspace}**",
+        ])
+
+    parts.extend([
+        "",
+        "Please run root cause analysis using the **code-rca** skill:",
+        "1. Use the code-rca skill to parse this tool-failure alert and search",
+        f"   the workspace ({workspace if workspace else 'from the description above'}) for relevant source code",
+        "2. Run analyze_code_issue.py from the skill's scripts directory with the",
+        "   alert details as JSON stdin. Example:",
+        "   echo '{...}' | python scripts/analyze_code_issue.py --workspace " + (workspace if workspace else "<path>"),
+        "3. Trace the error through the source code — check the failing tool's",
+        "   execute() function, error handling, and recent git changes",
+        "4. Produce a structured RCA report with: root cause, source code trace,",
+        "   fix recommendation, and prevention suggestions",
     ])
     return "\n".join(parts)
 
@@ -425,8 +519,36 @@ _full_router_kwargs = build_skill_router_components(
 )
 quick_eval_router_kwargs = {
     k: v for k, v in _full_router_kwargs.items()
-    if k not in ("long_term_memory", "cache", "memory_cache_ttl_seconds")
+    if k not in ("long_term_memory", "cache", "memory_cache_ttl_seconds", "query_rewriter")
 }
+
+# ── Quick evaluation lightweight LLM ────────────────────────────
+# skill_routing_semantic_enabled is often False in dev/test, which skips
+# the entire semantic pipeline (vector index, reranker, LLM judge).
+# Quick eval still needs full 3-tier funnel coverage so regression in
+# non-regex paths can be detected.  Build lightweight fallbacks here.
+if "llm" not in quick_eval_router_kwargs or quick_eval_router_kwargs.get("llm") is None:
+    try:
+        _quick_eval_llm = build_llm(
+            settings,
+            LLMConfig(
+                model=settings.llm_model,
+                temperature=0.0,
+            ),
+        )
+        quick_eval_router_kwargs["llm"] = _quick_eval_llm
+        logger.info("Quick evaluation LLM judge built: model=%s", settings.llm_model)
+    except Exception as exc:
+        logger.warning("Failed to build quick evaluation LLM judge: %s", exc)
+
+if quick_eval_router_kwargs.get("semantic_index") is None:
+    try:
+        from personal_assistant.agent.agent import build_skill_vector_index
+        _quick_eval_semantic_index = build_skill_vector_index(settings)
+        quick_eval_router_kwargs["semantic_index"] = _quick_eval_semantic_index
+        logger.info("Quick evaluation semantic index built")
+    except Exception as exc:
+        logger.warning("Failed to build quick evaluation semantic index: %s", exc)
 
 
 def _build_feishu_message_handler(
@@ -498,6 +620,15 @@ async def lifespan(_: FastAPI):
     # Pre-warm Qdrant skill vector index at startup so the first user request
     # does not block on embedding generation.
     await warmup_skill_routing(settings, registry)
+    # Quick eval semantic index warmup (separate from production so it works
+    # even when SKILL_ROUTING_SEMANTIC_ENABLED=False).
+    _qe_index = quick_eval_router_kwargs.get("semantic_index")
+    if _qe_index is not None:
+        try:
+            await _qe_index.warmup(registry)
+            logger.info("Quick evaluation semantic index warmed up")
+        except Exception as exc:
+            logger.warning("Quick evaluation semantic index warmup failed: %s", exc)
     # Production agent harness initializes its own routing components internally, no extra warmup needed here.
     # Quick eval skips startup Qdrant sync intentionally; sync happens lazily on first semantic search if needed.
 

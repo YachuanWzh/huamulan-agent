@@ -1,0 +1,38 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-005",
+    "alert_name": "FlavorToolFailure:Multi",
+    "level": "P0",
+    "severity": "critical",
+    "service_name": "flavor-code",
+    "agent_type": "subagent",
+    "workspace": "C:\\idea\\backend-service",
+    "git_branch": "main",
+    "git_commit": "ghi9012"
+  },
+  "alert_data": {
+    "tools": [
+      {
+        "tool": "Shell",
+        "error_code": "tool_error",
+        "error_message": "[tool_error] Command not found: grep"
+      },
+      {
+        "tool": "Grep",
+        "error_code": "tool_error",
+        "error_message": "[tool_error] Invalid regex pattern"
+      }
+    ],
+    "workspace": "C:\\idea\\backend-service",
+    "git_branch": "main",
+    "git_commit": "ghi9012",
+    "agent": "subagent"
+  },
+  "description": "Multiple tool failures detected:\n- Tool: Shell, Error: [tool_error] Command not found: grep\n- Tool: Grep, Error: [tool_error] Invalid regex pattern\nBranch: main\nCommit: ghi9012\nWorkspace: C:\\idea\\backend-service",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["Shell", "Grep", "tool_error", "environment"]
+  }
+}

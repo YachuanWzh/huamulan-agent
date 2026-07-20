@@ -1,0 +1,33 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-001",
+    "alert_name": "FlavorToolFailure:Shell",
+    "level": "P0",
+    "severity": "critical",
+    "service_name": "flavor-code",
+    "agent_type": "main",
+    "workspace": "C:\\idea\\myproject",
+    "git_branch": "main",
+    "git_commit": "abc1234"
+  },
+  "alert_data": {
+    "tool": "Shell",
+    "error_code": "tool_error",
+    "error_message": "[tool_error] Command exited with code 1",
+    "input": {
+      "command": "git",
+      "args": ["push"]
+    },
+    "workspace": "C:\\idea\\myproject",
+    "git_branch": "main",
+    "git_commit": "abc1234",
+    "agent": "main"
+  },
+  "description": "Tool: Shell\nAgent: main\nError: [tool_error] Command exited with code 1\nBranch: main\nCommit: abc1234\nWorkspace: C:\\idea\\myproject\nInput: {\"command\":\"git\",\"args\":[\"push\"]}",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["Shell", "git push", "tool_error"]
+  }
+}

@@ -133,6 +133,15 @@ _DEFAULT_SKILL_REGEXES: dict[str, list[str]] = {
             r"\u62a5\u544a)?|\u4e0d\u5408\u89c4)"
         ),
     ],
+    "code-rca": [
+        r"\bcode\s+(?:rca|RCA|root\s+cause(?:\s+analysis)?|analysis)\b",
+        r"\bflavor-code\s+alert\b",
+        r"\bcoding\s+agent\s+(?:tool\s+failure|alert)\b",
+        (
+            r"(\u4ee3\u7801(?:RCA|\u6839\u56e0\u5206\u6790|\u5c42\u9762.*\u6839\u56e0)|"
+            r"\u4ee3\u7801\u5de5\u5177\u5931\u8d25|\u4ee3\u7801\u7ea7.*\u6839\u56e0)"
+        ),
+    ],
 
 }
 
@@ -254,6 +263,12 @@ _SKILL_ROUTE_RULES: tuple[SkillRouteRule, ...] = (
         rule_id="apm.metrics",
         patterns=tuple(_DEFAULT_SKILL_REGEXES["apm-metrics"]),
         priority=30,
+    ),
+    SkillRouteRule(
+        skill="code-rca",
+        rule_id="code_rca.code",
+        patterns=tuple(_DEFAULT_SKILL_REGEXES["code-rca"]),
+        priority=25,
     ),
 )
 
@@ -1038,22 +1053,50 @@ async def route_skill_names_with_trace(
             }
         )
 
-    if llm is None or not semantic_candidates:
+    if llm is None:
         logger.info(
             "Skill routing completed without selected skill: llm_available=%s semantic_candidates=%s",
-            llm is not None,
+            False,
             len(semantic_candidates),
         )
         trace.append(
             {
                 "stage": "llm_judge",
                 "status": "skipped",
-                "reason": "llm unavailable" if llm is None else "no semantic candidates",
-                "llm_available": llm is not None,
+                "reason": "llm unavailable",
+                "llm_available": False,
                 "semantic_candidates": len(semantic_candidates),
             }
         )
         return SkillRoutingResult(selected_skills=[], trace=trace)
+
+    # ── Fallback candidate pool when semantic search returns nothing ──
+    # Ollama BGE-M3 may be unavailable (dev/test), leaving 0 candidates.
+    # Instead of skipping the LLM judge entirely, build a candidate pool
+    # from the full skill registry so the LLM can still make routing
+    # decisions based on skill name + description.
+    if not semantic_candidates:
+        semantic_candidates = [
+            SkillSemanticCandidate(
+                name=skill.name,
+                description=skill.description,
+                score=0.0,
+            )
+            for skill in registry.skills.values()
+        ]
+        logger.info(
+            "Skill routing semantic search returned 0 candidates; "
+            "falling back to full registry (%d skills) for LLM judge",
+            len(semantic_candidates),
+        )
+        trace.append(
+            {
+                "stage": "semantic",
+                "status": "fallback_registry",
+                "candidates": _candidate_trace(semantic_candidates),
+                "reason": "semantic search returned no candidates; using full registry for LLM judge",
+            }
+        )
 
     llm_result = await _llm_route_with_trace(
         registry,
@@ -1272,7 +1315,21 @@ def _deterministic_route(
             kept.append(match)
         matches = kept
 
-    regex_primary_skills = {"weather", "audit-sop", "troubleshoot"}
+    # ── code-rca vs audit-sop/troubleshoot disambiguation ──────
+    # "tool failure"/"tool error" match both audit-sop and code-rca;
+    # "RCA" matches both troubleshoot and code-rca.
+    # When code-rca matched via its own regex rules (not just trigger),
+    # suppress the broader audit-sop / troubleshoot regex matches.
+    if any(match.skill == "code-rca" and match.source == "regex" for match in matches):
+        kept = []
+        for match in matches:
+            if match.skill in ("audit-sop", "troubleshoot") and match.source == "regex":
+                suppressed.append(match)
+                continue
+            kept.append(match)
+        matches = kept
+
+    regex_primary_skills = {"weather", "audit-sop", "troubleshoot", "code-rca"}
     if any(match.skill in regex_primary_skills and match.source == "regex" for match in matches):
         kept: list[DeterministicRouteMatch] = []
         for match in matches:
@@ -1493,6 +1550,7 @@ async def _llm_route_with_trace(
             raw = await llm.ainvoke(_llm_route_prompt(payload))
             last_output = raw
             decision = _parse_llm_route_decision(raw)
+            decision = _normalize_llm_route_decision(decision, registry)
         except Exception as exc:
             if isinstance(exc, (ValidationError, TypeError, ValueError)):
                 logger.info(
@@ -1523,7 +1581,7 @@ async def _llm_route_with_trace(
                     }
                 ],
             )
-        if decision.selectedSkill in registry.skills:
+        if decision.selectedSkill and decision.selectedSkill in registry.skills:
             logger.info(
                 "Skill routing LLM judge selected=%s confidence=%.4f reason=%s",
                 decision.selectedSkill,
@@ -1595,6 +1653,33 @@ def _parse_llm_route_decision(raw) -> LLMSkillRouteDecision:
     if isinstance(content, str):
         return LLMSkillRouteDecision.model_validate_json(_extract_json_object(content))
     raise TypeError(f"Unsupported LLM route decision type: {type(raw).__name__}")
+
+
+def _normalize_llm_route_decision(
+    decision: LLMSkillRouteDecision,
+    registry: "SkillRegistry",
+) -> LLMSkillRouteDecision:
+    """Normalize the selectedSkill field when the LLM returns the full
+    ``name: description`` string from ``relatedFind`` instead of just the name.
+
+    The ``relatedFind`` payload for the LLM judge uses the format
+    ``skill.name: skill.description``. Some LLM responses copy the entire
+    string verbatim as ``selectedSkill``, which fails the
+    ``selectedSkill in registry.skills`` membership test.
+    """
+    if decision.selectedSkill is None:
+        return decision
+    if decision.selectedSkill in registry.skills:
+        return decision
+    # Extract the skill name before the first ": " delimiter
+    name_part = decision.selectedSkill.split(": ", 1)[0].strip()
+    if name_part in registry.skills:
+        return LLMSkillRouteDecision(
+            selectedSkill=name_part,
+            confidence=decision.confidence,
+            reason=decision.reason,
+        )
+    return decision
 
 
 def _extract_json_object(text: str) -> str:

@@ -1,0 +1,34 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-003",
+    "alert_name": "FlavorToolFailure:Edit",
+    "level": "P0",
+    "severity": "critical",
+    "service_name": "flavor-code",
+    "agent_type": "main",
+    "workspace": "C:\\idea\\frontend-app",
+    "git_branch": "feature/new-ui",
+    "git_commit": "def5678"
+  },
+  "alert_data": {
+    "tool": "Edit",
+    "error_code": "tool_error",
+    "error_message": "[tool_error] Failed to apply edit: oldText not found in file",
+    "input": {
+      "path": "src/components/Header.tsx",
+      "oldText": "const Title = () => {",
+      "newText": "const HeaderTitle = () => {"
+    },
+    "workspace": "C:\\idea\\frontend-app",
+    "git_branch": "feature/new-ui",
+    "git_commit": "def5678",
+    "agent": "main"
+  },
+  "description": "Tool: Edit\nAgent: main\nError: [tool_error] Failed to apply edit: oldText not found in file\nBranch: feature/new-ui\nCommit: def5678\nWorkspace: C:\\idea\\frontend-app\nInput: {\"path\":\"src/components/Header.tsx\",\"oldText\":\"const Title = () => {\",\"newText\":\"const HeaderTitle = () => {\"}",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["Edit", "oldText", "not found", "concurrent edit"]
+  }
+}

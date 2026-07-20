@@ -1,0 +1,32 @@
+{
+  "incident_meta": {
+    "scenario": "code-rca-002",
+    "alert_name": "FlavorToolFailure:Read",
+    "level": "P1",
+    "severity": "warning",
+    "service_name": "flavor-code",
+    "agent_type": "subagent",
+    "workspace": "C:\\Users\\dev\\backend",
+    "git_branch": "feature/api",
+    "git_commit": "def5678"
+  },
+  "alert_data": {
+    "tool": "Read",
+    "error_code": "permission_denied",
+    "error_message": "[permission_denied] Cannot read file at path C:\\secrets\\.env",
+    "input": {
+      "path": "C:\\secrets\\.env"
+    },
+    "workspace": "C:\\Users\\dev\\backend",
+    "git_branch": "feature/api",
+    "git_commit": "def5678",
+    "agent": "subagent"
+  },
+  "description": "Tool: Read\nAgent: subagent\nError: [permission_denied] Cannot read file at path C:\\secrets\\.env\nBranch: feature/api\nCommit: def5678\nWorkspace: C:\\Users\\dev\\backend\nInput: {\"path\":\"C:\\\\secrets\\\\.env\"}",
+  "expected_rca_output": {
+    "should_trigger": "code-rca",
+    "expected_sections": ["Error Summary", "Source Code Trace", "Root Cause", "Fix Recommendation", "Prevention"],
+    "expected_tool": "analyze_code_issue",
+    "expected_root_cause_keywords": ["Read", "permission_denied", "secrets", "permission engine"]
+  }
+}

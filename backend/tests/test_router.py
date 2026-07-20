@@ -760,7 +760,9 @@ class TestSkillRoutingFunnel:
             ),
         )
 
-        assert result == []
+        # When semantic fails, the LLM judge falls back to the full registry
+        # instead of giving up entirely. This ensures routing resilience.
+        assert result == ["cal"]
 
     @pytest.mark.asyncio
     async def test_logs_semantic_threshold_and_llm_no_match(self, tmp_path: Path, caplog):
