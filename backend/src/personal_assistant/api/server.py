@@ -334,6 +334,24 @@ def _parse_workspace_from_description(description: str) -> str:
     return _parse_line(description, "Workspace:")
 
 
+def _extract_flavor_workspace(alert_data: dict) -> str:
+    """Extract the flavor-code workspace path from alert data.
+
+    Returns the first non-empty value from:
+    1. ``alert_data["description"]`` → ``Workspace:`` line
+    2. ``alert_data["summary"]`` → ``Workspace:`` line
+    Returns ``""`` if no workspace is found.
+    """
+    description = alert_data.get("description", "")
+    summary = alert_data.get("summary", "")
+
+    workspace = _parse_workspace_from_description(description)
+    if workspace:
+        return workspace
+
+    return _parse_workspace_from_description(summary)
+
+
 def _parse_line(text: str, prefix: str) -> str:
     """Extract the value after a ``prefix`` in a multi-line text."""
     for line in text.split("\n"):
@@ -389,15 +407,15 @@ def _build_flavor_code_rca_prompt(
     parts.extend([
         "",
         "Please run root cause analysis using the **code-rca** skill:",
-        "1. Use the code-rca skill to parse this tool-failure alert and search",
-        f"   the workspace ({workspace if workspace else 'from the description above'}) for relevant source code",
-        "2. Run analyze_code_issue.py from the skill's scripts directory with the",
-        "   alert details as JSON stdin. Example:",
-        "   echo '{...}' | python scripts/analyze_code_issue.py --workspace " + (workspace if workspace else "<path>"),
+        "1. Use the **analyze_code_issue** tool (from the code-rca skill) to parse this",
+        "   tool-failure alert and search the workspace for relevant source code.",
+        f"   Pass workspace=\"{workspace}\" to the tool if it " + ("was provided in the alert." if workspace else "is available."),
+        "2. Use Read, Grep, and Glob tools to examine the failing tool's source",
+        "   code, error handling paths, and recent changes.",
         "3. Trace the error through the source code — check the failing tool's",
-        "   execute() function, error handling, and recent git changes",
+        "   execute() function, error handling, and recent git changes.",
         "4. Produce a structured RCA report with: root cause, source code trace,",
-        "   fix recommendation, and prevention suggestions",
+        "   fix recommendation, and prevention suggestions.",
     ])
     return "\n".join(parts)
 
@@ -422,6 +440,22 @@ async def _trigger_rca_background(alert_data: dict) -> None:
     await _broadcast_otel_alert(alert_data)
 
     rca_result_text = None
+
+    # ── flavor-code: dynamically switch workspace so the RCA agent can
+    #     access the failing project's source code ────────────────────────
+    _original_workspace = settings.assistant_workspace_dir
+    _workspace_switched = False
+    if alert_data.get("service_name") == "flavor-code":
+        flavor_workspace = _extract_flavor_workspace(alert_data)
+        if flavor_workspace and Path(flavor_workspace).is_dir():
+            settings.assistant_workspace_dir = flavor_workspace
+            harness._compiled_app_cache.clear()
+            _workspace_switched = True
+            logger.info(
+                "RCA workspace switched from %s to %s for alert %s",
+                _original_workspace, flavor_workspace, alert_id,
+            )
+
     try:
         prompt = _build_rca_prompt(alert_data)
         response = await harness.run_user_turn(
@@ -454,6 +488,11 @@ async def _trigger_rca_background(alert_data: dict) -> None:
             rca_pending_approvals=None,
         )
     finally:
+        # Restore original workspace if it was switched for flavor-code RCA
+        if _workspace_switched:
+            settings.assistant_workspace_dir = _original_workspace
+            harness._compiled_app_cache.clear()
+
         await _broadcast_otel_alert(alert_data)
         # Push RCA result to Feishu for P0/P1 (skip P2/P3)
         if alert_data.get("level") in ("P0", "P1"):
