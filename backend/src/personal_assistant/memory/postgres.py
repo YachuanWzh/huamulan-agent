@@ -941,6 +941,152 @@ class PostgresMemory:
             total_duration_ms=row[8],
         )
 
+    # ── Harness Health query methods ───────────────────────────────────
+
+    async def harness_approval_denial_rates(self, days: int = 30) -> list[dict[str, Any]]:
+        """Per-tool approval denial rate aggregated over *days*."""
+        if self.pool is None:
+            return []
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    name AS tool_name,
+                    COUNT(*)::int AS total_requests,
+                    COUNT(*) FILTER (WHERE status = 'denied')::int AS denied_count,
+                    COUNT(*) FILTER (WHERE status = 'approved')::int AS approved_count,
+                    ROUND(
+                        COUNT(*) FILTER (WHERE status = 'denied') * 100.0
+                        / GREATEST(COUNT(*), 1),
+                        2
+                    ) AS denial_rate_pct
+                FROM agent_execution_logs
+                WHERE event_type = 'approval'
+                  AND created_at > now() - (%s || ' days')::interval
+                GROUP BY name
+                ORDER BY denial_rate_pct DESC
+                """,
+                (str(days),),
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "tool_name": row[0],
+                "total_requests": row[1],
+                "denied_count": row[2],
+                "approved_count": row[3],
+                "denial_rate_pct": float(row[4]),
+            }
+            for row in rows
+        ]
+
+    async def harness_compaction_trends(self, days: int = 7) -> list[dict[str, Any]]:
+        """Daily compaction efficiency trend over *days*."""
+        if self.pool is None:
+            return []
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT
+                    date_trunc('day', created_at)::date AS day,
+                    COUNT(*)::int AS compaction_count,
+                    COALESCE(AVG((metadata->>'before_tokens')::int), 0)::int AS avg_before_tokens,
+                    COALESCE(AVG((metadata->>'after_tokens')::int), 0)::int AS avg_after_tokens,
+                    ROUND(COALESCE(AVG((metadata->>'saved_ratio')::float), 0) * 100, 2) AS avg_saved_pct,
+                    COALESCE(AVG(duration_ms), 0)::float AS avg_duration_ms
+                FROM agent_execution_logs
+                WHERE event_type = 'harness'
+                  AND name = 'compaction'
+                  AND created_at > now() - (%s || ' days')::interval
+                GROUP BY date_trunc('day', created_at)
+                ORDER BY day DESC
+                """,
+                (str(days),),
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "day": str(row[0]),
+                "compaction_count": row[1],
+                "avg_before_tokens": row[2],
+                "avg_after_tokens": row[3],
+                "avg_saved_pct": float(row[4]),
+                "avg_duration_ms": float(row[5]),
+            }
+            for row in rows
+        ]
+
+    async def harness_latency_breakdown(self, thread_id: str) -> list[dict[str, Any]]:
+        """Per-layer latency breakdown for the latest turn in *thread_id*."""
+        if self.pool is None:
+            return []
+        async with self.pool.connection() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT name, status, duration_ms, metadata
+                FROM agent_execution_logs
+                WHERE thread_id = %s
+                  AND event_type = 'harness'
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                (thread_id,),
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "name": row[0],
+                "status": row[1],
+                "duration_ms": row[2],
+                "metadata": row[3] if isinstance(row[3], dict) else {},
+            }
+            for row in rows
+        ]
+
+    async def harness_tool_guard_intercept_rate(self, hours: int = 1) -> dict[str, Any]:
+        """Tool Guard intercept rate vs 7-day P95 baseline."""
+        if self.pool is None:
+            return {"current_count": 0, "p95_baseline": 0, "anomaly": False}
+        async with self.pool.connection() as conn:
+            # Current rate
+            cursor = await conn.execute(
+                """
+                SELECT COUNT(*)::int
+                FROM audit_events
+                WHERE source = 'tool'
+                  AND created_at > now() - (%s || ' hours')::interval
+                """,
+                (str(hours),),
+            )
+            row = await cursor.fetchone()
+            current_count = row[0] if row else 0
+
+            # 7-day P95 hourly baseline
+            cursor = await conn.execute(
+                """
+                SELECT COALESCE(
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cnt),
+                    0
+                )
+                FROM (
+                    SELECT date_trunc('hour', created_at) AS h,
+                           COUNT(*) AS cnt
+                    FROM audit_events
+                    WHERE source = 'tool'
+                      AND created_at > now() - interval '7 days'
+                    GROUP BY date_trunc('hour', created_at)
+                ) sub
+                """
+            )
+            row = await cursor.fetchone()
+            p95_baseline = float(row[0]) if row else 0.0
+
+        return {
+            "current_count": current_count,
+            "p95_baseline": p95_baseline,
+            "anomaly": current_count > p95_baseline,
+        }
+
     async def list_tool_errors(
         self,
         thread_id: str | None = None,

@@ -66,20 +66,46 @@ class ContextCompactor:
         *,
         thread_id: str | None = None,
         additional_turns: int = 0,
+        record_span: Callable[..., Awaitable[None]] | None = None,
     ) -> list[AnyMessage]:
         if not self.should_compact(messages, additional_turns=additional_turns):
             return list(messages)
 
+        before_tokens = self.estimate_tokens(messages)
         transcript_path = self.write_transcript(messages, thread_id=thread_id)
         summary_messages = _summary_messages(messages)
         summary = await self._summarize_with_retries(summary_messages)
-        return _semantic_compact(
+        result = _semantic_compact(
             messages,
             (
                 f"Transcript: {transcript_path}\n\n"
                 f"{_with_tool_result_references(summary, summary_messages)}"
             )
         )
+        after_tokens = self.estimate_tokens(result)
+        saved_tokens = max(0, before_tokens - after_tokens)
+        saved_ratio = round(saved_tokens / max(before_tokens, 1), 4)
+
+        if record_span is not None:
+            try:
+                await record_span(
+                    name="compaction",
+                    status="completed",
+                    duration_ms=0,
+                    metadata={
+                        "before_tokens": before_tokens,
+                        "after_tokens": after_tokens,
+                        "saved_tokens": saved_tokens,
+                        "saved_ratio": saved_ratio,
+                        "trigger_message_count": _user_turn_count(messages) + max(0, additional_turns),
+                        "trigger_token_threshold": self.token_threshold,
+                        "transcript_path": str(transcript_path),
+                    },
+                )
+            except Exception:
+                pass  # Compaction observability failure must not affect the main flow.
+
+        return result
 
     def write_transcript(
         self,

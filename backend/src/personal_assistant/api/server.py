@@ -554,6 +554,72 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# ── Harness Health endpoints ────────────────────────────────────────
+
+@app.get("/api/harness/approval-denial-rates")
+async def harness_approval_denial_rates(
+    days: int = Query(default=30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Approval denial rate by tool, aggregated over *days*.
+
+    Returns a list of tools ordered by denial rate (highest first)
+    from the ``agent_execution_logs`` table.
+    """
+    try:
+        return await harness.approval_denial_rates(days=days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/harness/compaction-trends")
+async def harness_compaction_trends(
+    days: int = Query(default=7, ge=1, le=365),
+) -> dict[str, Any]:
+    """Compaction efficiency trend: token savings over time.
+
+    Returns daily aggregation of compaction count, average before/after
+    tokens, saved ratio, and duration.  Data drawn from
+    ``agent_execution_logs`` where ``event_type='harness'`` and
+    ``name='compaction'``.
+    """
+    try:
+        return await harness.compaction_trends(days=days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/harness/latency-breakdown")
+async def harness_latency_breakdown(
+    thread_id: str,
+) -> dict[str, Any]:
+    """Per-layer latency breakdown for the latest turn in *thread_id*.
+
+    Returns a map of harness span names → duration_ms, plus total.
+    Spans include: prompt_guard_regex, prompt_guard_llm,
+    tool_guard:{tool}, middleware:{tool}, compaction.
+    """
+    try:
+        return await harness.latency_breakdown(thread_id=thread_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/harness/tool-guard-intercept-rate")
+async def harness_tool_guard_intercept_rate(
+    hours: int = Query(default=1, ge=1, le=168),
+) -> dict[str, Any]:
+    """Tool Guard intercept rate anomaly check.
+
+    Compares the last *hours* of ``audit_events`` (source='tool')
+    against the last 7-day P95 hourly rate.  Returns current rate,
+    P95 baseline, and an ``anomaly`` flag.
+    """
+    try:
+        return await harness.tool_guard_intercept_rate(hours=hours)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     return await harness.run_user_turn(

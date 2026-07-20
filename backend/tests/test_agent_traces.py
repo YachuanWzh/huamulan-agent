@@ -198,9 +198,11 @@ async def test_run_user_turn_propagates_one_root_trace_to_config_and_logs() -> N
     context = context_from_config(config)
     assert context is not None
     assert context.thread_id == "thread-1"
-    assert [log.status for log in memory.logs] == ["started", "completed"]
-    assert {log.run_id for log in memory.logs} == {context.span_id}
-    assert {log.metadata["trace_id"] for log in memory.logs} == {context.trace_id}
+    # Filter out harness-span logs; only check turn lifecycle logs
+    turn_logs = [log for log in memory.logs if log.event_type in ("turn",)]
+    assert [log.status for log in turn_logs] == ["started", "completed"]
+    assert {log.run_id for log in turn_logs} == {context.span_id}
+    assert {log.metadata["trace_id"] for log in turn_logs} == {context.trace_id}
 
 
 async def test_trace_api_returns_topology_and_thread_summaries(monkeypatch) -> None:

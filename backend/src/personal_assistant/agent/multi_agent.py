@@ -308,13 +308,48 @@ def compile_multi_agent(
 
     async def compact_context(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         thread_id = _thread_id_from_config(config)
+        t_start = time.perf_counter()
         messages = await compactor.acompact(
             state.get("messages", []),
             thread_id=thread_id,
+            record_span=lambda **kwargs: _record_harness_span(
+                memory, thread_id or "", **kwargs,
+            ),
         )
         if messages == state.get("messages", []):
             return {}
+
+        await _record_harness_span(
+            memory,
+            thread_id or "",
+            name="compaction",
+            status="completed",
+            duration_ms=_elapsed_ms(t_start),
+            metadata={
+                "before_messages": len(state.get("messages", [])),
+                "after_messages": len(messages),
+            },
+        )
         return _replace_messages_update(messages)
+
+    async def _record_harness_span(memory, thread_id, *, name, status, duration_ms, metadata):
+        """Lightweight harness span recorder for the compact_context closure."""
+        try:
+            record = getattr(memory, "record_execution_log", None)
+            if not callable(record):
+                return
+            await record(
+                ExecutionLogCreate(
+                    thread_id=thread_id,
+                    event_type="harness",
+                    status=status,
+                    name=name,
+                    duration_ms=duration_ms,
+                    metadata=metadata or {},
+                )
+            )
+        except Exception:
+            pass
 
     async def rewrite_intent(state: AgentState, config: RunnableConfig | None = None) -> AgentState:
         started = time.perf_counter()

@@ -328,18 +328,46 @@ class AgentHarness:
         requires_approval=None,
     ) -> ChatResponse:
         # Layer 1: 正则快速拦截
+        t_pg_regex_start = time.perf_counter()
         match = scan_prompt_guard(message)
+        pg_regex_ms = int((time.perf_counter() - t_pg_regex_start) * 1000)
         if match:
+            await _record_harness_span(
+                self.memory,
+                thread_id,
+                name="prompt_guard_regex",
+                status="blocked",
+                duration_ms=pg_regex_ms,
+                metadata={"category": match.category, "severity": match.severity, "blocked": True},
+            )
             return await self._handle_prompt_guard_block(thread_id, message, match)
+        await _record_harness_span(
+            self.memory,
+            thread_id,
+            name="prompt_guard_regex",
+            status="completed",
+            duration_ms=pg_regex_ms,
+            metadata={"blocked": False},
+        )
         # Layer 2: LLM语义安全判定
         guard_llm = self._get_prompt_guard_llm()
         if guard_llm is not None:
+            t_pg_llm_start = time.perf_counter()
             match = await scan_prompt_guard_with_llm(
                 message,
                 guard_llm,
                 confidence_threshold=self.settings.prompt_guard_llm_confidence_threshold,
             )
+            pg_llm_ms = int((time.perf_counter() - t_pg_llm_start) * 1000)
             if match:
+                await _record_harness_span(
+                    self.memory,
+                    thread_id,
+                    name="prompt_guard_llm",
+                    status="blocked",
+                    duration_ms=pg_llm_ms,
+                    metadata={"category": match.category, "severity": match.severity, "blocked": True},
+                )
                 logger.info(
                     "LLM prompt guard blocked request: category=%s source=%s reason=%s",
                     match.category,
@@ -347,6 +375,15 @@ class AgentHarness:
                     match.reason[:150],
                 )
                 return await self._handle_prompt_guard_block(thread_id, message, match)
+            else:
+                await _record_harness_span(
+                    self.memory,
+                    thread_id,
+                    name="prompt_guard_llm",
+                    status="completed",
+                    duration_ms=pg_llm_ms,
+                    metadata={"blocked": False},
+                )
         app = (
             self._compile_multi_agent(llm_config, requires_approval=requires_approval)
             if agent_mode == "multi"
@@ -460,6 +497,28 @@ class AgentHarness:
 
     async def execution_log_summary(self, thread_id: str):
         return await self.memory.execution_log_summary(thread_id=thread_id)
+
+    # ── Harness Health query methods ──────────────────────────────────
+
+    async def approval_denial_rates(self, days: int = 30) -> dict[str, Any]:
+        """Approval denial rate by tool over the last *days* days."""
+        raw = await self.memory.harness_approval_denial_rates(days=days)
+        return {"days": days, "tools": raw}
+
+    async def compaction_trends(self, days: int = 7) -> dict[str, Any]:
+        """Daily compaction trend over the last *days* days."""
+        raw = await self.memory.harness_compaction_trends(days=days)
+        return {"days": days, "daily": raw}
+
+    async def latency_breakdown(self, thread_id: str) -> dict[str, Any]:
+        """Per-layer latency breakdown for *thread_id*."""
+        raw = await self.memory.harness_latency_breakdown(thread_id=thread_id)
+        return {"thread_id": thread_id, "breakdown": raw}
+
+    async def tool_guard_intercept_rate(self, hours: int = 1) -> dict[str, Any]:
+        """Tool Guard intercept rate vs 7-day P95 baseline."""
+        raw = await self.memory.harness_tool_guard_intercept_rate(hours=hours)
+        return {"hours": hours, **raw}
 
     async def run_user_turn_stream(
         self,
@@ -1231,10 +1290,29 @@ async def apply_pre_tool_guards(
             blocked_messages.append(security_response)
             continue
 
+        t_mw_start = time.perf_counter()
         middleware_response = _run_pre_tool_middlewares(call, middlewares)
+        mw_duration_ms = int((time.perf_counter() - t_mw_start) * 1000)
+        tool_name = _tool_call_name(call)
         if middleware_response is not None:
+            await _record_harness_span(
+                memory,
+                thread_id or "",
+                name=f"middleware:{tool_name}",
+                status="blocked",
+                duration_ms=mw_duration_ms,
+                metadata={"tool_name": tool_name, "blocked": True},
+            )
             blocked_messages.append(middleware_response)
             continue
+        await _record_harness_span(
+            memory,
+            thread_id or "",
+            name=f"middleware:{tool_name}",
+            status="completed",
+            duration_ms=mw_duration_ms,
+            metadata={"tool_name": tool_name, "blocked": False},
+        )
 
         allowed_calls.append(call)
 
@@ -1268,6 +1346,43 @@ async def _record_execution_log(memory: Any, log: ExecutionLogCreate) -> None:
         await record(log)
     except Exception:
         logger.exception("Failed to record execution log")
+
+
+async def _record_harness_span(
+    memory: Any,
+    thread_id: str,
+    *,
+    name: str,
+    status: str = "completed",
+    duration_ms: int = 0,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Record a harness-layer instrumentation span in execution logs.
+
+    Lightweight wrapper around ``ExecutionLogCreate`` with
+    ``event_type="harness"``.  All harness-internal guard scans,
+    middleware checks, and compaction events write through this
+    path so their latency and outcome are queryable from the
+    existing ``agent_execution_logs`` table.
+    """
+    if memory is None:
+        return
+    try:
+        record = getattr(memory, "record_execution_log", None)
+        if not callable(record):
+            return
+        await record(
+            ExecutionLogCreate(
+                thread_id=thread_id,
+                event_type="harness",
+                status=status,
+                name=name,
+                duration_ms=duration_ms,
+                metadata=metadata or {},
+            )
+        )
+    except Exception:
+        pass  # Observability failure must never affect the main flow.
 
 
 async def _record_tool_approval_decision(
@@ -1591,11 +1706,30 @@ async def _pre_tool_security_guard(
     *,
     approval_decisions: dict[str, bool] | None = None,
 ) -> ToolMessage | None:
-    match = scan_tool_guard(_tool_call_name(call), call.get("args", {}))
+    t_tg_start = time.perf_counter()
+    tool_name = _tool_call_name(call)
+    match = scan_tool_guard(tool_name, call.get("args", {}))
+    tg_duration_ms = int((time.perf_counter() - t_tg_start) * 1000)
     if match is None:
+        await _record_harness_span(
+            memory,
+            thread_id or "",
+            name=f"tool_guard:{tool_name}",
+            status="completed",
+            duration_ms=tg_duration_ms,
+            metadata={"tool_name": tool_name, "blocked": False},
+        )
         return None
     if _approved_tool_guard_override(call, match, approval_decisions):
         return None
+    await _record_harness_span(
+        memory,
+        thread_id or "",
+        name=f"tool_guard:{tool_name}",
+        status="blocked",
+        duration_ms=tg_duration_ms,
+        metadata={"tool_name": tool_name, "category": match.category, "severity": match.severity, "blocked": True},
+    )
     await _record_audit(
         memory,
         AuditEventCreate(

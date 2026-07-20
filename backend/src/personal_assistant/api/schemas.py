@@ -94,6 +94,7 @@ class ExecutionLogCreate(BaseModel):
         "approval",
         "security",
         "multiagent",
+        "harness",
     ]
     status: Literal[
         "started",
