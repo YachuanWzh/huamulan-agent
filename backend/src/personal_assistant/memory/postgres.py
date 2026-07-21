@@ -1716,8 +1716,15 @@ def _json_text(value: Any) -> str:
     return json.dumps(encoded, ensure_ascii=False)
 
 
-def _alert_row_to_dict(row: Any) -> dict:
+def _alert_row_to_dict(row: tuple) -> dict:
     """Convert an asyncpg row from otel_alerts to a plain dict.
+
+    Columns (from SELECT / *):
+      0: id, 1: created_at, 2: updated_at, 3: received_at,
+      4: severity, 5: level, 6: service_name, 7: alert_name,
+      8: summary, 9: description, 10: starts_at, 11: status,
+      12: rca_status, 13: rca_thread_id, 14: rca_pending_approvals,
+      15: rca_result_text, 16: metadata
 
     Handles JSONB columns that may be returned as strings or parsed objects
     depending on the asyncpg configuration.
@@ -1735,23 +1742,23 @@ def _alert_row_to_dict(row: Any) -> dict:
         return value
 
     return {
-        "id": row["id"],
-        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-        "received_at": row["received_at"].isoformat() if row["received_at"] else "",
-        "severity": row["severity"],
-        "level": row["level"],
-        "service_name": row["service_name"],
-        "alert_name": row["alert_name"],
-        "summary": row["summary"] or "",
-        "description": row["description"] or "",
-        "starts_at": row["starts_at"],
-        "status": row["status"] or "firing",
-        "rca_status": row["rca_status"] or "pending",
-        "rca_thread_id": row["rca_thread_id"],
-        "rca_pending_approvals": _parse_jsonb(row["rca_pending_approvals"]),
-        "rca_result_text": row["rca_result_text"],
-        "metadata": _parse_jsonb(row["metadata"]) or {},
+        "id": row[0],
+        "created_at": row[1].isoformat() if row[1] else None,
+        "updated_at": row[2].isoformat() if row[2] else None,
+        "received_at": row[3].isoformat() if row[3] else "",
+        "severity": row[4],
+        "level": row[5],
+        "service_name": row[6],
+        "alert_name": row[7],
+        "summary": row[8] or "",
+        "description": row[9] or "",
+        "starts_at": row[10],
+        "status": row[11] or "firing",
+        "rca_status": row[12] or "pending",
+        "rca_thread_id": row[13],
+        "rca_pending_approvals": _parse_jsonb(row[14]),
+        "rca_result_text": row[15],
+        "metadata": _parse_jsonb(row[16]) or {},
     }
 
 

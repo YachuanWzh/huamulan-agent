@@ -74,7 +74,7 @@ class Settings(BaseSettings):
         alias="CHECKPOINT_SKIP_NODES",
     )
     skill_routing_semantic_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="SKILL_ROUTING_SEMANTIC_ENABLED",
     )
     skill_routing_embedding_model: str = Field(

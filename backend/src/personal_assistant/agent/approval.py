@@ -10,7 +10,7 @@ from personal_assistant.agent.state import AgentState
 RequiresApproval = Callable[[str, Any], bool]
 
 
-_READ_ONLY_TOOL_NAMES = {"read_file"}
+_READ_ONLY_TOOL_NAMES = {"read_file", "search_public_skills"}
 
 
 def requires_tool_approval(tool_name: str, args: Any) -> bool:
