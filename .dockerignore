@@ -1,0 +1,42 @@
+# Git
+.git/
+.gitignore
+
+# Environment (keep .env.example but never real .env)
+.env
+.env.docker
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+backend/.venv/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# CI / configs
+.woodpecker/
+.claude/
+.flavor/
+FLAVOR.md
+.superharness/
+
+# Worktrees
+.worktrees/
+
+# Local memory / transcripts
+.memory/
+.transcripts/
+
+# Miscellaneous
+test.md
+*.log
